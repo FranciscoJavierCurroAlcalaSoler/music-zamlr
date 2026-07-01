@@ -45,16 +45,22 @@ Credential helper: Git Credential Manager (set by the installer).
 | | |
 |---|---|
 | Remote | github.com/<username>/music-zamlr (private) |
-| Contents | README only so far. No LICENSE yet (parked; MIT lean). Combined Python + Node `.gitignore` to be added at scaffold. |
+| Contents | Phase 0 scaffold committed: `backend/` (FastAPI skeleton + venv, `requirements.txt`) and `frontend/` (Vite React+TS, `package.json`), combined root `.gitignore`, README, this file. No LICENSE yet (parked; MIT lean). |
 
 ## Setup choices worth remembering
 - Node installer "Tools for Native Modules" left unchecked (not needed; revisit only on a native-build error).
 - Python 3.14 chosen; 3.13 was the conservative alternative. The whole stack supports both.
 
 ## Not tracked here (by design)
-Once we scaffold, these are captured by their own files and should not be duplicated here:
+These are captured by their own files and should not be duplicated here:
 - Python packages → `backend/requirements.txt` (or `pyproject.toml`)
 - Node packages → `frontend/package.json` + `package-lock.json`
 
 System binaries that *do* belong here later (no lockfile covers them):
 - Chromaprint / `fpcalc` (Phase 5, fingerprinting)
+
+## Rebuilding from a clone
+After `git clone`:
+- Backend: `cd backend`, `py -m venv .venv`, activate it, `pip install -r requirements.txt`.
+- Frontend: `cd frontend`, `npm install`.
+- Run (two terminals): backend `fastapi dev main.py` (serves `:8000`); frontend `npm run dev` (serves `:5173`).
