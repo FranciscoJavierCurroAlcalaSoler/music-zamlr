@@ -15,13 +15,28 @@ def compute_file_hash(file_path: str) -> str:
             sha256_hash.update(byte_block)
     return sha256_hash.hexdigest()
 
-def year_from_date(date_str: str) -> int | None:
+def get_tag(audio, keys: list[str]) -> str | None:
+    # try each key in order, return the first non-empty value found
+    for key in keys:
+        value = audio.get(key, [None])[0]
+        if value is not None and value != '':
+            return value
+    return None
+
+def year_from_date(date_str: str | None) -> int | None:
     try:
         # Assuming the date is in the format 'YYYY-MM-DD' or 'YYYY'
         return int(date_str.split('-')[0])
     except (ValueError, AttributeError):
         return None
 
+def track_number_from_tag(track_number_str: str | None) -> int | None:
+    try:
+        # Assuming the track number is in the format 'X/Y' or 'X'
+        return int(track_number_str.split('/')[0])
+    except (ValueError, AttributeError):
+        return None
+    
 def read_track(file_path: str) -> Track | None:
     try:
         # Implementation for reading track information
@@ -34,15 +49,15 @@ def read_track(file_path: str) -> Track | None:
             bit_rate=audio.info.bitrate,
             sample_rate=audio.info.sample_rate,
             duration=round(audio.info.length),
-            title=audio.get('title', [None])[0],
-            artist=audio.get('artist', [None])[0],
-            album=audio.get('album', [None])[0],
-            track_number=int(audio.get('tracknumber', [None])[0]) if audio.get('tracknumber', [None])[0] is not None else None,
-            year=year_from_date(audio.get('date', [None])[0]) if audio.get('date', [None])[0] is not None else None,
+            title=get_tag(audio, ['title']),
+            artist=get_tag(audio, ['artist']),
+            album=get_tag(audio, ['album']),
+            track_number=track_number_from_tag(get_tag(audio, ['tracknumber'])),
+            year=year_from_date(get_tag(audio, ['date', 'year'])),
             format=os.path.splitext(file_path)[1].upper().strip('.'),
             bit_depth=audio.info.bits_per_sample if hasattr(audio.info, 'bits_per_sample') else None,
             file_size=os.path.getsize(file_path),
             file_hash=compute_file_hash(file_path))
     except Exception as e:
-        logging.error(f"Error occurred: {e}")
+        logging.error(f"Failed to read track information from {file_path}: {e}")
         return None
