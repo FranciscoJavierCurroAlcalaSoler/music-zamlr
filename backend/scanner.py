@@ -1,5 +1,7 @@
 import os
+import sys
 import logging
+import hashlib
 import mutagen
 from database import create_db_and_tables, database_commit, engine
 from models import Track
@@ -7,17 +9,13 @@ from models import Track
 logging.basicConfig(level=logging.INFO)
 
 def compute_file_hash(file_path: str) -> str:
-    # Implementation for computing file hash (e.g., SHA256)
-    import hashlib
     sha256_hash = hashlib.sha256()
     with open(file_path, "rb") as f:
-        # Read and update hash string value in blocks of 4K
         for byte_block in iter(lambda: f.read(4096), b""):
             sha256_hash.update(byte_block)
     return sha256_hash.hexdigest()
 
 def get_tag(audio, keys: list[str]) -> str | None:
-    # try each key in order, return the first non-empty value found
     for key in keys:
         value = audio.get(key, [None])[0]
         if value is not None and value != '':
@@ -40,10 +38,7 @@ def track_number_from_tag(track_number_str: str | None) -> int | None:
     
 def read_track(file_path: str) -> Track | None:
     try:
-        # Implementation for reading track information
         audio = mutagen.File(file_path, easy=True)
-        # Extract relevant information from the audio file
-        # This is a simplified example - you would need to handle different audio formats appropriately
         return Track(
             file_path=os.path.normpath(file_path),
             file_name=os.path.basename(file_path),
@@ -87,12 +82,12 @@ def scan_folder(folder_path: str, engine) -> dict:
                     added_count += 1
                 else:
                     failed_count += 1
-                if  len(batch) >= BATCH_SIZE:  # limit batch size to BATCH_SIZE
+                if  len(batch) >= BATCH_SIZE:
                     database_commit(batch, engine)
                     batch = []
             else:
                 skipped_count += 1
-    if batch:  # commit any remaining tracks in the batch
+    if batch:
         database_commit(batch, engine)
     return {
         "scanned": scanned_count,
@@ -101,11 +96,15 @@ def scan_folder(folder_path: str, engine) -> dict:
         "failed": failed_count
     }
 
-FOLDER_TO_SCAN = "C:/path/to/test_music"
-
 def main():
+    if len(sys.argv) < 2:
+        print("Usage: python scanner.py <folder_to_scan>")
+        sys.exit(1)
+    
+    folder_to_scan = sys.argv[1]
     create_db_and_tables()
-    scan_folder(FOLDER_TO_SCAN, engine)
+    result = scan_folder(folder_to_scan, engine)
+    print(result)
 
 if __name__ == "__main__":
     main()

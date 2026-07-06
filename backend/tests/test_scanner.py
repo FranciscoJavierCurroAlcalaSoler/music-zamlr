@@ -7,11 +7,6 @@ from models import Track
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
-def make_test_engine():
-    engine = create_engine("sqlite://")
-    SQLModel.metadata.create_all(engine)
-    return engine
-
 def test_read_track_mp3():
     track = read_track(str(FIXTURES_DIR / "test_track.mp3"))
 
@@ -78,12 +73,11 @@ def test_track_number_from_tag_handles_empty_string():
 def test_track_number_from_tag_handles_none():
     assert track_number_from_tag(None) is None
 
-def test_scan_folder_finds_and_stores_audio_files(tmp_path):
+def test_scan_folder_finds_and_stores_audio_files(tmp_path, engine):
     shutil.copy(FIXTURES_DIR / "test_track.mp3", tmp_path / "test_track.mp3")
     shutil.copy(FIXTURES_DIR / "test_track.flac", tmp_path / "test_track.flac")
     (tmp_path / "cover.jpg").write_text("not audio")
 
-    engine = make_test_engine()
     result = scan_folder(str(tmp_path), engine)
 
     assert result["scanned"] == 3
@@ -98,23 +92,21 @@ def test_scan_folder_finds_and_stores_audio_files(tmp_path):
         assert titles == {"Test Track MP3", "Test Track FLAC"}
 
 
-def test_scan_folder_handles_uppercase_extensions(tmp_path):
+def test_scan_folder_handles_uppercase_extensions(tmp_path, engine):
     shutil.copy(FIXTURES_DIR / "test_track.mp3", tmp_path / "TEST_UPPER.MP3")
 
-    engine = make_test_engine()
     result = scan_folder(str(tmp_path), engine)
 
     assert result["added"] == 1
     assert result["skipped"] == 0
 
 
-def test_scan_folder_batches_correctly(tmp_path, monkeypatch):
+def test_scan_folder_batches_correctly(tmp_path, monkeypatch, engine):
     monkeypatch.setattr("scanner.BATCH_SIZE", 1)
 
     shutil.copy(FIXTURES_DIR / "test_track.mp3", tmp_path / "one.mp3")
     shutil.copy(FIXTURES_DIR / "test_track.flac", tmp_path / "two.flac")
 
-    engine = make_test_engine()
     result = scan_folder(str(tmp_path), engine)
 
     assert result["added"] == 2

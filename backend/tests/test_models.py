@@ -5,15 +5,6 @@ from sqlalchemy.exc import IntegrityError
 
 from models import Track
 
-
-@pytest.fixture
-def session():
-    engine = create_engine("sqlite://")  # in-memory, fresh per test
-    SQLModel.metadata.create_all(engine)
-    with Session(engine) as session:
-        yield session
-
-
 def test_track_with_only_required_fields(session):
     track = Track(
         file_path="/music/song.mp3",
