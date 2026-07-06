@@ -1,10 +1,16 @@
 # tests/test_scanner.py
+import shutil
 from pathlib import Path
-
-from scanner import read_track, year_from_date, track_number_from_tag
+from sqlmodel import SQLModel, Session, create_engine, select
+from scanner import read_track, year_from_date, track_number_from_tag, scan_folder
+from models import Track
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
+def make_test_engine():
+    engine = create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    return engine
 
 def test_read_track_mp3():
     track = read_track(str(FIXTURES_DIR / "test_track.mp3"))
@@ -71,3 +77,47 @@ def test_track_number_from_tag_handles_empty_string():
 
 def test_track_number_from_tag_handles_none():
     assert track_number_from_tag(None) is None
+
+def test_scan_folder_finds_and_stores_audio_files(tmp_path):
+    shutil.copy(FIXTURES_DIR / "test_track.mp3", tmp_path / "test_track.mp3")
+    shutil.copy(FIXTURES_DIR / "test_track.flac", tmp_path / "test_track.flac")
+    (tmp_path / "cover.jpg").write_text("not audio")
+
+    engine = make_test_engine()
+    result = scan_folder(str(tmp_path), engine)
+
+    assert result["scanned"] == 3
+    assert result["added"] == 2
+    assert result["skipped"] == 1
+    assert result["failed"] == 0
+
+    with Session(engine) as session:
+        tracks = session.exec(select(Track)).all()
+        assert len(tracks) == 2
+        titles = {t.title for t in tracks}
+        assert titles == {"Test Track MP3", "Test Track FLAC"}
+
+
+def test_scan_folder_handles_uppercase_extensions(tmp_path):
+    shutil.copy(FIXTURES_DIR / "test_track.mp3", tmp_path / "TEST_UPPER.MP3")
+
+    engine = make_test_engine()
+    result = scan_folder(str(tmp_path), engine)
+
+    assert result["added"] == 1
+    assert result["skipped"] == 0
+
+
+def test_scan_folder_batches_correctly(tmp_path, monkeypatch):
+    monkeypatch.setattr("scanner.BATCH_SIZE", 1)
+
+    shutil.copy(FIXTURES_DIR / "test_track.mp3", tmp_path / "one.mp3")
+    shutil.copy(FIXTURES_DIR / "test_track.flac", tmp_path / "two.flac")
+
+    engine = make_test_engine()
+    result = scan_folder(str(tmp_path), engine)
+
+    assert result["added"] == 2
+    with Session(engine) as session:
+        tracks = session.exec(select(Track)).all()
+        assert len(tracks) == 2

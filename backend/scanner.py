@@ -1,7 +1,8 @@
-from models import Track
-import mutagen
 import os
 import logging
+import mutagen
+from database import create_db_and_tables, database_commit, engine
+from models import Track
 
 logging.basicConfig(level=logging.INFO)
 
@@ -44,7 +45,7 @@ def read_track(file_path: str) -> Track | None:
         # Extract relevant information from the audio file
         # This is a simplified example - you would need to handle different audio formats appropriately
         return Track(
-            file_path=file_path,
+            file_path=os.path.normpath(file_path),
             file_name=os.path.basename(file_path),
             bit_rate=audio.info.bitrate,
             sample_rate=audio.info.sample_rate,
@@ -61,3 +62,50 @@ def read_track(file_path: str) -> Track | None:
     except Exception as e:
         logging.error(f"Failed to read track information from {file_path}: {e}")
         return None
+
+ALLOWED_EXTENSIONS = {".mp3", ".flac"}  # placeholder, config file comes later
+BATCH_SIZE = 100  # placeholder, config file comes later
+
+def scan_folder(folder_path: str, engine) -> dict:
+    # Known limitation: scanning the same folder twice will raise
+    # sqlalchemy.exc.IntegrityError on the first duplicate file_path,
+    # since file_path is unique on Track. Not handled yet: re-scan/
+    # duplicate-detection is deferred, likely Phase 6 territory.
+    # Deliberate scope cut for Phase 1, not an oversight.
+    batch = []
+    scanned_count = 0
+    added_count = 0
+    skipped_count = 0
+    failed_count = 0
+    for root, dirs, files in os.walk(folder_path):
+        for file in files:
+            scanned_count += 1
+            if file.lower().endswith(tuple(ALLOWED_EXTENSIONS)):
+                track = read_track(os.path.join(root, file))
+                if track:
+                    batch.append(track)
+                    added_count += 1
+                else:
+                    failed_count += 1
+                if  len(batch) >= BATCH_SIZE:  # limit batch size to BATCH_SIZE
+                    database_commit(batch, engine)
+                    batch = []
+            else:
+                skipped_count += 1
+    if batch:  # commit any remaining tracks in the batch
+        database_commit(batch, engine)
+    return {
+        "scanned": scanned_count,
+        "added": added_count,
+        "skipped": skipped_count,
+        "failed": failed_count
+    }
+
+FOLDER_TO_SCAN = "C:/path/to/test_music"
+
+def main():
+    create_db_and_tables()
+    scan_folder(FOLDER_TO_SCAN, engine)
+
+if __name__ == "__main__":
+    main()

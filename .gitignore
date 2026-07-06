@@ -1,3 +1,6 @@
+# Music Zamlr
+backend/db/*.db
+
 # Python
 .venv/
 __pycache__/
