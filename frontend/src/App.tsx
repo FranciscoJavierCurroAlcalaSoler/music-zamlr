@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { TrackTable } from "./components/TrackTable";
 
 function App() {
   const [message, setMessage] = useState("loading...");
@@ -10,7 +11,11 @@ function App() {
       .catch(() => setMessage("could not reach backend"));
   }, []);
 
-  return <h1>Backend says: {message}</h1>;
+  return (
+    <div>
+      <TrackTable />
+    </div>
+  );
 }
 
 export default App;
