@@ -5,7 +5,7 @@ export interface Track {
   album: string | null;
   title: string | null;
   track_number: number | null;
-  year: string | null;
+  year: number | null;
   format: string | null;
   bit_rate: number | null;
   sample_rate: number | null;
