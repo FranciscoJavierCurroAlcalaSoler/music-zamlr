@@ -1,20 +1,12 @@
 import os
 import sys
 import logging
-import hashlib
 import mutagen
 from datetime import datetime
 from database import create_db_and_tables, database_commit, create_collection, engine
 from models import Collection, Track
 
 logging.basicConfig(level=logging.INFO)
-
-def compute_file_hash(file_path: str) -> str:
-    sha256_hash = hashlib.sha256()
-    with open(file_path, "rb") as f:
-        for byte_block in iter(lambda: f.read(4096), b""):
-            sha256_hash.update(byte_block)
-    return sha256_hash.hexdigest()
 
 def get_tag(audio, keys: list[str]) -> str | None:
     for key in keys:
@@ -54,7 +46,6 @@ def read_track(file_path: str, collection_id: int) -> Track | None:
             format=os.path.splitext(file_path)[1].upper().strip('.'),
             bit_depth=audio.info.bits_per_sample if hasattr(audio.info, 'bits_per_sample') else None,
             file_size=os.path.getsize(file_path),
-            file_hash=compute_file_hash(file_path),
             collection_id=collection_id)
     except Exception as e:
         logging.error(f"Failed to read track information from {file_path}: {e}")

@@ -27,7 +27,6 @@ def test_track_with_only_required_fields(session, test_collection):
         sample_rate=44100,
         duration=210,
         file_size=8_400_000,
-        file_hash="abc123",
         collection_id=test_collection
     )
     session.add(track)
@@ -37,6 +36,7 @@ def test_track_with_only_required_fields(session, test_collection):
     assert track.id is not None
     assert track.collection_id is not None
     assert track.title is None
+    assert track.file_hash is None
 
 
 def test_track_missing_bit_rate_fails(session, test_collection):

@@ -23,7 +23,7 @@ def test_read_track_mp3(test_collection):
     assert track.sample_rate == 44100
     assert track.duration == 5
     assert track.file_size == 206805
-    assert len(track.file_hash) == 64
+    assert track.file_hash is None
     assert track.collection_id == test_collection
 
 def test_read_track_flac(test_collection):
@@ -42,7 +42,7 @@ def test_read_track_flac(test_collection):
     assert track.sample_rate == 48000
     assert track.duration == 5
     assert track.file_size == 78544
-    assert len(track.file_hash) == 64
+    assert track.file_hash is None
     assert track.collection_id == test_collection
 
 
