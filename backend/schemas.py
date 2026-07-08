@@ -13,6 +13,7 @@ class TrackRead(BaseModel):
     bit_rate: int | None = None
     sample_rate: int | None = None
     duration: float | None = None
+    collection_id: int
 
     class Config:
         from_attributes = True

@@ -7,8 +7,8 @@ from models import Track
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
-def test_read_track_mp3():
-    track = read_track(str(FIXTURES_DIR / "test_track.mp3"))
+def test_read_track_mp3(test_collection):
+    track = read_track(str(FIXTURES_DIR / "test_track.mp3"), collection_id=test_collection)
 
     assert track is not None
     assert track.file_name == "test_track.mp3"
@@ -24,10 +24,10 @@ def test_read_track_mp3():
     assert track.duration == 5
     assert track.file_size == 206805
     assert len(track.file_hash) == 64
+    assert track.collection_id == test_collection
 
-
-def test_read_track_flac():
-    track = read_track(str(FIXTURES_DIR / "test_track.flac"))
+def test_read_track_flac(test_collection):
+    track = read_track(str(FIXTURES_DIR / "test_track.flac"), collection_id=test_collection)
 
     assert track is not None
     assert track.file_name == "test_track.flac"
@@ -43,10 +43,11 @@ def test_read_track_flac():
     assert track.duration == 5
     assert track.file_size == 78544
     assert len(track.file_hash) == 64
+    assert track.collection_id == test_collection
 
 
-def test_read_track_nonexistent_file_returns_none():
-    track = read_track(str(FIXTURES_DIR / "does_not_exist.mp3"))
+def test_read_track_nonexistent_file_returns_none(test_collection):
+    track = read_track(str(FIXTURES_DIR / "does_not_exist.mp3"), collection_id=test_collection)
     assert track is None
 
 
@@ -73,12 +74,12 @@ def test_track_number_from_tag_handles_empty_string():
 def test_track_number_from_tag_handles_none():
     assert track_number_from_tag(None) is None
 
-def test_scan_folder_finds_and_stores_audio_files(tmp_path, engine):
+def test_scan_folder_finds_and_stores_audio_files(tmp_path, test_collection, engine):
     shutil.copy(FIXTURES_DIR / "test_track.mp3", tmp_path / "test_track.mp3")
     shutil.copy(FIXTURES_DIR / "test_track.flac", tmp_path / "test_track.flac")
     (tmp_path / "cover.jpg").write_text("not audio")
 
-    result = scan_folder(str(tmp_path), engine)
+    result = scan_folder(str(tmp_path), collection_id=test_collection, engine=engine)
 
     assert result["scanned"] == 3
     assert result["added"] == 2
@@ -92,22 +93,22 @@ def test_scan_folder_finds_and_stores_audio_files(tmp_path, engine):
         assert titles == {"Test Track MP3", "Test Track FLAC"}
 
 
-def test_scan_folder_handles_uppercase_extensions(tmp_path, engine):
+def test_scan_folder_handles_uppercase_extensions(tmp_path, test_collection, engine):
     shutil.copy(FIXTURES_DIR / "test_track.mp3", tmp_path / "TEST_UPPER.MP3")
 
-    result = scan_folder(str(tmp_path), engine)
+    result = scan_folder(str(tmp_path), collection_id=test_collection, engine=engine)
 
     assert result["added"] == 1
     assert result["skipped"] == 0
 
 
-def test_scan_folder_batches_correctly(tmp_path, monkeypatch, engine):
+def test_scan_folder_batches_correctly(tmp_path, test_collection, monkeypatch, engine):
     monkeypatch.setattr("scanner.BATCH_SIZE", 1)
 
     shutil.copy(FIXTURES_DIR / "test_track.mp3", tmp_path / "one.mp3")
     shutil.copy(FIXTURES_DIR / "test_track.flac", tmp_path / "two.flac")
 
-    result = scan_folder(str(tmp_path), engine)
+    result = scan_folder(str(tmp_path), collection_id=test_collection, engine=engine)
 
     assert result["added"] == 2
     with Session(engine) as session:

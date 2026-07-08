@@ -3,8 +3,9 @@ import sys
 import logging
 import hashlib
 import mutagen
-from database import create_db_and_tables, database_commit, engine
-from models import Track
+from datetime import datetime
+from database import create_db_and_tables, database_commit, create_collection, engine
+from models import Collection, Track
 
 logging.basicConfig(level=logging.INFO)
 
@@ -36,7 +37,7 @@ def track_number_from_tag(track_number_str: str | None) -> int | None:
     except (ValueError, AttributeError):
         return None
     
-def read_track(file_path: str) -> Track | None:
+def read_track(file_path: str, collection_id: int) -> Track | None:
     try:
         audio = mutagen.File(file_path, easy=True)
         return Track(
@@ -53,7 +54,8 @@ def read_track(file_path: str) -> Track | None:
             format=os.path.splitext(file_path)[1].upper().strip('.'),
             bit_depth=audio.info.bits_per_sample if hasattr(audio.info, 'bits_per_sample') else None,
             file_size=os.path.getsize(file_path),
-            file_hash=compute_file_hash(file_path))
+            file_hash=compute_file_hash(file_path),
+            collection_id=collection_id)
     except Exception as e:
         logging.error(f"Failed to read track information from {file_path}: {e}")
         return None
@@ -61,12 +63,15 @@ def read_track(file_path: str) -> Track | None:
 ALLOWED_EXTENSIONS = {".mp3", ".flac"}  # placeholder, config file comes later
 BATCH_SIZE = 100  # placeholder, config file comes later
 
-def scan_folder(folder_path: str, engine) -> dict:
+def scan_folder(folder_path: str, collection_id: int, engine) -> dict:
     # Known limitation: scanning the same folder twice will raise
-    # sqlalchemy.exc.IntegrityError on the first duplicate file_path,
-    # since file_path is unique on Track. Not handled yet: re-scan/
-    # duplicate-detection is deferred, likely Phase 6 territory.
-    # Deliberate scope cut for Phase 1, not an oversight.
+    # sqlalchemy.exc.IntegrityError on the first file whose path already
+    # exists *within that same collection*, since (collection_id, file_path)
+    # is a composite unique constraint on Track. Two different collections
+    # can safely share a path (e.g. same drive letter reused for different
+    # external drives). Not handled yet: re-scan/duplicate-detection is
+    # deferred, likely Phase 6 territory. Deliberate scope cut, not an
+    # oversight.
     batch = []
     scanned_count = 0
     added_count = 0
@@ -76,7 +81,7 @@ def scan_folder(folder_path: str, engine) -> dict:
         for file in files:
             scanned_count += 1
             if file.lower().endswith(tuple(ALLOWED_EXTENSIONS)):
-                track = read_track(os.path.join(root, file))
+                track = read_track(os.path.join(root, file), collection_id=collection_id)
                 if track:
                     batch.append(track)
                     added_count += 1
@@ -97,13 +102,23 @@ def scan_folder(folder_path: str, engine) -> dict:
     }
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python scanner.py <folder_to_scan>")
+    if len(sys.argv) < 3:
+        print("Usage: python scanner.py <folder_to_scan> <collection_name>")
         sys.exit(1)
     
     folder_to_scan = sys.argv[1]
+    collection_name = sys.argv[2]
     create_db_and_tables()
-    result = scan_folder(folder_to_scan, engine)
+
+    collection = create_collection(
+        Collection(
+            name=collection_name,
+            root_path=os.path.normpath(folder_to_scan),
+            last_scanned_at=datetime.now().isoformat()
+        ),
+        engine
+    )
+    result = scan_folder(folder_to_scan, collection.id, engine)
     print(result)
 
 if __name__ == "__main__":
