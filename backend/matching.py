@@ -1,3 +1,22 @@
+# Matching strategy: size-first, then hash, then fuzzy tags.
+#
+# We index "mine" by exact file_size first and use that as a free
+# pre-filter, before looking at any tags. Two files with different
+# byte counts can never be byte-identical, so this cheaply narrows the
+# field to real duplicate candidates without touching the disk. Only
+# same-size candidates get hashed (SHA-256), and hashing is the only
+# tier that works when tags are missing entirely.
+#
+# Tag+duration fuzzy matching runs only as a fallback, and it's the
+# only tier that can catch a genuine quality upgrade: the same song in
+# a different encoding almost always has a different file size, so
+# size/hash structurally cannot find that pairing. The two tiers are
+# complementary, not competing, each catches what the other can't.
+#
+# Fuzzy matches use normalized artist+title and a ±2 second duration
+# tolerance. Ambiguous matches (2+ candidates in tolerance) are never
+# auto-resolved; they go to needs_review for the user to eyeball.
+
 from collections import defaultdict
 from dataclasses import dataclass, field
 
