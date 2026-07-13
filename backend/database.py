@@ -7,6 +7,10 @@ DB_FILE = "music.db"
 
 engine = create_engine(f"sqlite:///db/{DB_FILE}")
 
+def get_session():
+    with Session(engine) as session:
+        yield session
+
 def create_db_and_tables():
     os.makedirs("db", exist_ok=True)
     SQLModel.metadata.create_all(engine)
