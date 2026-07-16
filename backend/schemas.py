@@ -18,6 +18,14 @@ class TrackRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CollectionRead(BaseModel):
+    id: int
+    name: str
+    root_path: str
+    last_scanned_at: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
 class MatchRead(BaseModel):
     mine: TrackRead
     theirs: TrackRead

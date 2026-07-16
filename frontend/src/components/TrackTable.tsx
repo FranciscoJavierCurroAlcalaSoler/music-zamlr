@@ -8,7 +8,7 @@ const columns: GridColDef[] = [
   { field: 'artist', headerName: 'Artist', flex: 1 },
   { field: 'album', headerName: 'Album', flex: 1 },
   { field: 'format', headerName: 'Format', width: 90 },
-  { field: 'bitrate', headerName: 'Bitrate', width: 100 },
+  { field: 'bit_rate', headerName: 'Bitrate', width: 100 },
 ];
 
 export function TrackTable() {

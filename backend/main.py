@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database import get_session
 from models import Track, Collection
-from schemas import TrackRead, DiffRead
+from schemas import TrackRead, CollectionRead, DiffRead
 from matching import match_collections, MatchResult
 
 app = FastAPI()
@@ -22,6 +22,10 @@ app.add_middleware(
 @app.get("/api/tracks", response_model=list[TrackRead])
 def list_tracks(session: Session = Depends(get_session)):
     return session.exec(select(Track)).all()
+
+@app.get("/api/collections", response_model=list[CollectionRead])
+def list_collections(session: Session = Depends(get_session)):
+    return session.exec(select(Collection)).all()
 
 @dataclass
 class DiffResult:
