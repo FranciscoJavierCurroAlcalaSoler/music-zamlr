@@ -1,4 +1,16 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+from enum import StrEnum
+
+
+class StructureMode(StrEnum):
+    MIRROR = "mirror"
+    FLAT = "flat"
+
+
+class UpgradeAction(StrEnum):
+    DELETE = "delete"
+    KEEP_BOTH = "keep_both"
+    MOVE = "move"
 
 
 class TrackRead(BaseModel):
@@ -26,6 +38,7 @@ class CollectionRead(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
 class MatchRead(BaseModel):
     mine: TrackRead
     theirs: TrackRead
@@ -48,3 +61,10 @@ class DiffRead(BaseModel):
     match_counts: dict[str, int]
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ImportRequest(BaseModel):
+    track_ids: list[int] = Field(min_length=1)
+    destination_root: str
+    structure_mode: StructureMode
+    upgrade_action: UpgradeAction
