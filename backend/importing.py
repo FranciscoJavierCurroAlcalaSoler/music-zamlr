@@ -40,9 +40,15 @@ def plan_import(
 ) -> list[PlannedOperation]:
     planned_operations = []
     for track in tracks:
+        normalized_root = os.path.normpath(destination_root)
+        destination_path = compute_destination(track, source_root, destination_root, structure_mode)
+        if os.path.commonpath([destination_path, normalized_root]) != normalized_root:
+            raise ValueError(
+                f"Destination {destination_path!r} escapes destination root {destination_root!r}"
+            )
         planned_operations.append(PlannedOperation(
             source=track.file_path,
-            destination=compute_destination(track, source_root, destination_root, structure_mode),
+            destination=destination_path,
             action=ActionType.COPY
         ))
     return planned_operations

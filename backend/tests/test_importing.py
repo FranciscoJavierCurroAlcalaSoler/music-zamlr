@@ -37,17 +37,39 @@ def test_unknown_raises_error(make_track):
 
 def test_plan_missing_tracks(make_track):
     import_plan = plan_import(
-        [make_track(file_path="/fake/path.mp3"),
-         make_track(file_path="/fake/file/path.flac")],
+        [make_track(file_path="/source_root/path.mp3"),
+         make_track(file_path="/source_root/file/path.flac")],
         "/source_root",
         "/destination_root",
         "flat"
     )
     
     assert len(import_plan) == 2
-    assert import_plan[0].source == "/fake/path.mp3"
-    assert import_plan[1].source == "/fake/file/path.flac"
+    assert import_plan[0].source == "/source_root/path.mp3"
+    assert import_plan[1].source == "/source_root/file/path.flac"
     assert import_plan[0].destination == os.path.normpath("/destination_root/path.mp3")
     assert import_plan[1].destination == os.path.normpath("/destination_root/path.flac")
     assert import_plan[0].action == ActionType.COPY
     assert import_plan[1].action == ActionType.COPY
+
+
+def test_escaped_destination_path_raises_error(make_track):
+    with pytest.raises(ValueError, match="escapes destination root"):
+        plan_import(
+            [make_track(file_path="/fake/path.mp3")],
+            "/source_root",
+            "/destination_root",
+            "mirror"
+        )
+
+
+def test_sibling_prefix_destination_raises_error(make_track):
+    # /destination_root vs /destination_root-backup: a string prefix but a
+    # different directory. commonpath must reject it; startswith would not.
+    with pytest.raises(ValueError, match="escapes destination root"):
+        plan_import(
+            [make_track(file_path="/destination_root-backup/evil.mp3")],
+            "/destination_root",
+            "/destination_root",
+            "mirror",
+        )
