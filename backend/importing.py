@@ -16,6 +16,16 @@ class PlannedOperation:
     action: ActionType
 
 
+def _disambiguate(destination: str, seen_destinations: set[str]) -> str:
+    if destination.casefold() not in seen_destinations:
+        return destination
+    base, ext = os.path.splitext(destination)
+    n = 1
+    while f"{base} ({n}){ext}".casefold() in seen_destinations:
+        n += 1
+    return f"{base} ({n}){ext}"
+
+
 def compute_destination(
         track: Track,
         source_root: str,
@@ -39,16 +49,19 @@ def plan_import(
     structure_mode: str,
 ) -> list[PlannedOperation]:
     planned_operations = []
+    seen_destinations = set()
+    normalized_root = os.path.normpath(destination_root)
     for track in tracks:
-        normalized_root = os.path.normpath(destination_root)
         destination_path = compute_destination(track, source_root, destination_root, structure_mode)
         if os.path.commonpath([destination_path, normalized_root]) != normalized_root:
             raise ValueError(
                 f"Destination {destination_path!r} escapes destination root {destination_root!r}"
             )
+        disambiguated_destination = _disambiguate(destination_path, seen_destinations)
         planned_operations.append(PlannedOperation(
             source=track.file_path,
-            destination=destination_path,
+            destination=disambiguated_destination,
             action=ActionType.COPY
         ))
+        seen_destinations.add(disambiguated_destination.casefold())
     return planned_operations

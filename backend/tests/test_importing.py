@@ -73,3 +73,33 @@ def test_sibling_prefix_destination_raises_error(make_track):
             "/destination_root",
             "mirror",
         )
+
+
+def test_name_disambiguation(make_track):
+    import_plan = plan_import(
+        [make_track(file_path="/source_root/one/path.mp3"),
+         make_track(file_path="/source_root/two/path.mp3"),
+         make_track(file_path="/source_root/three/path.mp3")],
+        "/source_root",
+        "/destination_root",
+        "flat",
+    )
+
+    assert import_plan[0].destination == os.path.normpath("/destination_root/path.mp3")
+    assert import_plan[1].destination == os.path.normpath("/destination_root/path (1).mp3")
+    assert import_plan[2].destination == os.path.normpath("/destination_root/path (2).mp3")
+
+
+def test_case_insensitive_names_disambiguate(make_track):
+    # PATH.mp3 and path.mp3 are distinct strings but the same file on a
+    # case-insensitive Windows drive, so the second must be disambiguated.
+    import_plan = plan_import(
+        [make_track(file_path="/source_root/one/PATH.mp3"),
+         make_track(file_path="/source_root/two/path.mp3")],
+        "/source_root",
+        "/destination_root",
+        "flat",
+    )
+
+    assert import_plan[0].destination == os.path.normpath("/destination_root/PATH.mp3")
+    assert import_plan[1].destination == os.path.normpath("/destination_root/path (1).mp3")
