@@ -3,16 +3,19 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from models import Track
+from matching import Match
+from enums import StructureMode, UpgradeAction
 
 
 class ActionType(StrEnum):
     COPY = "copy"
+    DELETE = "delete"
 
 
 @dataclass
 class PlannedOperation:
     source: str
-    destination: str
+    destination: str | None
     action: ActionType
 
 
@@ -30,11 +33,11 @@ def compute_destination(
         track: Track,
         source_root: str,
         destination_root: str,
-        structure_mode: str
+        structure_mode: StructureMode
 ) -> str:
-    if structure_mode == "mirror":
+    if structure_mode == StructureMode.MIRROR:
         relative_path = os.path.relpath(track.file_path, source_root)
-    elif structure_mode == "flat":
+    elif structure_mode == StructureMode.FLAT:
         relative_path = os.path.basename(track.file_path)
     else:
         raise ValueError(f"Unknown structure mode: {structure_mode!r}")
@@ -43,25 +46,60 @@ def compute_destination(
 
 
 def plan_import(
-    tracks: list[Track],
+    missing: list[Track],
+    upgrades: list[Match],
     source_root: str,
     destination_root: str,
-    structure_mode: str,
+    structure_mode: StructureMode,
+    upgrade_action: UpgradeAction,
 ) -> list[PlannedOperation]:
-    planned_operations = []
-    seen_destinations = set()
+    # Comparisons below use == / != rather than identity, so a raw string
+    # ("delete") works as well as an UpgradeAction member. Don't switch to
+    # 'is' without coercing upgrade_action to a member first.
+    if upgrade_action not in UpgradeAction:
+        raise ValueError(f"Unknown upgrade action: {upgrade_action!r}")
+    if upgrade_action == UpgradeAction.MOVE:
+        raise NotImplementedError("MOVE upgrade action not implemented yet")
+
     normalized_root = os.path.normpath(destination_root)
-    for track in tracks:
-        destination_path = compute_destination(track, source_root, destination_root, structure_mode)
-        if os.path.commonpath([destination_path, normalized_root]) != normalized_root:
+    seen_destinations = set()
+    operations = []
+
+    def plan_copy(track: Track) -> PlannedOperation:
+        destination = compute_destination(track, source_root, destination_root, structure_mode)
+        if os.path.commonpath([destination, normalized_root]) != normalized_root:
             raise ValueError(
-                f"Destination {destination_path!r} escapes destination root {destination_root!r}"
+                f"Destination {destination!r} escapes destination root {normalized_root!r}"
             )
-        disambiguated_destination = _disambiguate(destination_path, seen_destinations)
-        planned_operations.append(PlannedOperation(
+        destination = _disambiguate(destination, seen_destinations)
+        seen_destinations.add(destination.casefold())
+        return PlannedOperation(
             source=track.file_path,
-            destination=disambiguated_destination,
-            action=ActionType.COPY
-        ))
-        seen_destinations.add(disambiguated_destination.casefold())
-    return planned_operations
+            destination=destination,
+            action=ActionType.COPY,
+        )
+
+    for track in missing:
+        operations.append(plan_copy(track))
+
+    for match in upgrades:
+        copy_operation = plan_copy(match.theirs)
+        operations.append(copy_operation)
+
+        if upgrade_action != UpgradeAction.DELETE:
+            continue
+
+        # An in-place upgrade overwrites mine's own file. Deleting that path
+        # afterwards would remove the copy we just wrote.
+        replaced_in_place = (
+            copy_operation.destination.casefold()
+            == os.path.normpath(match.mine.file_path).casefold()
+        )
+        if not replaced_in_place:
+            operations.append(PlannedOperation(
+                source=match.mine.file_path,
+                destination=None,
+                action=ActionType.DELETE,
+            ))
+
+    return operations
