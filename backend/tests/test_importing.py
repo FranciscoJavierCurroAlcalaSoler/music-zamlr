@@ -321,3 +321,76 @@ def test_move_with_shared_mine_names(make_track):
     assert import_plan[3].destination == os.path.normpath(
         "/destination_root/_superseded/same_mine_name (1).mp3"
     )
+
+
+def test_group_in_upgrade_pair(make_track):
+    import_plan = plan_import(
+        missing=[],
+        upgrades=[
+            Match(
+                mine=make_track(file_path="/destination_root/mine.mp3"),
+                theirs=make_track(file_path="/source_root/theirs.mp3"),
+            )
+        ],
+        source_root="/source_root",
+        destination_root="/destination_root",
+        structure_mode=StructureMode.MIRROR,
+        upgrade_action=UpgradeAction.MOVE,
+    )
+
+    assert import_plan[0].group_id == import_plan[1].group_id
+
+
+def test_different_group_in_missing_tracks(make_track):
+    import_plan = plan_import(
+        missing=[
+            make_track(file_path="/source_root/one.mp3"),
+            make_track(file_path="/source_root/two.mp3"),
+        ],
+        upgrades=[],
+        source_root="/source_root",
+        destination_root="/destination_root",
+        structure_mode=StructureMode.MIRROR,
+        upgrade_action=UpgradeAction.MOVE,
+    )
+
+    assert import_plan[0].group_id != import_plan[1].group_id
+
+
+def test_group_in_upgrade_move_in_place(make_track):
+    import_plan = plan_import(
+        missing=[],
+        upgrades=[
+            Match(
+                mine=make_track(file_path="/destination_root/same_name.mp3"),
+                theirs=make_track(file_path="/source_root/same_name.mp3"),
+            )
+        ],
+        source_root="/source_root",
+        destination_root="/destination_root",
+        structure_mode=StructureMode.MIRROR,
+        upgrade_action=UpgradeAction.MOVE,
+    )
+
+    assert import_plan[0].group_id == import_plan[1].group_id
+
+
+def test_missing_and_upgrade_have_different_groups(make_track):
+    # The counter runs continuously across both buckets. Numbering each
+    # bucket from zero would collide their ids and make the executor skip
+    # an unrelated upgrade when a missing copy fails.
+    import_plan = plan_import(
+        missing=[make_track(file_path="/source_root/one.mp3")],
+        upgrades=[
+            Match(
+                mine=make_track(file_path="/destination_root/mine.mp3"),
+                theirs=make_track(file_path="/source_root/theirs.mp3"),
+            )
+        ],
+        source_root="/source_root",
+        destination_root="/destination_root",
+        structure_mode=StructureMode.MIRROR,
+        upgrade_action=UpgradeAction.DELETE,
+    )
+
+    assert import_plan[0].group_id != import_plan[1].group_id

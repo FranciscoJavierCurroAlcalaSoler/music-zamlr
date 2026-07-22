@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from enum import StrEnum
+from itertools import count
 
 from enums import StructureMode, UpgradeAction
 from matching import Match
@@ -20,6 +21,7 @@ class PlannedOperation:
     source: str
     destination: str | None
     action: ActionType
+    group_id: int
 
 
 def compute_destination(
@@ -66,10 +68,11 @@ def plan_import(
         raise ValueError(f"Unknown upgrade action: {upgrade_action!r}")
 
     normalized_root = os.path.normpath(destination_root)
-    seen_destinations = set()
-    operations = []
+    seen_destinations: set[str] = set()
+    operations: list[PlannedOperation] = []
+    group_ids = count()
 
-    def plan_copy(track: Track) -> PlannedOperation:
+    def plan_copy(track: Track, group_id: int) -> PlannedOperation:
         destination = compute_destination(
             track, source_root, destination_root, structure_mode
         )
@@ -82,9 +85,10 @@ def plan_import(
             source=track.file_path,
             destination=destination,
             action=ActionType.COPY,
+            group_id=group_id,
         )
 
-    def plan_move(track: Track) -> PlannedOperation:
+    def plan_move(track: Track, group_id: int) -> PlannedOperation:
         destination = os.path.normpath(
             os.path.join(
                 destination_root, SUPERSEDED_DIR_NAME, os.path.basename(track.file_path)
@@ -95,13 +99,16 @@ def plan_import(
             source=track.file_path,
             destination=destination,
             action=ActionType.MOVE,
+            group_id=group_id,
         )
 
     for track in missing:
-        operations.append(plan_copy(track))
+        group_id = next(group_ids)
+        operations.append(plan_copy(track, group_id))
 
     for match in upgrades:
-        copy_operation = plan_copy(match.theirs)
+        group_id = next(group_ids)
+        copy_operation = plan_copy(match.theirs, group_id)
 
         # An in-place upgrade overwrites mine's own file. Deleting that path
         # afterwards would remove the copy we just wrote.
@@ -111,7 +118,7 @@ def plan_import(
         )
 
         if upgrade_action == UpgradeAction.MOVE:
-            move_operation = plan_move(match.mine)
+            move_operation = plan_move(match.mine, group_id)
             if replaced_in_place:
                 operations.extend([move_operation, copy_operation])
             else:
@@ -126,6 +133,7 @@ def plan_import(
                     source=match.mine.file_path,
                     destination=None,
                     action=ActionType.DELETE,
+                    group_id=group_id,
                 )
             )
 
