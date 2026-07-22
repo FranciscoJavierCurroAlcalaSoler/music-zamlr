@@ -3,7 +3,14 @@ import os
 import pytest
 
 from enums import StructureMode, UpgradeAction
-from importing import ActionType, compute_destination, plan_import
+from importing import (
+    ActionType,
+    OperationStatus,
+    PlannedOperation,
+    compute_destination,
+    execute_plan,
+    plan_import,
+)
 from matching import Match
 
 
@@ -394,3 +401,144 @@ def test_missing_and_upgrade_have_different_groups(make_track):
     )
 
     assert import_plan[0].group_id != import_plan[1].group_id
+
+
+def test_copy_creates_the_file(tmp_path):
+    source = tmp_path / "source" / "song.mp3"
+    source.parent.mkdir()
+    source.write_bytes(b"audio data")
+
+    destination = tmp_path / "dest" / "Artist" / "song.mp3"
+
+    results = execute_plan(
+        [
+            PlannedOperation(
+                source=str(source),
+                destination=str(destination),
+                action=ActionType.COPY,
+                group_id=0,
+            )
+        ]
+    )
+
+    assert results[0].status == OperationStatus.SUCCESS
+    assert destination.read_bytes() == b"audio data"
+
+
+def test_delete_removes(tmp_path):
+    source = tmp_path / "source" / "song.mp3"
+    source.parent.mkdir()
+    source.write_bytes(b"audio data")
+
+    destination = None
+
+    results = execute_plan(
+        [
+            PlannedOperation(
+                source=str(source),
+                destination=destination,
+                action=ActionType.DELETE,
+                group_id=0,
+            )
+        ]
+    )
+
+    assert results[0].status == OperationStatus.SUCCESS
+    assert not source.exists()
+
+
+def test_move_relocates(tmp_path):
+    source = tmp_path / "source" / "song.mp3"
+    source.parent.mkdir()
+    source.write_bytes(b"audio data")
+
+    destination = tmp_path / "dest" / "Artist" / "song.mp3"
+
+    results = execute_plan(
+        [
+            PlannedOperation(
+                source=str(source),
+                destination=str(destination),
+                action=ActionType.MOVE,
+                group_id=0,
+            )
+        ]
+    )
+
+    assert results[0].status == OperationStatus.SUCCESS
+    assert destination.read_bytes() == b"audio data"
+    assert not source.exists()
+
+
+def test_failed_copy_reports_failure_and_group_skips_and_another_group_succeeds(
+    tmp_path,
+):
+    g0_source_theirs = "/their/source/song.mp3"
+
+    g0_destination = tmp_path / "dest" / "Artist" / "song.mp3"
+
+    g0_source_mine = tmp_path / "my_source" / "song.mp3"
+    g0_source_mine.parent.mkdir()
+    g0_source_mine.write_bytes(b"audio data")
+
+    g1_source_theirs = tmp_path / "source" / "theirs.mp3"
+    g1_source_theirs.parent.mkdir()
+    g1_source_theirs.write_bytes(b"flac data")
+
+    g1_destination = tmp_path / "dest" / "Artist" / "theirs.mp3"
+
+    results = execute_plan(
+        [
+            PlannedOperation(
+                source=g0_source_theirs,
+                destination=str(g0_destination),
+                action=ActionType.COPY,
+                group_id=0,
+            ),
+            PlannedOperation(
+                source=str(g0_source_mine),
+                destination=None,
+                action=ActionType.DELETE,
+                group_id=0,
+            ),
+            PlannedOperation(
+                source=str(g1_source_theirs),
+                destination=str(g1_destination),
+                action=ActionType.COPY,
+                group_id=1,
+            ),
+        ]
+    )
+
+    assert results[0].status == OperationStatus.FAILED
+    assert not g0_destination.exists()
+    assert results[1].status == OperationStatus.SKIPPED
+    assert g0_source_mine.read_bytes() == b"audio data"
+    assert results[2].status == OperationStatus.SUCCESS
+    assert g1_destination.read_bytes() == b"flac data"
+
+
+def test_failed_copy_leaves_no_temp_file(tmp_path):
+    # The copy succeeds but os.replace fails, because the destination path
+    # already exists as a directory. This is the case the cleanup exists for:
+    # a nonexistent source fails before any temp file is written.
+    source = tmp_path / "source" / "song.mp3"
+    source.parent.mkdir()
+    source.write_bytes(b"audio data")
+
+    destination = tmp_path / "dest" / "song.mp3"
+    destination.mkdir(parents=True)
+
+    results = execute_plan(
+        [
+            PlannedOperation(
+                source=str(source),
+                destination=str(destination),
+                action=ActionType.COPY,
+                group_id=0,
+            )
+        ]
+    )
+
+    assert results[0].status == OperationStatus.FAILED
+    assert not (tmp_path / "dest" / "song.mp3.tmp").exists()

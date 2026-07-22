@@ -1,4 +1,5 @@
 import os
+import shutil
 from dataclasses import dataclass
 from enum import StrEnum
 from itertools import count
@@ -22,6 +23,19 @@ class PlannedOperation:
     destination: str | None
     action: ActionType
     group_id: int
+
+
+class OperationStatus(StrEnum):
+    SUCCESS = "success"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+@dataclass
+class OperationResult:
+    operation: PlannedOperation
+    status: OperationStatus
+    error: str | None = None
 
 
 def compute_destination(
@@ -138,3 +152,59 @@ def plan_import(
             )
 
     return operations
+
+
+def _copy(source: str, destination: str) -> None:
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    temp_path = destination + ".tmp"
+    try:
+        shutil.copy2(source, temp_path)
+        os.replace(temp_path, destination)
+    except OSError:
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass  # best effort; report the original failure, not the cleanup's
+        raise
+
+
+def _move(source: str, destination: str) -> None:
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    shutil.move(source, destination)
+
+
+def _perform(operation: PlannedOperation) -> None:
+    if operation.action == ActionType.DELETE:
+        os.remove(operation.source)
+        return
+
+    if operation.destination is None:
+        raise ValueError(f"{operation.action} operation requires a destination")
+
+    if operation.action == ActionType.COPY:
+        _copy(operation.source, operation.destination)
+    elif operation.action == ActionType.MOVE:
+        _move(operation.source, operation.destination)
+    else:
+        raise ValueError(f"Invalid action value: {operation.action!r}")
+
+
+def execute_plan(operations: list[PlannedOperation]) -> list[OperationResult]:
+    results: list[OperationResult] = []
+    failed_groups: set[int] = set()
+
+    for operation in operations:
+        if operation.group_id in failed_groups:
+            results.append(OperationResult(operation, OperationStatus.SKIPPED))
+            continue
+        try:
+            _perform(operation)
+        except OSError as error:
+            failed_groups.add(operation.group_id)
+            results.append(
+                OperationResult(operation, OperationStatus.FAILED, str(error))
+            )
+        else:
+            results.append(OperationResult(operation, OperationStatus.SUCCESS))
+
+    return results
