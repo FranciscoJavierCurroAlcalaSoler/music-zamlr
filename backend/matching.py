@@ -19,10 +19,11 @@
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-
-from models import Track
-from hashing import compute_file_hash
 from enum import Enum, auto
+
+from hashing import compute_file_hash
+from models import Track
+
 
 @dataclass
 class Match:
@@ -48,6 +49,7 @@ class Bucket(Enum):
 
 DURATION_TOLERANCE_SECONDS = 2
 
+
 def durations_close(a: int, b: int) -> bool:
     return abs(a - b) <= DURATION_TOLERANCE_SECONDS
 
@@ -60,6 +62,7 @@ FORMAT_RANK = {
     "MP3": 1,
     "AAC": 1,
 }
+
 
 def format_rank(fmt: str | None) -> int:
     # Unknown/missing formats rank lowest so they never win an
@@ -86,13 +89,16 @@ def route(result, consumed, bucket, payload):
         result.needs_review.append(payload)
 
 
-def attempt_fuzzy_match(theirs_track: Track, tracks_mine: list[Track], consumed: set[int]):
+def attempt_fuzzy_match(
+    theirs_track: Track, tracks_mine: list[Track], consumed: set[int]
+):
 
     if not normalize(theirs_track.artist) or not normalize(theirs_track.title):
         return (Bucket.MISSING, theirs_track)
 
     fuzzy_candidates = [
-        m for m in tracks_mine
+        m
+        for m in tracks_mine
         if id(m) not in consumed
         and normalize(m.artist) == normalize(theirs_track.artist)
         and normalize(m.title) == normalize(theirs_track.title)
@@ -107,20 +113,30 @@ def attempt_fuzzy_match(theirs_track: Track, tracks_mine: list[Track], consumed:
         mine_rank = format_rank(mine_track.format)
 
         if theirs_rank > mine_rank:
-            return (Bucket.UPGRADE_AVAILABLE, Match(mine=mine_track, theirs=theirs_track))
+            return (
+                Bucket.UPGRADE_AVAILABLE,
+                Match(mine=mine_track, theirs=theirs_track),
+            )
         elif theirs_rank < mine_rank:
             return (Bucket.ALREADY_HAVE, Match(mine=mine_track, theirs=theirs_track))
         else:
             if theirs_track.bit_rate > mine_track.bit_rate:
-                return (Bucket.UPGRADE_AVAILABLE, Match(mine=mine_track, theirs=theirs_track))
+                return (
+                    Bucket.UPGRADE_AVAILABLE,
+                    Match(mine=mine_track, theirs=theirs_track),
+                )
             else:
-                return (Bucket.ALREADY_HAVE, Match(mine=mine_track, theirs=theirs_track))
+                return (
+                    Bucket.ALREADY_HAVE,
+                    Match(mine=mine_track, theirs=theirs_track),
+                )
     else:
         return (Bucket.NEEDS_REVIEW, theirs_track)
 
 
-
-def match_collections(tracks_mine: list[Track], tracks_theirs: list[Track]) -> MatchResult:
+def match_collections(
+    tracks_mine: list[Track], tracks_theirs: list[Track]
+) -> MatchResult:
     result = MatchResult()
     consumed: set[int] = set()
 
@@ -141,11 +157,15 @@ def match_collections(tracks_mine: list[Track], tracks_theirs: list[Track]) -> M
                     mine_track.file_hash = compute_file_hash(mine_track.file_path)
                 if theirs_track.file_hash == mine_track.file_hash:
                     hash_match = True
-                    result.already_have.append(Match(mine=mine_track, theirs=theirs_track))
+                    result.already_have.append(
+                        Match(mine=mine_track, theirs=theirs_track)
+                    )
                     consumed.add(id(mine_track))
                     break
             if not hash_match:
-                bucket, payload = attempt_fuzzy_match(theirs_track, tracks_mine, consumed)
+                bucket, payload = attempt_fuzzy_match(
+                    theirs_track, tracks_mine, consumed
+                )
                 route(result, consumed, bucket, payload)
         else:
             bucket, payload = attempt_fuzzy_match(theirs_track, tracks_mine, consumed)
@@ -153,6 +173,6 @@ def match_collections(tracks_mine: list[Track], tracks_theirs: list[Track]) -> M
 
     for mine_track in tracks_mine:
         if id(mine_track) not in consumed:
-            result.only_in_mine.append(mine_track) 
+            result.only_in_mine.append(mine_track)
 
     return result

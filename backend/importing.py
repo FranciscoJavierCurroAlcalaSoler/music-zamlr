@@ -2,9 +2,9 @@ import os
 from dataclasses import dataclass
 from enum import StrEnum
 
-from models import Track
-from matching import Match
 from enums import StructureMode, UpgradeAction
+from matching import Match
+from models import Track
 
 SUPERSEDED_DIR_NAME = "_superseded"
 
@@ -23,10 +23,7 @@ class PlannedOperation:
 
 
 def compute_destination(
-        track: Track,
-        source_root: str,
-        destination_root: str,
-        structure_mode: StructureMode
+    track: Track, source_root: str, destination_root: str, structure_mode: StructureMode
 ) -> str:
     if structure_mode == StructureMode.MIRROR:
         relative_path = os.path.relpath(track.file_path, source_root)
@@ -73,7 +70,9 @@ def plan_import(
     operations = []
 
     def plan_copy(track: Track) -> PlannedOperation:
-        destination = compute_destination(track, source_root, destination_root, structure_mode)
+        destination = compute_destination(
+            track, source_root, destination_root, structure_mode
+        )
         if os.path.commonpath([destination, normalized_root]) != normalized_root:
             raise ValueError(
                 f"Destination {destination!r} escapes destination root {normalized_root!r}"
@@ -88,9 +87,7 @@ def plan_import(
     def plan_move(track: Track) -> PlannedOperation:
         destination = os.path.normpath(
             os.path.join(
-                destination_root,
-                SUPERSEDED_DIR_NAME,
-                os.path.basename(track.file_path)
+                destination_root, SUPERSEDED_DIR_NAME, os.path.basename(track.file_path)
             )
         )
         destination = _register(destination, seen_destinations)
@@ -124,10 +121,12 @@ def plan_import(
         operations.append(copy_operation)
 
         if upgrade_action == UpgradeAction.DELETE and not replaced_in_place:
-            operations.append(PlannedOperation(
-                source=match.mine.file_path,
-                destination=None,
-                action=ActionType.DELETE,
-            ))
+            operations.append(
+                PlannedOperation(
+                    source=match.mine.file_path,
+                    destination=None,
+                    action=ActionType.DELETE,
+                )
+            )
 
     return operations

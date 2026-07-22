@@ -1,14 +1,19 @@
 # tests/test_scanner.py
 import shutil
 from pathlib import Path
-from sqlmodel import SQLModel, Session, create_engine, select
-from scanner import read_track, year_from_date, track_number_from_tag, scan_folder
+
+from sqlmodel import Session, select
+
 from models import Track
+from scanner import read_track, scan_folder, track_number_from_tag, year_from_date
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
+
 def test_read_track_mp3(test_collection):
-    track = read_track(str(FIXTURES_DIR / "test_track.mp3"), collection_id=test_collection)
+    track = read_track(
+        str(FIXTURES_DIR / "test_track.mp3"), collection_id=test_collection
+    )
 
     assert track is not None
     assert track.file_name == "test_track.mp3"
@@ -26,8 +31,11 @@ def test_read_track_mp3(test_collection):
     assert track.file_hash is None
     assert track.collection_id == test_collection
 
+
 def test_read_track_flac(test_collection):
-    track = read_track(str(FIXTURES_DIR / "test_track.flac"), collection_id=test_collection)
+    track = read_track(
+        str(FIXTURES_DIR / "test_track.flac"), collection_id=test_collection
+    )
 
     assert track is not None
     assert track.file_name == "test_track.flac"
@@ -47,7 +55,9 @@ def test_read_track_flac(test_collection):
 
 
 def test_read_track_nonexistent_file_returns_none(test_collection):
-    track = read_track(str(FIXTURES_DIR / "does_not_exist.mp3"), collection_id=test_collection)
+    track = read_track(
+        str(FIXTURES_DIR / "does_not_exist.mp3"), collection_id=test_collection
+    )
     assert track is None
 
 
@@ -73,6 +83,7 @@ def test_track_number_from_tag_handles_empty_string():
 
 def test_track_number_from_tag_handles_none():
     assert track_number_from_tag(None) is None
+
 
 def test_scan_folder_finds_and_stores_audio_files(tmp_path, test_collection, engine):
     shutil.copy(FIXTURES_DIR / "test_track.mp3", tmp_path / "test_track.mp3")

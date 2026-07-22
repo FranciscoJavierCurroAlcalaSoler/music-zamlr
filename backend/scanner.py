@@ -1,34 +1,40 @@
+import logging
 import os
 import sys
-import logging
-import mutagen
 from datetime import datetime
-from database import create_db_and_tables, database_commit, create_collection, engine
+
+import mutagen
+
+from database import create_collection, create_db_and_tables, database_commit, engine
 from models import Collection, Track
 
 logging.basicConfig(level=logging.INFO)
 
+
 def get_tag(audio, keys: list[str]) -> str | None:
     for key in keys:
         value = audio.get(key, [None])[0]
-        if value is not None and value != '':
+        if value is not None and value != "":
             return value
     return None
+
 
 def year_from_date(date_str: str | None) -> int | None:
     try:
         # Assuming the date is in the format 'YYYY-MM-DD' or 'YYYY'
-        return int(date_str.split('-')[0])
+        return int(date_str.split("-")[0])
     except (ValueError, AttributeError):
         return None
+
 
 def track_number_from_tag(track_number_str: str | None) -> int | None:
     try:
         # Assuming the track number is in the format 'X/Y' or 'X'
-        return int(track_number_str.split('/')[0])
+        return int(track_number_str.split("/")[0])
     except (ValueError, AttributeError):
         return None
-    
+
+
 def read_track(file_path: str, collection_id: int) -> Track | None:
     try:
         audio = mutagen.File(file_path, easy=True)
@@ -38,21 +44,26 @@ def read_track(file_path: str, collection_id: int) -> Track | None:
             bit_rate=audio.info.bitrate,
             sample_rate=audio.info.sample_rate,
             duration=round(audio.info.length),
-            title=get_tag(audio, ['title']),
-            artist=get_tag(audio, ['artist']),
-            album=get_tag(audio, ['album']),
-            track_number=track_number_from_tag(get_tag(audio, ['tracknumber'])),
-            year=year_from_date(get_tag(audio, ['date', 'year'])),
-            format=os.path.splitext(file_path)[1].upper().strip('.'),
-            bit_depth=audio.info.bits_per_sample if hasattr(audio.info, 'bits_per_sample') else None,
+            title=get_tag(audio, ["title"]),
+            artist=get_tag(audio, ["artist"]),
+            album=get_tag(audio, ["album"]),
+            track_number=track_number_from_tag(get_tag(audio, ["tracknumber"])),
+            year=year_from_date(get_tag(audio, ["date", "year"])),
+            format=os.path.splitext(file_path)[1].upper().strip("."),
+            bit_depth=audio.info.bits_per_sample
+            if hasattr(audio.info, "bits_per_sample")
+            else None,
             file_size=os.path.getsize(file_path),
-            collection_id=collection_id)
+            collection_id=collection_id,
+        )
     except Exception as e:
         logging.error(f"Failed to read track information from {file_path}: {e}")
         return None
 
+
 ALLOWED_EXTENSIONS = {".mp3", ".flac"}  # placeholder, config file comes later
 BATCH_SIZE = 100  # placeholder, config file comes later
+
 
 def scan_folder(folder_path: str, collection_id: int, engine) -> dict:
     # Known limitation: scanning the same folder twice will raise
@@ -72,13 +83,15 @@ def scan_folder(folder_path: str, collection_id: int, engine) -> dict:
         for file in files:
             scanned_count += 1
             if file.lower().endswith(tuple(ALLOWED_EXTENSIONS)):
-                track = read_track(os.path.join(root, file), collection_id=collection_id)
+                track = read_track(
+                    os.path.join(root, file), collection_id=collection_id
+                )
                 if track:
                     batch.append(track)
                     added_count += 1
                 else:
                     failed_count += 1
-                if  len(batch) >= BATCH_SIZE:
+                if len(batch) >= BATCH_SIZE:
                     database_commit(batch, engine)
                     batch = []
             else:
@@ -89,14 +102,15 @@ def scan_folder(folder_path: str, collection_id: int, engine) -> dict:
         "scanned": scanned_count,
         "added": added_count,
         "skipped": skipped_count,
-        "failed": failed_count
+        "failed": failed_count,
     }
+
 
 def main():
     if len(sys.argv) < 3:
         print("Usage: python scanner.py <folder_to_scan> <collection_name>")
         sys.exit(1)
-    
+
     folder_to_scan = sys.argv[1]
     collection_name = sys.argv[2]
     create_db_and_tables()
@@ -105,12 +119,13 @@ def main():
         Collection(
             name=collection_name,
             root_path=os.path.normpath(folder_to_scan),
-            last_scanned_at=datetime.now().isoformat()
+            last_scanned_at=datetime.now().isoformat(),
         ),
-        engine
+        engine,
     )
     result = scan_folder(folder_to_scan, collection.id, engine)
     print(result)
+
 
 if __name__ == "__main__":
     main()

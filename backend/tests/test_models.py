@@ -1,16 +1,12 @@
 # tests/test_models.py
 import pytest
-from sqlmodel import SQLModel, Session, create_engine
 from sqlalchemy.exc import IntegrityError
 
-from models import Track, Collection
+from models import Collection, Track
 
 
 def test_collection_with_only_required_fields(session):
-    collection = Collection(
-        name="My Collection",
-        root_path="/music/collection"
-    )
+    collection = Collection(name="My Collection", root_path="/music/collection")
     session.add(collection)
     session.commit()
     session.refresh(collection)
@@ -27,7 +23,7 @@ def test_track_with_only_required_fields(session, test_collection):
         sample_rate=44100,
         duration=210,
         file_size=8_400_000,
-        collection_id=test_collection
+        collection_id=test_collection,
     )
     session.add(track)
     session.commit()
@@ -48,7 +44,7 @@ def test_track_missing_bit_rate_fails(session, test_collection):
             duration=210,
             file_size=8_400_000,
             file_hash="abc123",
-            collection_id=test_collection
+            collection_id=test_collection,
         )
         session.add(track)
         session.commit()

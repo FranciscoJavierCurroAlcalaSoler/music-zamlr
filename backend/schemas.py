@@ -1,6 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
-from enums import UpgradeAction, StructureMode
+from enums import StructureMode, UpgradeAction
+
 
 class TrackRead(BaseModel):
     id: int

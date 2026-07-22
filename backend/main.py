@@ -1,14 +1,13 @@
-
-from fastapi import FastAPI, Depends, HTTPException
-from sqlmodel import Session, select
 from dataclasses import dataclass
 
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlmodel import Session, select
 
 from database import get_session
-from models import Track, Collection
-from schemas import TrackRead, CollectionRead, DiffRead
-from matching import match_collections, MatchResult
+from matching import MatchResult, match_collections
+from models import Collection, Track
+from schemas import CollectionRead, DiffRead, TrackRead
 
 app = FastAPI()
 
@@ -19,18 +18,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/api/tracks", response_model=list[TrackRead])
 def list_tracks(session: Session = Depends(get_session)):
     return session.exec(select(Track)).all()
+
 
 @app.get("/api/collections", response_model=list[CollectionRead])
 def list_collections(session: Session = Depends(get_session)):
     return session.exec(select(Collection)).all()
 
+
 @dataclass
 class DiffResult:
     match_results: MatchResult
     match_counts: dict[str, int]
+
 
 @app.get("/api/diff", response_model=DiffRead)
 def diff_collections(
@@ -39,16 +42,16 @@ def diff_collections(
     session: Session = Depends(get_session),
 ):
     if mine == theirs:
-        raise HTTPException(status_code=400, detail="Cannot diff a collection against itself.")
+        raise HTTPException(
+            status_code=400, detail="Cannot diff a collection against itself."
+        )
 
     mine_collection = session.get(Collection, mine)
     theirs_collection = session.get(Collection, theirs)
     if mine_collection is None or theirs_collection is None:
         raise HTTPException(status_code=404, detail="Collection not found.")
 
-    tracks_mine = session.exec(
-        select(Track).where(Track.collection_id == mine)
-    ).all()
+    tracks_mine = session.exec(select(Track).where(Track.collection_id == mine)).all()
     tracks_theirs = session.exec(
         select(Track).where(Track.collection_id == theirs)
     ).all()
@@ -65,8 +68,8 @@ def diff_collections(
             upgrade_available=len(result.upgrade_available),
             already_have=len(result.already_have),
             needs_review=len(result.needs_review),
-            only_in_mine=len(result.only_in_mine)
-        )
+            only_in_mine=len(result.only_in_mine),
+        ),
     )
-    
+
     return diff
