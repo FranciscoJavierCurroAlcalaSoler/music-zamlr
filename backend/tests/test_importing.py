@@ -10,7 +10,7 @@ def test_mirror_returns_mirrored_path(make_track):
         make_track(file_path="/source_root/fake/path.mp3"),
         "/source_root",
         "/destination_root",
-        "mirror"
+        StructureMode.MIRROR
     )
     
     assert destination == os.path.normpath("/destination_root/fake/path.mp3")
@@ -21,7 +21,7 @@ def test_flat_returns_basename_under_root(make_track):
         make_track(file_path="/source_root/fake/path.mp3"),
         "/source_root",
         "/destination_root",
-        "flat"
+        StructureMode.FLAT
     )
     
     assert destination == os.path.normpath("/destination_root/path.mp3")
@@ -176,21 +176,6 @@ def test_upgrade_and_delete_with_collision(make_track):
     assert import_plan[2].source == "/destination_root/mine.mp3"
 
 
-def test_upgrade_and_move(make_track):
-    with pytest.raises(NotImplementedError):
-        plan_import(
-            missing=[],
-            upgrades=[Match(
-                mine=make_track(file_path="/destination_root/mine.mp3"),
-                theirs=make_track(file_path="/source_root/theirs.mp3")
-        )],
-            source_root="/source_root",
-            destination_root="/destination_root",
-            structure_mode=StructureMode.FLAT,
-            upgrade_action=UpgradeAction.MOVE
-        )
-
-
 def test_upgrade_in_place_does_not_delete_the_new_file(make_track):
     # Same-format bitrate upgrade: theirs lands exactly where mine already is.
     # The plan must not copy over mine and then delete that same path.
@@ -221,3 +206,70 @@ def test_unknown_upgrade_action_raises_error(make_track):
             structure_mode=StructureMode.FLAT,
             upgrade_action="bogus",
         )
+
+
+def test_basic_move(make_track):
+    import_plan = plan_import(
+        missing=[],
+        upgrades=[Match(
+            mine=make_track(file_path="/destination_root/mine.mp3"),
+            theirs=make_track(file_path="/source_root/theirs.mp3"),
+        )],
+        source_root="/source_root",
+        destination_root="/destination_root",
+        structure_mode=StructureMode.MIRROR,
+        upgrade_action=UpgradeAction.MOVE,
+    )
+
+    assert len(import_plan) == 2
+    assert import_plan[0].action == ActionType.COPY
+    assert import_plan[0].destination == os.path.normpath("/destination_root/theirs.mp3")
+    assert import_plan[1].action == ActionType.MOVE
+    assert import_plan[1].source == "/destination_root/mine.mp3"
+    assert import_plan[1].destination == os.path.normpath("/destination_root/_superseded/mine.mp3")
+
+
+def test_move_in_place(make_track):
+    import_plan = plan_import(
+        missing=[],
+        upgrades=[Match(
+            mine=make_track(file_path="/destination_root/same_name.mp3"),
+            theirs=make_track(file_path="/source_root/same_name.mp3")
+        )],
+        source_root="/source_root",
+        destination_root="/destination_root",
+        structure_mode=StructureMode.MIRROR,
+        upgrade_action=UpgradeAction.MOVE,
+    )
+
+    assert len(import_plan) == 2
+    assert import_plan[0].action == ActionType.MOVE
+    assert import_plan[1].action == ActionType.COPY
+    assert import_plan[0].destination == os.path.normpath("/destination_root/_superseded/same_name.mp3")
+    assert import_plan[1].destination == os.path.normpath("/destination_root/same_name.mp3")
+
+def test_move_with_shared_mine_names(make_track):
+    import_plan = plan_import(
+        missing=[],
+        upgrades=[
+            Match(
+                mine=make_track(file_path="/destination_root/one/same_mine_name.mp3"),
+                theirs=make_track(file_path="/source_root/theirs_one.mp3"),
+            ),
+            Match(
+                mine=make_track(file_path="/destination_root/two/same_mine_name.mp3"),
+                theirs=make_track(file_path="/source_root/theirs_two.mp3"),
+            )],
+        source_root="/source_root",
+        destination_root="/destination_root",
+        structure_mode=StructureMode.MIRROR,
+        upgrade_action=UpgradeAction.MOVE,
+    )
+
+    assert len(import_plan) == 4
+    assert import_plan[0].action == ActionType.COPY
+    assert import_plan[1].action == ActionType.MOVE
+    assert import_plan[2].action == ActionType.COPY
+    assert import_plan[3].action == ActionType.MOVE
+    assert import_plan[1].destination == os.path.normpath("/destination_root/_superseded/same_mine_name.mp3")
+    assert import_plan[3].destination == os.path.normpath("/destination_root/_superseded/same_mine_name (1).mp3")
