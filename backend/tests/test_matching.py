@@ -41,6 +41,23 @@ def test_same_format_better_bitrate_is_already_have(make_track):
     assert result.missing == []
 
 
+def test_same_format_their_bitrate_none_is_already_have(make_track):
+    mine = make_track(format="MP3", bit_rate=640000, file_size=1_000_000)
+    theirs = make_track(format="MP3", bit_rate=None, file_size=2_000_000)
+    result = match_collections([mine], [theirs])
+
+    assert len(result.already_have) == 1
+
+
+def test_same_format_my_bitrate_none_is_already_have(make_track):
+    mine = make_track(format="MP3", bit_rate=None, file_size=1_000_000)
+    theirs = make_track(format="MP3", bit_rate=320000, file_size=2_000_000)
+    result = match_collections([mine], [theirs])
+
+    assert len(result.already_have) == 1
+    assert result.upgrade_available == []
+
+
 def test_no_match_is_missing(make_track):
     mine = make_track(title="Some Title", artist="Some Artist", file_size=1_000_000)
     theirs = make_track(
@@ -94,6 +111,37 @@ def test_two_far_candidates_is_missing_not_review(make_track):
     assert len(result.missing) == 1
     assert result.needs_review == []
     assert len(result.only_in_mine) == 2
+
+
+def test_their_duration_none_is_missing(make_track):
+    mine = [
+        make_track(duration=200, file_size=1_000_000),
+    ]
+    theirs = [
+        make_track(duration=None, file_size=4_000_000),
+    ]
+    result = match_collections(mine, theirs)
+
+    assert len(result.missing) == 1
+
+
+def test_my_duration_none_with_matching_tags_is_missing(make_track):
+    mine = [
+        make_track(
+            duration=None, title="A Title", artist="An Artist", file_size=1_000_000
+        ),
+    ]
+    theirs = [
+        make_track(
+            duration=200, title="A Title", artist="An Artist", file_size=4_000_000
+        ),
+    ]
+    result = match_collections(mine, theirs)
+
+    assert len(result.missing) == 1
+    assert result.missing[0] is theirs[0]
+    assert len(result.only_in_mine) == 1
+    assert result.only_in_mine[0] is mine[0]
 
 
 def test_empty_or_blank_title_is_missing(make_track):

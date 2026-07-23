@@ -137,9 +137,15 @@ def attempt_fuzzy_match(
     # Blank-tag guard, and it is load-bearing. Without it, a track of
     # theirs with no artist/title matches every untagged track of mine,
     # because None == None and "" == "" both hold. Whole libraries of
-    # untagged rips would collapse into one bogus pairing. Anything blank
-    # on either tag is sent straight to missing instead.
-    if not normalize(theirs_track.artist) or not normalize(theirs_track.title):
+    # untagged rips would collapse into one bogus pairing. Duration is
+    # checked here too: it's nullable when a file won't parse, and
+    # durations_close would raise TypeError on None rather than skipping
+    # the track. Anything blank or unreadable goes straight to missing.
+    if (
+        not normalize(theirs_track.artist)
+        or not normalize(theirs_track.title)
+        or theirs_track.duration is None
+    ):
         return (Bucket.MISSING, theirs_track)
 
     # Scans all of tracks_mine, not just the same-size ones. That's
@@ -153,6 +159,7 @@ def attempt_fuzzy_match(
         if id(m) not in consumed
         and normalize(m.artist) == normalize(theirs_track.artist)
         and normalize(m.title) == normalize(theirs_track.title)
+        and m.duration is not None
         and durations_close(m.duration, theirs_track.duration)
     ]
     if len(fuzzy_candidates) == 0:
@@ -171,11 +178,18 @@ def attempt_fuzzy_match(
         elif theirs_rank < mine_rank:
             return (Bucket.ALREADY_HAVE, Match(mine=mine_track, theirs=theirs_track))
         else:
-            # Same format rank, so bitrate breaks the tie. Equal bitrates
-            # fall to already_have: without a strict improvement we don't
-            # claim an upgrade, since the cost of a wrong "upgrade" is a
-            # pointless copy and possibly a deleted original.
-            if theirs_track.bit_rate > mine_track.bit_rate:
+            # Same format rank, so bitrate breaks the tie. An unreadable
+            # bitrate on either side claims no upgrade: treating None as 0
+            # would let a known 320 kbps "beat" a file we simply couldn't
+            # measure, and with the delete action that removes an original
+            # we never evaluated. Equal bitrates fall the same way, since
+            # without a strict improvement the copy is pointless.
+            if theirs_track.bit_rate is None or mine_track.bit_rate is None:
+                return (
+                    Bucket.ALREADY_HAVE,
+                    Match(mine=mine_track, theirs=theirs_track),
+                )
+            elif theirs_track.bit_rate > mine_track.bit_rate:
                 return (
                     Bucket.UPGRADE_AVAILABLE,
                     Match(mine=mine_track, theirs=theirs_track),
