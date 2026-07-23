@@ -1,5 +1,7 @@
 # Music Zamlr
 backend/db/*.db
+music-zamlr-spec.md
+CLAUDE.md
 
 # Python
 .venv/
