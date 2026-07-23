@@ -542,3 +542,98 @@ def test_failed_copy_leaves_no_temp_file(tmp_path):
 
     assert results[0].status == OperationStatus.FAILED
     assert not (tmp_path / "dest" / "song.mp3.tmp").exists()
+
+
+def test_missing_disambiguates(make_track):
+    def fake_exists(path: str) -> bool:
+        on_disk = {os.path.normpath("/destination_root/song.mp3")}
+        return path.casefold() in {p.casefold() for p in on_disk}
+
+    import_plan = plan_import(
+        missing=[make_track(file_path="/source_root/song.mp3")],
+        upgrades=[],
+        source_root="/source_root",
+        destination_root="/destination_root",
+        structure_mode=StructureMode.FLAT,
+        upgrade_action=UpgradeAction.DELETE,
+        path_exists=fake_exists,
+    )
+
+    assert import_plan[0].destination == os.path.normpath(
+        "/destination_root/song (1).mp3"
+    )
+
+
+def test_upgrade_in_place_overwrites(make_track):
+    def fake_exists(path: str) -> bool:
+        on_disk = {os.path.normpath("/destination_root/song.mp3")}
+        return path.casefold() in {p.casefold() for p in on_disk}
+
+    import_plan = plan_import(
+        missing=[],
+        upgrades=[
+            Match(
+                theirs=make_track(file_path="/source_root/song.mp3"),
+                mine=make_track(file_path="/destination_root/song.mp3"),
+            )
+        ],
+        source_root="/source_root",
+        destination_root="/destination_root",
+        structure_mode=StructureMode.FLAT,
+        upgrade_action=UpgradeAction.DELETE,
+        path_exists=fake_exists,
+    )
+
+    assert import_plan[0].destination == os.path.normpath("/destination_root/song.mp3")
+
+
+def test_upgrade_move_disambiguates_on_superseded(make_track):
+    def fake_exists(path: str) -> bool:
+        on_disk = {os.path.normpath("/destination_root/_superseded/song.mp3")}
+        return path.casefold() in {p.casefold() for p in on_disk}
+
+    import_plan = plan_import(
+        missing=[],
+        upgrades=[
+            Match(
+                theirs=make_track(file_path="/source_root/theirs.mp3"),
+                mine=make_track(file_path="/destination_root/song.mp3"),
+            )
+        ],
+        source_root="/source_root",
+        destination_root="/destination_root",
+        structure_mode=StructureMode.FLAT,
+        upgrade_action=UpgradeAction.MOVE,
+        path_exists=fake_exists,
+    )
+
+    assert import_plan[1].destination == os.path.normpath(
+        "/destination_root/_superseded/song (1).mp3"
+    )
+
+
+def test_upgrade_in_place_overwrites_with_mixed_case_name(make_track):
+    # Real filenames have capitals. The allow_path exception must match
+    # case-insensitively or the in-place upgrade gets disambiguated away.
+    def fake_exists(path: str) -> bool:
+        on_disk = {os.path.normpath("/destination_root/Creep.mp3")}
+        return path.casefold() in {p.casefold() for p in on_disk}
+
+    import_plan = plan_import(
+        missing=[],
+        upgrades=[
+            Match(
+                theirs=make_track(file_path="/source_root/Creep.mp3"),
+                mine=make_track(file_path="/destination_root/Creep.mp3"),
+            )
+        ],
+        source_root="/source_root",
+        destination_root="/destination_root",
+        structure_mode=StructureMode.FLAT,
+        upgrade_action=UpgradeAction.DELETE,
+        path_exists=fake_exists,
+    )
+
+    assert len(import_plan) == 1
+    assert import_plan[0].destination == os.path.normpath("/destination_root/Creep.mp3")
+    assert import_plan[0].overwrites is True

@@ -1,5 +1,6 @@
 import os
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from itertools import count
@@ -23,6 +24,7 @@ class PlannedOperation:
     destination: str | None
     action: ActionType
     group_id: int
+    overwrites: bool = False
 
 
 class OperationStatus(StrEnum):
@@ -51,18 +53,34 @@ def compute_destination(
     return os.path.normpath(os.path.join(destination_root, relative_path))
 
 
-def _disambiguate(destination: str, seen_destinations: set[str]) -> str:
-    if destination.casefold() not in seen_destinations:
+def _disambiguate(
+    destination: str,
+    seen_destinations: set[str],
+    path_exists: Callable[[str], bool],
+    allow_path: str | None,
+) -> str:
+    def path_used(candidate: str) -> bool:
+        folded = candidate.casefold()
+        if allow_path is not None and folded == allow_path.casefold():
+            return folded in seen_destinations
+        return folded in seen_destinations or path_exists(candidate)
+
+    if not path_used(destination):
         return destination
     base, ext = os.path.splitext(destination)
     n = 1
-    while f"{base} ({n}){ext}".casefold() in seen_destinations:
+    while path_used(f"{base} ({n}){ext}"):
         n += 1
     return f"{base} ({n}){ext}"
 
 
-def _register(destination: str, seen_destinations: set[str]) -> str:
-    destination = _disambiguate(destination, seen_destinations)
+def _register(
+    destination: str,
+    seen_destinations: set[str],
+    path_exists: Callable[[str], bool],
+    allow_path: str | None,
+) -> str:
+    destination = _disambiguate(destination, seen_destinations, path_exists, allow_path)
     seen_destinations.add(destination.casefold())
     return destination
 
@@ -74,6 +92,7 @@ def plan_import(
     destination_root: str,
     structure_mode: StructureMode,
     upgrade_action: UpgradeAction,
+    path_exists: Callable[[str], bool] = os.path.exists,
 ) -> list[PlannedOperation]:
     # Comparisons below use == / != rather than identity, so a raw string
     # ("delete") works as well as an UpgradeAction member. Don't switch to
@@ -86,7 +105,9 @@ def plan_import(
     operations: list[PlannedOperation] = []
     group_ids = count()
 
-    def plan_copy(track: Track, group_id: int) -> PlannedOperation:
+    def plan_copy(
+        track: Track, group_id: int, allow_path: str | None = None
+    ) -> PlannedOperation:
         destination = compute_destination(
             track, source_root, destination_root, structure_mode
         )
@@ -94,7 +115,7 @@ def plan_import(
             raise ValueError(
                 f"Destination {destination!r} escapes destination root {normalized_root!r}"
             )
-        destination = _register(destination, seen_destinations)
+        destination = _register(destination, seen_destinations, path_exists, allow_path)
         return PlannedOperation(
             source=track.file_path,
             destination=destination,
@@ -108,7 +129,7 @@ def plan_import(
                 destination_root, SUPERSEDED_DIR_NAME, os.path.basename(track.file_path)
             )
         )
-        destination = _register(destination, seen_destinations)
+        destination = _register(destination, seen_destinations, path_exists, None)
         return PlannedOperation(
             source=track.file_path,
             destination=destination,
@@ -122,7 +143,9 @@ def plan_import(
 
     for match in upgrades:
         group_id = next(group_ids)
-        copy_operation = plan_copy(match.theirs, group_id)
+        copy_operation = plan_copy(
+            match.theirs, group_id, os.path.normpath(match.mine.file_path)
+        )
 
         # An in-place upgrade overwrites mine's own file. Deleting that path
         # afterwards would remove the copy we just wrote.
@@ -130,6 +153,8 @@ def plan_import(
             copy_operation.destination.casefold()
             == os.path.normpath(match.mine.file_path).casefold()
         )
+        if replaced_in_place:
+            copy_operation.overwrites = True
 
         if upgrade_action == UpgradeAction.MOVE:
             move_operation = plan_move(match.mine, group_id)
