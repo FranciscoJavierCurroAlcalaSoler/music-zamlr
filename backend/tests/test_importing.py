@@ -545,6 +545,9 @@ def test_failed_copy_leaves_no_temp_file(tmp_path):
 
 
 def test_missing_disambiguates(make_track):
+    # The fake casefolds because it stands in for os.path.exists on
+    # Windows, which is case-insensitive. An exact-match fake would encode
+    # Linux semantics and hide case-related bugs.
     def fake_exists(path: str) -> bool:
         on_disk = {os.path.normpath("/destination_root/song.mp3")}
         return path.casefold() in {p.casefold() for p in on_disk}
@@ -588,6 +591,8 @@ def test_upgrade_in_place_overwrites(make_track):
 
 
 def test_upgrade_move_disambiguates_on_superseded(make_track):
+    # A previous run already parked a song.mp3 in _superseded, so this
+    # run's move must not overwrite it.
     def fake_exists(path: str) -> bool:
         on_disk = {os.path.normpath("/destination_root/_superseded/song.mp3")}
         return path.casefold() in {p.casefold() for p in on_disk}
@@ -613,8 +618,9 @@ def test_upgrade_move_disambiguates_on_superseded(make_track):
 
 
 def test_upgrade_in_place_overwrites_with_mixed_case_name(make_track):
-    # Real filenames have capitals. The allow_path exception must match
-    # case-insensitively or the in-place upgrade gets disambiguated away.
+    # Real filenames have capitals. The allow_path exception has to match
+    # case-insensitively, or the in-place upgrade gets disambiguated to
+    # Creep (1).mp3 while the delete branch still removes the original.
     def fake_exists(path: str) -> bool:
         on_disk = {os.path.normpath("/destination_root/Creep.mp3")}
         return path.casefold() in {p.casefold() for p in on_disk}
