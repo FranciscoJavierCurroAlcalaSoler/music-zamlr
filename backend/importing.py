@@ -20,17 +20,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from itertools import count
 
-from enums import StructureMode, UpgradeAction
+from enums import ActionType, StructureMode, UpgradeAction
 from matching import Match
 from models import Track
 
 SUPERSEDED_DIR_NAME = "_superseded"
-
-
-class ActionType(StrEnum):
-    COPY = "copy"
-    DELETE = "delete"
-    MOVE = "move"
 
 
 @dataclass
