@@ -1,4 +1,5 @@
 import pytest
+from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 from models import Collection, Track
@@ -6,7 +7,17 @@ from models import Collection, Track
 
 @pytest.fixture
 def engine():
-    engine = create_engine("sqlite://")
+    # TestClient dispatches sync endpoints to a worker thread, so the
+    # session created here gets used from a different thread than it was
+    # made in. check_same_thread=False lifts sqlite3's thread-ownership
+    # assertion, and StaticPool makes every checkout reuse the one
+    # connection, without which the worker thread would open a second
+    # connection and get an empty in-memory database.
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     SQLModel.metadata.create_all(engine)
     return engine
 
@@ -53,3 +64,20 @@ def make_track():
         return Track(**defaults)
 
     return _make_track
+
+
+@pytest.fixture
+def collections(session, tmp_path):
+    mine = Collection(name="mine", root_path=str(tmp_path / "mine"))
+    theirs = Collection(name="theirs", root_path=str(tmp_path / "theirs"))
+    session.add(mine)
+    session.add(theirs)
+    session.commit()
+    return mine, theirs
+
+
+@pytest.fixture
+def destination(tmp_path):
+    path = tmp_path / "dest"
+    path.mkdir()
+    return path
