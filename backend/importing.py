@@ -17,10 +17,9 @@ import os
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
-from enum import StrEnum
 from itertools import count
 
-from enums import ActionType, StructureMode, UpgradeAction
+from enums import ActionType, OperationStatus, StructureMode, UpgradeAction
 from matching import Match
 from models import Track
 
@@ -34,12 +33,6 @@ class PlannedOperation:
     action: ActionType
     group_id: int
     overwrites: bool = False
-
-
-class OperationStatus(StrEnum):
-    SUCCESS = "success"
-    FAILED = "failed"
-    SKIPPED = "skipped"
 
 
 @dataclass

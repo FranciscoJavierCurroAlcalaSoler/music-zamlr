@@ -22,3 +22,9 @@ class ActionType(StrEnum):
     COPY = "copy"
     DELETE = "delete"
     MOVE = "move"
+
+
+class OperationStatus(StrEnum):
+    SUCCESS = "success"
+    FAILED = "failed"
+    SKIPPED = "skipped"

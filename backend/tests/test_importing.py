@@ -2,10 +2,9 @@ import os
 
 import pytest
 
-from enums import StructureMode, UpgradeAction
+from enums import OperationStatus, StructureMode, UpgradeAction
 from importing import (
     ActionType,
-    OperationStatus,
     PlannedOperation,
     compute_destination,
     execute_plan,
