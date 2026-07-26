@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 
-from enums import ActionType, StructureMode, UpgradeAction
+from enums import ActionType, OperationStatus, StructureMode, UpgradeAction
 
 
 class TrackRead(BaseModel):
@@ -63,6 +63,14 @@ class PlannedOperationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class OperationResultRead(BaseModel):
+    operation: PlannedOperationRead
+    status: OperationStatus
+    error: str | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ImportPreviewRead(BaseModel):
     operations: list[PlannedOperationRead]
     operation_counts: dict[str, int]
@@ -77,3 +85,10 @@ class ImportRequest(BaseModel):
     destination_root: str
     structure_mode: StructureMode
     upgrade_action: UpgradeAction
+
+
+class ImportResultRead(BaseModel):
+    operations: list[OperationResultRead]
+    status_counts: dict[str, int]
+
+    model_config = ConfigDict(from_attributes=True)
