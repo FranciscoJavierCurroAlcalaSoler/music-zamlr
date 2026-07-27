@@ -60,6 +60,9 @@ def make_track():
             file_hash=None,
             collection_id=1,
         )
+        unknown = set(overrides) - set(defaults)
+        if unknown:
+            raise TypeError(f"make_track got unknown field(s): {sorted(unknown)}")
         defaults.update(overrides)
         return Track(**defaults)
 

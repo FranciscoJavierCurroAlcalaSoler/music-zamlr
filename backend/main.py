@@ -1,13 +1,15 @@
+import json
 import os
 from dataclasses import dataclass
+from datetime import datetime
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 
 from database import get_session
-from enums import ActionType
-from importing import PlannedOperation, plan_import
+from enums import ActionType, OperationStatus
+from importing import OperationResult, PlannedOperation, execute_plan, plan_import
 from matching import Match, MatchResult, match_collections
 from models import Collection, Track
 from schemas import (
@@ -15,6 +17,8 @@ from schemas import (
     DiffRead,
     ImportPreviewRead,
     ImportRequest,
+    ImportResultRead,
+    OperationResultRead,
     TrackRead,
 )
 
@@ -44,44 +48,56 @@ class DiffResult:
     match_counts: dict[str, int]
 
 
+def _load_collections(
+    session: Session, mine_id: int, theirs_id: int
+) -> tuple[Collection, Collection]:
+    """Load both collections, rejecting an unknown id or a self-comparison."""
+    if mine_id == theirs_id:
+        raise HTTPException(
+            status_code=400, detail="Cannot diff a collection against itself."
+        )
+    mine = session.get(Collection, mine_id)
+    theirs = session.get(Collection, theirs_id)
+    if mine is None or theirs is None:
+        raise HTTPException(status_code=404, detail="Collection not found.")
+    return mine, theirs
+
+
+def _run_diff(
+    session: Session, mine_collection: Collection, theirs_collection: Collection
+) -> MatchResult:
+    tracks_mine = session.exec(
+        select(Track).where(Track.collection_id == mine_collection.id)
+    ).all()
+    tracks_theirs = session.exec(
+        select(Track).where(Track.collection_id == theirs_collection.id)
+    ).all()
+    match_result = match_collections(tracks_mine, tracks_theirs)
+    session.commit()  # persist the hashes the matcher computed
+    return match_result
+
+
 @app.get("/api/diff", response_model=DiffRead)
 def diff_collections(
     mine: int,
     theirs: int,
     session: Session = Depends(get_session),
 ):
-    if mine == theirs:
-        raise HTTPException(
-            status_code=400, detail="Cannot diff a collection against itself."
-        )
+    mine_collection, theirs_collection = _load_collections(session, mine, theirs)
+    match_result = _run_diff(session, mine_collection, theirs_collection)
 
-    mine_collection = session.get(Collection, mine)
-    theirs_collection = session.get(Collection, theirs)
-    if mine_collection is None or theirs_collection is None:
-        raise HTTPException(status_code=404, detail="Collection not found.")
-
-    tracks_mine = session.exec(select(Track).where(Track.collection_id == mine)).all()
-    tracks_theirs = session.exec(
-        select(Track).where(Track.collection_id == theirs)
-    ).all()
-
-    result = match_collections(tracks_mine, tracks_theirs)
-
-    # persist the hashes the matcher computed
-    session.commit()
-
-    diff = DiffResult(
-        match_results=result,
+    diff_result = DiffResult(
+        match_results=match_result,
         match_counts=dict(
-            missing=len(result.missing),
-            upgrade_available=len(result.upgrade_available),
-            already_have=len(result.already_have),
-            needs_review=len(result.needs_review),
-            only_in_mine=len(result.only_in_mine),
+            missing=len(match_result.missing),
+            upgrade_available=len(match_result.upgrade_available),
+            already_have=len(match_result.already_have),
+            needs_review=len(match_result.needs_review),
+            only_in_mine=len(match_result.only_in_mine),
         ),
     )
 
-    return diff
+    return diff_result
 
 
 def _build_plan(request: ImportRequest, session: Session) -> list[PlannedOperation]:
@@ -97,15 +113,9 @@ def _build_plan(request: ImportRequest, session: Session) -> list[PlannedOperati
     becomes the bottleneck, persist the diff and reference it by id rather
     than moving classification to the client.
     """
-    mine = request.mine_collection_id
-    theirs = request.theirs_collection_id
+    mine_id = request.mine_collection_id
+    theirs_id = request.theirs_collection_id
     track_ids = set(request.track_ids)
-
-    if mine == theirs:
-        raise HTTPException(
-            status_code=400, detail="Cannot import from own collection."
-        )
-
     destination_root = request.destination_root
 
     if not os.path.isdir(destination_root):
@@ -116,39 +126,26 @@ def _build_plan(request: ImportRequest, session: Session) -> list[PlannedOperati
     if not os.access(destination_root, os.W_OK):
         raise HTTPException(status_code=400, detail="Destination root is not writable.")
 
-    mine_collection = session.get(Collection, mine)
-    theirs_collection = session.get(Collection, theirs)
-    if mine_collection is None or theirs_collection is None:
-        raise HTTPException(status_code=404, detail="Collection not found.")
-
-    tracks_mine = session.exec(select(Track).where(Track.collection_id == mine)).all()
-    tracks_theirs = session.exec(
-        select(Track).where(Track.collection_id == theirs)
-    ).all()
-
-    result = match_collections(tracks_mine, tracks_theirs)
-
-    # persist the hashes the matcher computed
-    session.commit()
+    mine_collection, theirs_collection = _load_collections(session, mine_id, theirs_id)
+    match_result = _run_diff(session, mine_collection, theirs_collection)
 
     missing: list[Track] = []
     upgrade_available: list[Match] = []
     placed_ids: set[int] = set()
-    rejected_ids: list[int] = []
 
-    for track in result.missing:
+    for track in match_result.missing:
         if track.id in track_ids:
             missing.append(track)
             placed_ids.add(track.id)
 
-    for match in result.upgrade_available:
+    for match in match_result.upgrade_available:
         if match.theirs.id in track_ids:
             upgrade_available.append(match)
             placed_ids.add(match.theirs.id)
 
     rejected_ids = sorted(track_ids - placed_ids)
 
-    if len(rejected_ids) > 0:
+    if rejected_ids:
         raise HTTPException(
             status_code=400,
             detail=f"Not import candidates (already have, needs review, or the diff changed): {', '.join(str(i) for i in rejected_ids)}",
@@ -194,3 +191,88 @@ def preview_import(
     )
 
     return preview
+
+
+@dataclass
+class ImportResult:
+    operations: list[OperationResult]
+    status_counts: dict[str, int]
+    log_path: str | None = None
+    log_error: str | None = None
+
+
+def _write_import_log(
+    destination_root: str, results: list[OperationResult]
+) -> tuple[str | None, str | None]:
+    log_path = None
+    log_error = None
+    candidate_path = os.path.join(
+        destination_root,
+        "import_log_" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".json",
+    )
+    try:
+        log_entries = [
+            OperationResultRead.model_validate(r).model_dump(mode="json")
+            for r in results
+        ]
+        with open(candidate_path, "w", encoding="utf-8") as log_file:
+            json.dump(log_entries, log_file, indent=2, ensure_ascii=False)
+        log_path = candidate_path
+    except OSError as error:
+        log_error = str(error)
+
+    return log_path, log_error
+
+
+@app.post("/api/import/execute", response_model=ImportResultRead)
+def execute_import(
+    request: ImportRequest,
+    session: Session = Depends(get_session),
+):
+
+    import_plan = _build_plan(request, session)
+
+    operation_results = execute_plan(import_plan)
+
+    # Successful deletes and moves leave rows pointing at files that no
+    # longer exist; the next diff would offer the same upgrade again and
+    # then fail on the delete. Copies deliberately get no rows: the
+    # destination root is any folder the user picked, so nothing guarantees
+    # it sits inside mine's collection tree. A re-scan is how they appear.
+    for result in operation_results:
+        if result.status == OperationStatus.SUCCESS and result.operation.action in (
+            ActionType.DELETE,
+            ActionType.MOVE,
+        ):
+            stale_track = session.exec(
+                select(Track).where(
+                    Track.collection_id == request.mine_collection_id,
+                    Track.file_path == result.operation.source,
+                )
+            ).first()
+            if stale_track is not None:
+                session.delete(stale_track)
+    session.commit()
+
+    (log_path, log_error) = _write_import_log(
+        request.destination_root, operation_results
+    )
+
+    import_result = ImportResult(
+        operations=operation_results,
+        status_counts={
+            "success": sum(
+                1 for r in operation_results if r.status == OperationStatus.SUCCESS
+            ),
+            "failed": sum(
+                1 for r in operation_results if r.status == OperationStatus.FAILED
+            ),
+            "skipped": sum(
+                1 for r in operation_results if r.status == OperationStatus.SKIPPED
+            ),
+        },
+        log_path=log_path,
+        log_error=log_error,
+    )
+
+    return import_result

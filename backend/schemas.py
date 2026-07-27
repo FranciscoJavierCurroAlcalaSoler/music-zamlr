@@ -66,7 +66,7 @@ class PlannedOperationRead(BaseModel):
 class OperationResultRead(BaseModel):
     operation: PlannedOperationRead
     status: OperationStatus
-    error: str | None
+    error: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -90,5 +90,7 @@ class ImportRequest(BaseModel):
 class ImportResultRead(BaseModel):
     operations: list[OperationResultRead]
     status_counts: dict[str, int]
+    log_path: str | None = None
+    log_error: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
