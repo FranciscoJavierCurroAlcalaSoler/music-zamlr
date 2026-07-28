@@ -1,7 +1,9 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Alert, Box, Select, MenuItem, InputLabel, Stack, FormControl, Button, ToggleButton, ToggleButtonGroup, Tabs, Tab } from "@mui/material";
-import { DataGrid, type GridColDef } from '@mui/x-data-grid';
+import { Alert, Box, Select, MenuItem, InputLabel, Stack, FormControl, Button, ToggleButton, ToggleButtonGroup, Tabs, Tab, Typography } from "@mui/material";
+import { DataGrid } from '@mui/x-data-grid';
+import type { GridColDef, GridRowSelectionModel, GridRowParams } from "@mui/x-data-grid";
 import type { Track, Match, Collection, Diff } from '../types';
+
 
 type BucketKey = 'missing' | 'upgrade_available' | 'already_have' | 'needs_review';
 
@@ -59,6 +61,10 @@ export function DiffView() {
   const [diff, setDiff] = useState<Diff | null>(null);
   const [bucket, setBucket] = useState<BucketKey | 'all'>('all');
   const [tab, setTab] = useState(0);
+  const [selection, setSelection] = useState<GridRowSelectionModel>({
+    type: "include",
+    ids: new Set(),
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -135,6 +141,7 @@ export function DiffView() {
   async function runDiff() {
     setLoadingDiff(true);
     setError(null);
+    setSelection({ type: "include", ids: new Set() });
     try {
         const res = await fetch(`http://localhost:8000/api/diff?mine=${mineId}&theirs=${theirsId}`);
         if (!res.ok) {
@@ -210,7 +217,21 @@ export function DiffView() {
                 <ToggleButton value="already_have">Already have ({diff.match_counts.already_have})</ToggleButton>
                 <ToggleButton value="needs_review">Needs review ({diff.match_counts.needs_review})</ToggleButton>
               </ToggleButtonGroup>
-              <DataGrid rows={visibleRows} columns={columns} loading={loadingDiff} sx={{ flex: 1, minHeight: 0 }} />
+              <Typography variant="body2">{selection.ids.size} selected</Typography>
+              <DataGrid
+                rows={visibleRows}
+                columns={columns}
+                loading={loadingDiff}
+                checkboxSelection
+                disableRowSelectionExcludeModel
+                keepNonExistentRowsSelected
+                rowSelectionModel={selection}
+                onRowSelectionModelChange={setSelection}
+                isRowSelectable={(params: GridRowParams) =>
+                  params.row.bucket === 'missing' || params.row.bucket === 'upgrade_available'
+                }
+                sx={{ flex: 1, minHeight: 0 }}
+              />
             </>
           )}
 
