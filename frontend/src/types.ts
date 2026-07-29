@@ -42,3 +42,12 @@ export interface Diff {
     only_in_mine: number;
   };
 }
+
+export type StructureMode = 'mirror' | 'flat';
+export type UpgradeAction = 'delete' | 'keep_both' | 'move';
+
+export interface ImportSettingsValues {
+  destinationRoot: string;
+  structureMode: StructureMode;
+  upgradeAction: UpgradeAction;
+}

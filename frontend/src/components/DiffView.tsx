@@ -3,7 +3,7 @@ import { Alert, Box, Select, MenuItem, InputLabel, Stack, FormControl, Button, T
 import { DataGrid } from '@mui/x-data-grid';
 import type { GridColDef, GridRowSelectionModel, GridRowParams } from "@mui/x-data-grid";
 import type { Track, Match, Collection, Diff } from '../types';
-
+import { ImportSettings } from './ImportSettings';
 
 type BucketKey = 'missing' | 'upgrade_available' | 'already_have' | 'needs_review';
 
@@ -231,6 +231,13 @@ export function DiffView() {
                   params.row.bucket === 'missing' || params.row.bucket === 'upgrade_available'
                 }
                 sx={{ flex: 1, minHeight: 0 }}
+              />
+              <ImportSettings
+                disabled={selection.ids.size === 0}
+                onPreview={(settings) => {
+                  console.log('settings', settings);
+                  console.log('track ids', [...selection.ids]);
+                }}
               />
             </>
           )}
