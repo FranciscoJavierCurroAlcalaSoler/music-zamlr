@@ -4,6 +4,7 @@ import { DataGrid } from '@mui/x-data-grid';
 import type { GridColDef, GridRowSelectionModel, GridRowParams } from "@mui/x-data-grid";
 import type { Track, Match, Collection, Diff, PlannedOperation, ImportPreview, ImportSettingsValues } from '../types';
 import { ImportSettings } from './ImportSettings';
+import { ImportPreviewDialog } from './ImportPreviewDialog';
 
 type BucketKey = 'missing' | 'upgrade_available' | 'already_have' | 'needs_review';
 
@@ -190,91 +191,99 @@ export function DiffView() {
   }
 
   return (
-    <Box>
-      {error && <Alert severity="error">Error: {error}</Alert>}
-      <Stack direction="row" spacing={2}>
-        <FormControl fullWidth>
-          <InputLabel id="mine-label">My collection</InputLabel>
-          <Select
-            labelId="mine-label"
-            value={mineId}
-            label="My collection"
-            onChange={(e) => setMineId(Number(e.target.value))}
-          >
-            {collections.map((c) => (
-              <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <FormControl fullWidth>
-          <InputLabel id="theirs-label">Their collection</InputLabel>
-          <Select
-            labelId="theirs-label"
-            value={theirsId}
-            label="Their collection"
-            onChange={(e) => setTheirsId(Number(e.target.value))}
-          >
-            {collections.map((c) => (
-              <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Stack>
-      <Button
-        variant="contained"
-        disabled={loadingCollections || loadingDiff || mineId === "" || mineId === 0 || theirsId === "" || theirsId === 0 || mineId === theirsId}
-        onClick={runDiff}
-      >
-        {loadingDiff ? "Comparing…" : "Compare"}
-      </Button>
-      {diff && (
-        <Box sx={{ height: 600, width: '100%', display: 'flex', flexDirection: 'column' }}>
-          <Tabs value={tab} onChange={(_, next) => setTab(next)}>
-            <Tab label={`Import candidates (${rows.length})`} />
-            <Tab label={`Only in mine (${diff.match_counts.only_in_mine})`} />
-          </Tabs>
+    <>
+      <Box>
+        {error && <Alert severity="error">Error: {error}</Alert>}
+        <Stack direction="row" spacing={2}>
+          <FormControl fullWidth>
+            <InputLabel id="mine-label">My collection</InputLabel>
+            <Select
+              labelId="mine-label"
+              value={mineId}
+              label="My collection"
+              onChange={(e) => setMineId(Number(e.target.value))}
+            >
+              {collections.map((c) => (
+                <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <FormControl fullWidth>
+            <InputLabel id="theirs-label">Their collection</InputLabel>
+            <Select
+              labelId="theirs-label"
+              value={theirsId}
+              label="Their collection"
+              onChange={(e) => setTheirsId(Number(e.target.value))}
+            >
+              {collections.map((c) => (
+                <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Stack>
+        <Button
+          variant="contained"
+          disabled={loadingCollections || loadingDiff || mineId === "" || mineId === 0 || theirsId === "" || theirsId === 0 || mineId === theirsId}
+          onClick={runDiff}
+        >
+          {loadingDiff ? "Comparing…" : "Compare"}
+        </Button>
+        {diff && (
+          <Box sx={{ height: 600, width: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Tabs value={tab} onChange={(_, next) => setTab(next)}>
+              <Tab label={`Import candidates (${rows.length})`} />
+              <Tab label={`Only in mine (${diff.match_counts.only_in_mine})`} />
+            </Tabs>
 
-          {tab === 0 && (
-            <>
-              <ToggleButtonGroup
-                value={bucket}
-                exclusive
-                onChange={(_, next) => { if (next !== null) setBucket(next); }}
-                size="small"
-              >
-                <ToggleButton value="all">All ({rows.length})</ToggleButton>
-                <ToggleButton value="missing">Missing ({diff.match_counts.missing})</ToggleButton>
-                <ToggleButton value="upgrade_available">Upgrades ({diff.match_counts.upgrade_available})</ToggleButton>
-                <ToggleButton value="already_have">Already have ({diff.match_counts.already_have})</ToggleButton>
-                <ToggleButton value="needs_review">Needs review ({diff.match_counts.needs_review})</ToggleButton>
-              </ToggleButtonGroup>
-              <Typography variant="body2">{selection.ids.size} selected</Typography>
-              <DataGrid
-                rows={visibleRows}
-                columns={columns}
-                loading={loadingDiff}
-                checkboxSelection
-                disableRowSelectionExcludeModel
-                keepNonExistentRowsSelected
-                rowSelectionModel={selection}
-                onRowSelectionModelChange={setSelection}
-                isRowSelectable={(params: GridRowParams) =>
-                  params.row.bucket === 'missing' || params.row.bucket === 'upgrade_available'
-                }
-                sx={{ flex: 1, minHeight: 0 }}
-              />
-              <ImportSettings
-                disabled={selection.ids.size === 0}
-                loading={previewing}
-                onPreview={runPreview}
-              />
-            </>
-          )}
+            {tab === 0 && (
+              <>
+                <ToggleButtonGroup
+                  value={bucket}
+                  exclusive
+                  onChange={(_, next) => { if (next !== null) setBucket(next); }}
+                  size="small"
+                >
+                  <ToggleButton value="all">All ({rows.length})</ToggleButton>
+                  <ToggleButton value="missing">Missing ({diff.match_counts.missing})</ToggleButton>
+                  <ToggleButton value="upgrade_available">Upgrades ({diff.match_counts.upgrade_available})</ToggleButton>
+                  <ToggleButton value="already_have">Already have ({diff.match_counts.already_have})</ToggleButton>
+                  <ToggleButton value="needs_review">Needs review ({diff.match_counts.needs_review})</ToggleButton>
+                </ToggleButtonGroup>
+                <Typography variant="body2">{selection.ids.size} selected</Typography>
+                <DataGrid
+                  rows={visibleRows}
+                  columns={columns}
+                  loading={loadingDiff}
+                  checkboxSelection
+                  disableRowSelectionExcludeModel
+                  keepNonExistentRowsSelected
+                  rowSelectionModel={selection}
+                  onRowSelectionModelChange={setSelection}
+                  isRowSelectable={(params: GridRowParams) =>
+                    params.row.bucket === 'missing' || params.row.bucket === 'upgrade_available'
+                  }
+                  sx={{ flex: 1, minHeight: 0 }}
+                />
+                <ImportSettings
+                  disabled={selection.ids.size === 0}
+                  loading={previewing}
+                  onPreview={runPreview}
+                />
+              </>
+            )}
 
-          {tab === 1 && (
-            <DataGrid rows={onlyInMineRows} columns={onlyInMineColumns} loading={loadingDiff} sx={{ flex: 1, minHeight: 0 }} />
-          )}
-        </Box>
-      )}
-    </Box>);
+            {tab === 1 && (
+              <DataGrid rows={onlyInMineRows} columns={onlyInMineColumns} loading={loadingDiff} sx={{ flex: 1, minHeight: 0 }} />
+            )}
+          </Box>
+        )}
+      </Box>
+      <ImportPreviewDialog
+        preview={preview}
+        onCancel={() => setPreview(null)}
+        onConfirm={() => console.log('confirmed')}
+      />  
+    </>
+  );
 }
