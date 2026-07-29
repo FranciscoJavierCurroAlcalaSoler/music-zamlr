@@ -51,3 +51,16 @@ export interface ImportSettingsValues {
   structureMode: StructureMode;
   upgradeAction: UpgradeAction;
 }
+
+export interface PlannedOperation {
+  source: string;
+  destination: string | null;
+  action: 'copy' | 'delete' | 'move';
+  group_id: number;
+  overwrites: boolean;
+}
+
+export interface ImportPreview {
+  operations: PlannedOperation[];
+  operation_counts: Record<string, number>;
+}

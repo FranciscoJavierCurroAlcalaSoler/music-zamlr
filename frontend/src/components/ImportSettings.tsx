@@ -7,10 +7,11 @@ import type { ImportSettingsValues, StructureMode, UpgradeAction } from '../type
 
 interface ImportSettingsProps {
   disabled: boolean;
+  loading: boolean;
   onPreview: (settings: ImportSettingsValues) => void;
 }
 
-export function ImportSettings({ disabled, onPreview }: ImportSettingsProps) {
+export function ImportSettings({ disabled, loading, onPreview }: ImportSettingsProps) {
   const [destinationRoot, setDestinationRoot] = useState('');
   const [structureMode, setStructureMode] = useState<StructureMode>('mirror');
   const [upgradeAction, setUpgradeAction] = useState<UpgradeAction>('keep_both');
@@ -49,10 +50,10 @@ export function ImportSettings({ disabled, onPreview }: ImportSettingsProps) {
         </FormControl>
         <Button
         variant="contained"
-        disabled={disabled || destinationRoot.trim() === ''}
+        disabled={disabled || loading || destinationRoot.trim() === ''}
         onClick={() => onPreview({ destinationRoot, structureMode, upgradeAction })}
         >
-        Preview import
+        {loading ? 'Previewing...' : 'Preview import' }
         </Button>
     </Stack>
   )

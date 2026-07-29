@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { Alert, Box, Select, MenuItem, InputLabel, Stack, FormControl, Button, ToggleButton, ToggleButtonGroup, Tabs, Tab, Typography } from "@mui/material";
 import { DataGrid } from '@mui/x-data-grid';
 import type { GridColDef, GridRowSelectionModel, GridRowParams } from "@mui/x-data-grid";
-import type { Track, Match, Collection, Diff } from '../types';
+import type { Track, Match, Collection, Diff, PlannedOperation, ImportPreview, ImportSettingsValues } from '../types';
 import { ImportSettings } from './ImportSettings';
 
 type BucketKey = 'missing' | 'upgrade_available' | 'already_have' | 'needs_review';
@@ -65,6 +65,8 @@ export function DiffView() {
     type: "include",
     ids: new Set(),
   });
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [previewing, setPreviewing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -158,6 +160,35 @@ export function DiffView() {
     }
   }
 
+  async function runPreview(settings: ImportSettingsValues) {
+    setPreviewing(true);
+    setError(null);
+    try {
+      const res = await fetch('http://localhost:8000/api/import/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          track_ids: [...selection.ids],
+          mine_collection_id: mineId,
+          theirs_collection_id: theirsId,
+          destination_root: settings.destinationRoot,
+          structure_mode: settings.structureMode,
+          upgrade_action: settings.upgradeAction,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json();
+        setError(body.detail ?? 'Preview failed');
+        return;
+      }
+      setPreview(await res.json());
+    } catch {
+      setError('Could not reach the server');
+    } finally {
+      setPreviewing(false);
+    }
+  }
+
   return (
     <Box>
       {error && <Alert severity="error">Error: {error}</Alert>}
@@ -234,10 +265,8 @@ export function DiffView() {
               />
               <ImportSettings
                 disabled={selection.ids.size === 0}
-                onPreview={(settings) => {
-                  console.log('settings', settings);
-                  console.log('track ids', [...selection.ids]);
-                }}
+                loading={previewing}
+                onPreview={runPreview}
               />
             </>
           )}
