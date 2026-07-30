@@ -642,3 +642,43 @@ def test_upgrade_in_place_overwrites_with_mixed_case_name(make_track):
     assert len(import_plan) == 1
     assert import_plan[0].destination == os.path.normpath("/destination_root/Creep.mp3")
     assert import_plan[0].overwrites is True
+
+
+def test_keep_both_disambiguates_around_my_existing_file(make_track):
+    # Same-format bitrate upgrade in mirror mode: theirs computes to exactly
+    # mine's path. keep_both must not land on it, or the file the user asked
+    # to keep is overwritten. allow_path waives the disk check and belongs to
+    # delete and move only.
+    def fake_exists(path: str) -> bool:
+        on_disk = {os.path.normpath("/destination_root/Radiohead/Creep.mp3")}
+        return path.casefold() in {p.casefold() for p in on_disk}
+
+    import_plan = plan_import(
+        missing=[],
+        upgrades=[
+            Match(
+                mine=make_track(
+                    file_path="/destination_root/Radiohead/Creep.mp3",
+                    format="MP3",
+                    bit_rate=128000,
+                ),
+                theirs=make_track(
+                    file_path="/source_root/Radiohead/Creep.mp3",
+                    format="MP3",
+                    bit_rate=320000,
+                ),
+            )
+        ],
+        source_root="/source_root",
+        destination_root="/destination_root",
+        structure_mode=StructureMode.MIRROR,
+        upgrade_action=UpgradeAction.KEEP_BOTH,
+        path_exists=fake_exists,
+    )
+
+    assert len(import_plan) == 1
+    assert import_plan[0].action == ActionType.COPY
+    assert import_plan[0].destination == os.path.normpath(
+        "/destination_root/Radiohead/Creep (1).mp3"
+    )
+    assert import_plan[0].overwrites is False

@@ -205,11 +205,16 @@ def plan_import(
 
     for match in upgrades:
         group_id = next(group_ids)
-        # mine's own file is the one existing path this copy may claim,
-        # because replacing it is exactly what the user asked for.
-        copy_operation = plan_copy(
-            match.theirs, group_id, os.path.normpath(match.mine.file_path)
+        # allow_path waives the disk-collision check for the one file being
+        # replaced. keep_both replaces nothing, so it must not waive it:
+        # otherwise a same-extension upgrade lands on mine's own path and
+        # overwrites the file the user asked to keep.
+        allow_path = (
+            None
+            if upgrade_action == UpgradeAction.KEEP_BOTH
+            else os.path.normpath(match.mine.file_path)
         )
+        copy_operation = plan_copy(match.theirs, group_id, allow_path)
 
         # An in-place upgrade overwrites mine's own file. Deleting that path
         # afterwards would remove the copy we just wrote. Both sides are
