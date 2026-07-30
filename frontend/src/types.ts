@@ -43,8 +43,8 @@ export interface Diff {
   };
 }
 
-export type StructureMode = 'mirror' | 'flat';
-export type UpgradeAction = 'delete' | 'keep_both' | 'move';
+export type StructureMode = "mirror" | "flat";
+export type UpgradeAction = "delete" | "keep_both" | "move";
 
 export interface ImportSettingsValues {
   destinationRoot: string;
@@ -55,7 +55,7 @@ export interface ImportSettingsValues {
 export interface PlannedOperation {
   source: string;
   destination: string | null;
-  action: 'copy' | 'delete' | 'move';
+  action: "copy" | "delete" | "move";
   group_id: number;
   overwrites: boolean;
 }

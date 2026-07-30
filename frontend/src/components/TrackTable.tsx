@@ -1,14 +1,14 @@
-import { useEffect, useState } from 'react';
-import { DataGrid, type GridColDef } from '@mui/x-data-grid';
-import { Alert, Box } from '@mui/material';
-import type { Track } from '../types';
+import { useEffect, useState } from "react";
+import { DataGrid, type GridColDef } from "@mui/x-data-grid";
+import { Alert, Box } from "@mui/material";
+import type { Track } from "../types";
 
 const columns: GridColDef[] = [
-  { field: 'title', headerName: 'Title', flex: 1 },
-  { field: 'artist', headerName: 'Artist', flex: 1 },
-  { field: 'album', headerName: 'Album', flex: 1 },
-  { field: 'format', headerName: 'Format', width: 90 },
-  { field: 'bit_rate', headerName: 'Bitrate', width: 100 },
+  { field: "title", headerName: "Title", flex: 1 },
+  { field: "artist", headerName: "Artist", flex: 1 },
+  { field: "album", headerName: "Album", flex: 1 },
+  { field: "format", headerName: "Format", width: 90 },
+  { field: "bit_rate", headerName: "Bitrate", width: 100 },
 ];
 
 export function TrackTable() {
@@ -19,7 +19,7 @@ export function TrackTable() {
   useEffect(() => {
     let cancelled = false;
 
-    fetch('http://localhost:8000/api/tracks')
+    fetch("http://localhost:8000/api/tracks")
       .then((res) => {
         if (!res.ok) {
           throw new Error(`Server responded with ${res.status}`);
@@ -46,7 +46,7 @@ export function TrackTable() {
   }
 
   return (
-    <Box sx={{ height: 600, width: '100%' }}>
+    <Box sx={{ height: 600, width: "100%" }}>
       <DataGrid rows={tracks} columns={columns} loading={loading} />
     </Box>
   );
