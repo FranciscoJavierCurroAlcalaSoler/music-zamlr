@@ -31,6 +31,7 @@ import type {
 } from "../types";
 import { ImportSettings } from "./ImportSettings";
 import { ImportPreviewDialog } from "./ImportPreviewDialog";
+import { ImportResultView } from "./ImportResultView";
 
 type BucketKey =
   | "missing"
@@ -253,9 +254,10 @@ export function DiffView() {
         return;
       }
       const data: ImportResult = await res.json();
-      console.log("import result", data);
       setPreview(null);
       setResult(data);
+      setDiff(null);
+      setSelection({ type: "include", ids: new Set() });
     } catch {
       setImportError("Could not reach the server");
     } finally {
@@ -393,6 +395,7 @@ export function DiffView() {
             />
           </>
         )}
+        <ImportResultView result={result} onDismiss={() => setResult(null)} />
       </Box>
       <ImportPreviewDialog
         preview={preview}
