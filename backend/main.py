@@ -206,9 +206,11 @@ def _write_import_log(
 ) -> tuple[str | None, str | None]:
     log_path = None
     log_error = None
-    candidate_path = os.path.join(
-        destination_root,
-        "import_log_" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".json",
+    candidate_path = os.path.normpath(
+        os.path.join(
+            destination_root,
+            "import_log_" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".json",
+        )
     )
     try:
         log_entries = [

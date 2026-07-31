@@ -174,6 +174,44 @@ def test_empty_track_ids_returns_422(client, collections, destination):
     assert response.status_code == 422
 
 
+def test_empty_destination_root_returns_422(client, collections):
+    # normpath("") is ".", a real writable directory, so an empty root that
+    # reached the endpoint's isdir and access checks would pass them and
+    # import into the server's working directory. The schema rejects it
+    # before normalizing, which is why this is a 422 and not a 400.
+    mine, theirs = collections
+
+    response = client.post(
+        "/api/import/preview",
+        json={
+            "track_ids": [1],
+            "mine_collection_id": mine.id,
+            "theirs_collection_id": theirs.id,
+            "destination_root": "",
+            "structure_mode": "flat",
+            "upgrade_action": "keep_both",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_whitespace_destination_root_returns_422(client, collections):
+    mine, theirs = collections
+    response = client.post(
+        "/api/import/preview",
+        json={
+            "track_ids": [1],
+            "mine_collection_id": mine.id,
+            "theirs_collection_id": theirs.id,
+            "destination_root": "   ",
+            "structure_mode": "flat",
+            "upgrade_action": "keep_both",
+        },
+    )
+    assert response.status_code == 422
+
+
 def test_execute_copies_a_missing_track(
     client, session, tmp_path, make_track, collections, destination
 ):

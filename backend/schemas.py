@@ -1,4 +1,6 @@
-from pydantic import BaseModel, ConfigDict, Field
+import os
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from enums import ActionType, OperationStatus, StructureMode, UpgradeAction
 
@@ -85,6 +87,22 @@ class ImportRequest(BaseModel):
     destination_root: str
     structure_mode: StructureMode
     upgrade_action: UpgradeAction
+
+    @field_validator("destination_root")
+    @classmethod
+    def normalize_destination_root(cls, value: str) -> str:
+        # Normalizing here rather than in the endpoint because two functions
+        # read this field, and normalizing in one would leave the other with
+        # the raw string. normpath is pure string manipulation, so the schema
+        # still needs no filesystem to be tested.
+        #
+        # The empty check must come first: normpath("") is ".", which is a
+        # real writable directory, so an empty root would pass the endpoint's
+        # isdir and access checks and import into the server's working
+        # directory instead of failing.
+        if not value.strip():
+            raise ValueError("destination_root must not be empty")
+        return os.path.normpath(value)
 
 
 class ImportResultRead(BaseModel):
