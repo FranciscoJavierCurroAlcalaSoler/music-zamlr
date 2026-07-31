@@ -1,5 +1,6 @@
 export interface Track {
   id: number;
+  collection_id: number;
   file_path: string;
   artist: string | null;
   album: string | null;
@@ -63,4 +64,17 @@ export interface PlannedOperation {
 export interface ImportPreview {
   operations: PlannedOperation[];
   operation_counts: Record<string, number>;
+}
+
+export interface OperationResult {
+  operation: PlannedOperation;
+  status: "success" | "failed" | "skipped";
+  error: string | null;
+}
+
+export interface ImportResult {
+  operations: OperationResult[];
+  status_counts: Record<string, number>;
+  log_path: string | null;
+  log_error: string | null;
 }

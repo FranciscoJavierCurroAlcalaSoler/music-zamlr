@@ -18,6 +18,7 @@ import type { ImportPreview } from "../types";
 interface ImportPreviewDialogProps {
   preview: ImportPreview | null;
   destinationRoot: string;
+  executing: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }
@@ -44,6 +45,7 @@ function describeDestructive(counts: Record<string, number>): string {
   if (counts.delete) parts.push(`delete ${counts.delete}`);
   if (counts.move) parts.push(`move aside ${counts.move}`);
   if (counts.overwrites) parts.push(`overwrite ${counts.overwrites}`);
+  if (parts.length === 0) return "";
   const list =
     parts.length === 1
       ? parts[0]
@@ -54,6 +56,7 @@ function describeDestructive(counts: Record<string, number>): string {
 export function ImportPreviewDialog({
   preview,
   destinationRoot,
+  executing,
   onCancel,
   onConfirm,
 }: ImportPreviewDialogProps) {
@@ -62,7 +65,12 @@ export function ImportPreviewDialog({
     (counts?.delete ?? 0) + (counts?.move ?? 0) + (counts?.overwrites ?? 0);
 
   return (
-    <Dialog open={preview !== null} onClose={onCancel} maxWidth="md" fullWidth>
+    <Dialog
+      open={preview !== null}
+      onClose={executing ? undefined : onCancel}
+      maxWidth="md"
+      fullWidth
+    >
       <DialogTitle>Confirm import</DialogTitle>
       <DialogContent dividers>
         {counts && (
@@ -133,9 +141,11 @@ export function ImportPreviewDialog({
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onCancel}>Cancel</Button>
-        <Button variant="contained" onClick={onConfirm}>
-          Import
+        <Button onClick={onCancel} disabled={executing}>
+          Cancel
+        </Button>
+        <Button variant="contained" onClick={onConfirm} disabled={executing}>
+          {executing ? "Importing…" : "Import"}
         </Button>
       </DialogActions>
     </Dialog>

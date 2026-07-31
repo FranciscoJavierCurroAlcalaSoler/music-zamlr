@@ -27,12 +27,16 @@ import type {
   Diff,
   ImportPreview,
   ImportSettingsValues,
+  ImportResult,
 } from "../types";
 import { ImportSettings } from "./ImportSettings";
 import { ImportPreviewDialog } from "./ImportPreviewDialog";
 
 type BucketKey =
-  "missing" | "upgrade_available" | "already_have" | "needs_review";
+  | "missing"
+  | "upgrade_available"
+  | "already_have"
+  | "needs_review";
 
 interface DiffRow {
   id: number;
@@ -82,7 +86,8 @@ export function DiffView() {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [loadingCollections, setLoadingCollections] = useState(true);
   const [loadingDiff, setLoadingDiff] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [diffError, setDiffError] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
   const [mineId, setMineId] = useState<number | "">("");
   const [theirsId, setTheirsId] = useState<number | "">("");
   const [diff, setDiff] = useState<Diff | null>(null);
@@ -97,6 +102,8 @@ export function DiffView() {
   const [lastSettings, setLastSettings] = useState<ImportSettingsValues | null>(
     null,
   );
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const [executing, setExecuting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -112,7 +119,7 @@ export function DiffView() {
         if (!cancelled) setCollections(data);
       })
       .catch((err) => {
-        if (!cancelled) setError(err.message);
+        if (!cancelled) setDiffError(err.message);
       })
       .finally(() => {
         if (!cancelled) setLoadingCollections(false);
@@ -173,7 +180,7 @@ export function DiffView() {
 
   async function runDiff() {
     setLoadingDiff(true);
-    setError(null);
+    setDiffError(null);
     setSelection({ type: "include", ids: new Set() });
     setPreview(null);
     setLastSettings(null);
@@ -183,52 +190,83 @@ export function DiffView() {
       );
       if (!res.ok) {
         const body = await res.json();
-        setError(body.detail ?? "Diff failed");
+        setDiffError(body.detail ?? "Diff failed");
         return;
       }
       const data: Diff = await res.json();
       setDiff(data);
     } catch {
-      setError("Could not reach the server");
+      setDiffError("Could not reach the server");
     } finally {
       setLoadingDiff(false);
     }
   }
 
+  function importRequestBody(settings: ImportSettingsValues) {
+    return {
+      track_ids: [...selection.ids],
+      mine_collection_id: mineId,
+      theirs_collection_id: theirsId,
+      destination_root: settings.destinationRoot,
+      structure_mode: settings.structureMode,
+      upgrade_action: settings.upgradeAction,
+    };
+  }
+
   async function runPreview(settings: ImportSettingsValues) {
     setLastSettings(settings);
     setPreviewing(true);
-    setError(null);
+    setImportError(null);
     try {
       const res = await fetch("http://localhost:8000/api/import/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          track_ids: [...selection.ids],
-          mine_collection_id: mineId,
-          theirs_collection_id: theirsId,
-          destination_root: settings.destinationRoot,
-          structure_mode: settings.structureMode,
-          upgrade_action: settings.upgradeAction,
-        }),
+        body: JSON.stringify(importRequestBody(settings)),
       });
       if (!res.ok) {
         const body = await res.json();
-        setError(body.detail ?? "Preview failed");
+        setImportError(body.detail ?? "Preview failed");
         return;
       }
       setPreview(await res.json());
     } catch {
-      setError("Could not reach the server");
+      setImportError("Could not reach the server");
     } finally {
       setPreviewing(false);
+    }
+  }
+
+  async function runExecute() {
+    if (lastSettings === null) return;
+
+    setExecuting(true);
+    setImportError(null);
+    try {
+      const res = await fetch("http://localhost:8000/api/import/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(importRequestBody(lastSettings)),
+      });
+      if (!res.ok) {
+        const body = await res.json();
+        setImportError(body.detail ?? "Import failed");
+        return;
+      }
+      const data: ImportResult = await res.json();
+      console.log("import result", data);
+      setPreview(null);
+      setResult(data);
+    } catch {
+      setImportError("Could not reach the server");
+    } finally {
+      setExecuting(false);
     }
   }
 
   return (
     <>
       <Box>
-        {error && <Alert severity="error">Error: {error}</Alert>}
+        {diffError && <Alert severity="error">Error: {diffError}</Alert>}
         <Stack direction="row" spacing={2}>
           <FormControl fullWidth>
             <InputLabel id="mine-label">My collection</InputLabel>
@@ -350,7 +388,7 @@ export function DiffView() {
             <ImportSettings
               disabled={selection.ids.size === 0}
               loading={previewing}
-              error={error}
+              error={importError}
               onPreview={runPreview}
             />
           </>
@@ -359,8 +397,9 @@ export function DiffView() {
       <ImportPreviewDialog
         preview={preview}
         destinationRoot={lastSettings?.destinationRoot ?? ""}
+        executing={executing}
         onCancel={() => setPreview(null)}
-        onConfirm={() => console.log("confirmed")}
+        onConfirm={runExecute}
       />
     </>
   );
