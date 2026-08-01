@@ -102,7 +102,9 @@ export function ImportResultView({ result, onDismiss }: ImportResultViewProps) {
                 {op.operation.source.split(/[\\/]/).pop()}
               </TableCell>
               <TableCell sx={{ wordBreak: "break-all" }}>
-                {op.error ?? op.operation.destination ?? ""}
+                {op.status === "skipped"
+                  ? "not attempted"
+                  : (op.error ?? op.operation.destination ?? "")}
               </TableCell>
             </TableRow>
           ))}
