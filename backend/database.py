@@ -19,16 +19,8 @@ def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
 
 
-def create_collection(collection: Collection, engine):
-    with Session(engine) as session:
-        session.add(collection)
-        session.commit()
-        session.refresh(collection)
+def create_collection(collection: Collection, session: Session) -> Collection:
+    session.add(collection)
+    session.commit()
+    session.refresh(collection)
     return collection
-
-
-def database_commit(batch, engine):
-    with Session(engine) as session:
-        for track in batch:
-            session.add(track)
-        session.commit()

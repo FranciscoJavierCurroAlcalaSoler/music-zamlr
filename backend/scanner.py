@@ -1,11 +1,14 @@
 import logging
 import os
 import sys
+from dataclasses import dataclass, field
 from datetime import datetime
 
 import mutagen
+from sqlmodel import Session, select
 
-from database import create_collection, create_db_and_tables, database_commit, engine
+from database import create_collection, create_db_and_tables, engine
+from importing import SUPERSEDED_DIR_NAME
 from models import Collection, Track
 
 logging.basicConfig(level=logging.INFO)
@@ -63,47 +66,147 @@ def read_track(file_path: str, collection_id: int) -> Track | None:
 
 ALLOWED_EXTENSIONS = {".mp3", ".flac"}  # placeholder, config file comes later
 BATCH_SIZE = 100  # placeholder, config file comes later
+SCANNED_FIELDS = (
+    "file_size",
+    "bit_rate",
+    "sample_rate",
+    "duration",
+    "title",
+    "artist",
+    "album",
+    "track_number",
+    "year",
+    "bit_depth",
+)
 
 
-def scan_folder(folder_path: str, collection_id: int, engine) -> dict:
-    # Known limitation: scanning the same folder twice will raise
-    # sqlalchemy.exc.IntegrityError on the first file whose path already
-    # exists *within that same collection*, since (collection_id, file_path)
-    # is a composite unique constraint on Track. Two different collections
-    # can safely share a path (e.g. same drive letter reused for different
-    # external drives). Not handled yet: re-scan/duplicate-detection is
-    # deferred, likely Phase 6 territory. Deliberate scope cut, not an
-    # oversight.
-    batch = []
+@dataclass
+class ScanResult:
+    scanned: int
+    added: int
+    skipped_non_audio: int
+    updated: int
+    deleted: int
+    matched: int
+    collection: Collection
+    # Two different failures, named on the same axis so the only difference
+    # is the subject: a file we could not turn into a row, versus a
+    # directory we could not open at all. The second one is why rows under
+    # it were left alone instead of deleted.
+    unreadable_files: list[str] = field(default_factory=list)
+    unreadable_directories: list[str] = field(default_factory=list)
+
+
+def scan_folder(folder_path: str, collection_id: int, session) -> ScanResult:
     scanned_count = 0
+    matched_count = 0
+    updated_count = 0
     added_count = 0
-    skipped_count = 0
-    failed_count = 0
-    for root, dirs, files in os.walk(folder_path):
+    skipped_non_audio_count = 0
+    deleted_count = 0
+    pending_inserts = 0
+
+    collection = session.get(Collection, collection_id)
+    if collection is None:
+        raise ValueError(f"Collection with ID {collection_id} not found.")
+    tracks = session.exec(
+        select(Track).where(Track.collection_id == collection_id)
+    ).all()
+    # Keyed by exact path, deliberately not casefolded. Both halves of the
+    # key are stable across scans: the caller passes the collection's stored
+    # root_path verbatim, and os.walk reports on-disk casing for everything
+    # below it. Casefolding here would fold Song.mp3 and song.mp3 into one
+    # key on a case-sensitive filesystem, leaving the loser unreachable and
+    # so never updated and never deleted. The trade is that a case-only
+    # rename on Windows reads as a delete plus an insert, which costs that
+    # file's cached hash and nothing else. See spec §12.
+    existing_by_path = {os.path.normpath(track.file_path): track for track in tracks}
+    expected_keys = set(existing_by_path.keys())
+    visited_keys = set()
+    superseded_folded = SUPERSEDED_DIR_NAME.casefold()
+
+    unreadable_files: list[str] = []
+    unreadable_directories: list[str] = []
+
+    def record_unreadable_directory(error: OSError) -> None:
+        logging.warning(f"Could not read {error.filename}: {error}")
+        if error.filename:
+            unreadable_directories.append(os.path.normpath(error.filename))
+
+    for root, dirs, files in os.walk(folder_path, onerror=record_unreadable_directory):
+        # Skip the superseded directory at any depth.
+        dirs[:] = [d for d in dirs if d.casefold() != superseded_folded]
         for file in files:
             scanned_count += 1
             if file.lower().endswith(tuple(ALLOWED_EXTENSIONS)):
-                track = read_track(
-                    os.path.join(root, file), collection_id=collection_id
-                )
-                if track:
-                    batch.append(track)
-                    added_count += 1
+                file_key = os.path.normpath(os.path.join(root, file))
+                visited_keys.add(file_key)
+                if file_key in expected_keys:
+                    matched_count += 1
+                    field_changed = False
+                    updated_track = read_track(file_key, collection_id=collection_id)
+                    if updated_track:
+                        for field in SCANNED_FIELDS:
+                            if getattr(existing_by_path[file_key], field) != getattr(
+                                updated_track, field
+                            ):
+                                setattr(
+                                    existing_by_path[file_key],
+                                    field,
+                                    getattr(updated_track, field),
+                                )
+                                field_changed = True
+                        if field_changed:
+                            updated_count += 1
+                            existing_by_path[file_key].file_hash = None
+                    else:
+                        unreadable_files.append(file_key)
                 else:
-                    failed_count += 1
-                if len(batch) >= BATCH_SIZE:
-                    database_commit(batch, engine)
-                    batch = []
+                    new_track = read_track(file_key, collection_id=collection_id)
+                    if new_track:
+                        session.add(new_track)
+                        added_count += 1
+                        pending_inserts += 1
+                    else:
+                        unreadable_files.append(file_key)
+                if pending_inserts >= BATCH_SIZE:
+                    session.flush()
+                    pending_inserts = 0
             else:
-                skipped_count += 1
-    if batch:
-        database_commit(batch, engine)
-    return {
-        "scanned": scanned_count,
-        "added": added_count,
-        "skipped": skipped_count,
-        "failed": failed_count,
-    }
+                skipped_non_audio_count += 1
+
+    def under_unreadable_directory(path: str) -> bool:
+        for bad_path in unreadable_directories:
+            try:
+                if os.path.commonpath([path, bad_path]) == bad_path:
+                    return True
+            except ValueError:
+                continue  # different drives: not comparable, so not under it
+        return False
+
+    stale_keys = expected_keys - visited_keys
+    for stale_key in stale_keys:
+        if under_unreadable_directory(stale_key):
+            continue
+        stale_track = existing_by_path[stale_key]
+        session.delete(stale_track)
+        deleted_count += 1
+
+    collection.last_scanned_at = datetime.now().isoformat()
+    # This commit also flushes any pending inserts, so we don't need to flush before it.
+    session.commit()
+
+    return ScanResult(
+        scanned=scanned_count,
+        added=added_count,
+        skipped_non_audio=skipped_non_audio_count,
+        updated=updated_count,
+        deleted=deleted_count,
+        matched=matched_count,
+        unreadable_files=unreadable_files,
+        unreadable_directories=unreadable_directories,
+        collection=collection,
+    )
 
 
 def main():
@@ -115,15 +218,17 @@ def main():
     collection_name = sys.argv[2]
     create_db_and_tables()
 
-    collection = create_collection(
-        Collection(
-            name=collection_name,
-            root_path=os.path.normpath(folder_to_scan),
-            last_scanned_at=datetime.now().isoformat(),
-        ),
-        engine,
-    )
-    result = scan_folder(folder_to_scan, collection.id, engine)
+    with Session(engine) as session:
+        collection = create_collection(
+            Collection(
+                name=collection_name,
+                root_path=os.path.normpath(folder_to_scan),
+                last_scanned_at=None,
+            ),
+            session,
+        )
+        result = scan_folder(folder_to_scan, collection.id, session)
+
     print(result)
 
 

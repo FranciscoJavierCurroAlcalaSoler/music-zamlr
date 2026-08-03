@@ -1,6 +1,7 @@
 import os
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from enums import ActionType, OperationStatus, StructureMode, UpgradeAction
 
@@ -100,9 +101,17 @@ class ImportRequest(BaseModel):
         # real writable directory, so an empty root would pass the endpoint's
         # isdir and access checks and import into the server's working
         # directory instead of failing.
-        if not value.strip():
+        #
+        # strip() before normpath, because normpath does not remove
+        # surrounding whitespace. A trailing space is the dangerous one:
+        # Win32 strips it per component, so isdir and access both pass and
+        # the padding rides along into every computed destination, the
+        # preview, and the log path. Linux keeps it, so the same request
+        # 400s there instead.
+        stripped = value.strip()
+        if not stripped:
             raise ValueError("destination_root must not be empty")
-        return os.path.normpath(value)
+        return os.path.normpath(stripped)
 
 
 class ImportResultRead(BaseModel):
@@ -110,5 +119,52 @@ class ImportResultRead(BaseModel):
     status_counts: dict[str, int]
     log_path: str | None = None
     log_error: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ScanRequest(BaseModel):
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    root_path: str
+
+    @field_validator("root_path")
+    @classmethod
+    def normalize_root_path(cls, value: str) -> str:
+        # Normalizing here rather than in the endpoint because two functions
+        # read this field, and normalizing in one would leave the other with
+        # the raw string. normpath is pure string manipulation, so the schema
+        # still needs no filesystem to be tested.
+        #
+        # The empty check must come first: normpath("") is ".", which is a
+        # real writable directory, so an empty root would pass the endpoint's
+        # isdir and access checks and import into the server's working
+        # directory instead of failing.
+        #
+        # strip() before normpath, because normpath does not remove
+        # surrounding whitespace. A trailing space is the dangerous one:
+        # Win32 strips it per component, so isdir and access both pass and
+        # the padding rides along into every computed destination, the
+        # preview, and the log path. Linux keeps it, so the same request
+        # 400s there instead.
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("root_path must not be empty")
+        return os.path.normpath(stripped)
+
+
+class ScanResultRead(BaseModel):
+    scanned: int
+    added: int
+    updated: int
+    deleted: int
+    skipped_non_audio: int
+    matched: int
+    # unreadable_directories is not just a count of problems: rows beneath
+    # these paths were deliberately not deleted, so a client that reports
+    # deleted=0 without also reporting these is describing a partial scan as
+    # a clean one.
+    unreadable_files: list[str] = []
+    unreadable_directories: list[str] = []
+    collection: CollectionRead
 
     model_config = ConfigDict(from_attributes=True)

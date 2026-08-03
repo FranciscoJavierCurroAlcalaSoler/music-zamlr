@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 
 import pytest
 from fastapi.testclient import TestClient
@@ -53,6 +54,42 @@ def test_preview_returns_a_plan(
     assert body["operation_counts"]["delete"] == 0
     assert body["operation_counts"]["move"] == 0
     assert body["operation_counts"]["overwrites"] == 0
+
+
+def test_preview_accepts_a_destination_root_with_surrounding_whitespace(
+    client, session, tmp_path, make_track, collections, destination
+):
+    mine, theirs = collections
+
+    their_track = make_track(
+        file_path=str(tmp_path / "theirs" / "song.mp3"),
+        collection_id=theirs.id,
+        file_size=1_000_000,
+        title="Only Theirs",
+    )
+    session.add(their_track)
+    session.commit()
+
+    # Trailing whitespace is the dangerous half: Win32 strips it per path
+    # component, so isdir and access both pass and an unstripped root would
+    # ride along into every computed destination, the preview the user
+    # confirms, and the log path. Linux keeps the space, so the same request
+    # would 400 there instead.
+    response = client.post(
+        "/api/import/preview",
+        json={
+            "track_ids": [their_track.id],
+            "mine_collection_id": mine.id,
+            "theirs_collection_id": theirs.id,
+            "destination_root": f"  {destination}  ",
+            "structure_mode": "flat",
+            "upgrade_action": "keep_both",
+        },
+    )
+
+    assert response.status_code == 200
+    operation = response.json()["operations"][0]
+    assert operation["destination"] == os.path.normpath(str(destination / "song.mp3"))
 
 
 def test_already_have_track_is_rejected(
@@ -846,3 +883,159 @@ def test_diff_same_collection_returns_400(client, collections):
     mine, theirs = collections
     response = client.get(f"/api/diff?mine={mine.id}&theirs={mine.id}")
     assert response.status_code == 400
+
+
+def test_scan_returns_collection_and_stats(client, tmp_path, fixtures_dir):
+    shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
+
+    response = client.post(
+        "/api/collections/scan",
+        json={"root_path": str(tmp_path), "name": "Theirs"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["scanned"] == 1
+    assert body["added"] == 1
+    assert body["updated"] == 0
+    assert body["deleted"] == 0
+    assert body["collection"]["name"] == "Theirs"
+
+
+def test_scan_duplicate_collection_name_returns_400(client, tmp_path, fixtures_dir):
+    shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
+
+    response1 = client.post(
+        "/api/collections/scan",
+        json={"root_path": str(tmp_path), "name": "Theirs"},
+    )
+    assert response1.status_code == 200
+
+    response2 = client.post(
+        "/api/collections/scan",
+        json={"root_path": str(tmp_path), "name": "Theirs"},
+    )
+    assert response2.status_code == 400
+    assert "already exists" in response2.json()["detail"]
+
+    response3 = client.get("/api/collections")
+    assert response3.status_code == 200
+    assert len(response3.json()) == 1
+
+
+def test_scan_duplicate_collection_name_is_case_insensitive(
+    client, tmp_path, fixtures_dir
+):
+    shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
+
+    first = client.post(
+        "/api/collections/scan",
+        json={"root_path": str(tmp_path), "name": "Theirs"},
+    )
+    assert first.status_code == 200
+
+    # Names are compared casefolded even though the unique constraint is not:
+    # collection ids drive every diff and import, so a clash is cosmetic, but
+    # two collections rendering identically in a dropdown is its own bug.
+    second = client.post(
+        "/api/collections/scan",
+        json={"root_path": str(tmp_path), "name": "theirs"},
+    )
+
+    assert second.status_code == 400
+    # The stored casing, not the submitted casing, so the user can see what
+    # they collided with.
+    assert "'Theirs'" in second.json()["detail"]
+
+
+def test_scan_nonexistent_root_returns_400(client):
+    response = client.post(
+        "/api/collections/scan",
+        json={"root_path": "/nonexistent/path", "name": "Theirs"},
+    )
+    assert response.status_code == 400
+    assert "does not exist" in response.json()["detail"]
+
+
+def test_scan_accepts_a_root_path_with_surrounding_whitespace(
+    client, tmp_path, fixtures_dir
+):
+    shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
+
+    # A path pasted from Explorer or a chat message routinely carries a
+    # leading or trailing space. normpath does not strip whitespace, so
+    # without the validator's strip() the padded string reaches isdir and
+    # the request 400s on a directory that plainly exists.
+    response = client.post(
+        "/api/collections/scan",
+        json={"root_path": f"  {tmp_path}  ", "name": "Padded"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["added"] == 1
+    assert body["collection"]["root_path"] == os.path.normpath(str(tmp_path))
+
+
+def test_rescan_returns_collection_and_stats(client, tmp_path, fixtures_dir):
+    shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
+
+    response1 = client.post(
+        "/api/collections/scan",
+        json={"root_path": str(tmp_path), "name": "Theirs"},
+    )
+    assert response1.status_code == 200
+    collection_id = response1.json()["collection"]["id"]
+
+    response2 = client.post(f"/api/collections/{collection_id}/rescan")
+    assert response2.status_code == 200
+    body = response2.json()
+    assert body["scanned"] == 1
+    assert body["added"] == 0
+    assert body["updated"] == 0
+    assert body["deleted"] == 0
+
+
+def test_rescan_unknown_collection_returns_404(client):
+    response = client.post("/api/collections/99999/rescan")
+    assert response.status_code == 404
+    assert "Collection not found" in response.json()["detail"]
+
+
+def test_rescan_triggers_deletion(client, tmp_path, fixtures_dir):
+    shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
+
+    response1 = client.post(
+        "/api/collections/scan",
+        json={"root_path": str(tmp_path), "name": "Theirs"},
+    )
+    assert response1.status_code == 200
+    collection_id = response1.json()["collection"]["id"]
+
+    os.remove(tmp_path / "test_track.mp3")
+
+    response2 = client.post(f"/api/collections/{collection_id}/rescan")
+    assert response2.status_code == 200
+    body = response2.json()
+    assert body["scanned"] == 0
+    assert body["added"] == 0
+    assert body["updated"] == 0
+    assert body["deleted"] == 1
+
+
+def test_rescan_nonexistent_root_returns_400(client, tmp_path, fixtures_dir):
+    shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
+
+    response1 = client.post(
+        "/api/collections/scan",
+        json={"root_path": str(tmp_path), "name": "Theirs"},
+    )
+    assert response1.status_code == 200
+    collection_id = response1.json()["collection"]["id"]
+
+    # Simulate the collection root being unmounted or deleted.
+    shutil.rmtree(tmp_path)
+
+    response2 = client.post(f"/api/collections/{collection_id}/rescan")
+    assert response2.status_code == 400
+    assert "not found" in response2.json()["detail"]

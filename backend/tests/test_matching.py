@@ -1,8 +1,4 @@
-from pathlib import Path
-
 from matching import match_collections
-
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 def test_better_format_is_upgrade(make_track):
@@ -223,11 +219,11 @@ def test_one_mine_is_matched_only_once(make_track):
     assert result.only_in_mine == []
 
 
-def test_identical_files_match_by_hash(make_track):
+def test_identical_files_match_by_hash(make_track, fixtures_dir):
     mine = [
         make_track(
             file_size=206_805,
-            file_path=str(FIXTURES_DIR / "test_track_mine.mp3"),
+            file_path=str(fixtures_dir / "test_track_mine.mp3"),
             file_name="test_track.mp3",
         )
     ]
@@ -235,7 +231,7 @@ def test_identical_files_match_by_hash(make_track):
         make_track(
             title=None,
             file_size=206_805,
-            file_path=str(FIXTURES_DIR / "test_track_theirs.mp3"),
+            file_path=str(fixtures_dir / "test_track_theirs.mp3"),
             file_name="test_track.mp3",
         )
     ]
@@ -244,19 +240,19 @@ def test_identical_files_match_by_hash(make_track):
     assert len(result.already_have) == 1
 
 
-def test_same_size_different_content_no_hash_match(make_track):
+def test_same_size_different_content_no_hash_match(make_track, fixtures_dir):
     # Same size, different content → falls through to fuzzy tier (assert it doesn't false-match on hash).
     mine = [
         make_track(
             format="MP3",
-            file_path=str(FIXTURES_DIR / "test_track.mp3"),
+            file_path=str(fixtures_dir / "test_track.mp3"),
             file_name="test_track.mp3",
         )
     ]
     theirs = [
         make_track(
             format="FLAC",
-            file_path=str(FIXTURES_DIR / "test_track.flac"),
+            file_path=str(fixtures_dir / "test_track.flac"),
             file_name="test_track.flac",
         )
     ]

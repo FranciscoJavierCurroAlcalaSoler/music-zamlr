@@ -7,11 +7,12 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 
-from database import get_session
+from database import create_collection, get_session
 from enums import ActionType, OperationStatus
 from importing import OperationResult, PlannedOperation, execute_plan, plan_import
 from matching import Match, MatchResult, match_collections
 from models import Collection, Track
+from scanner import scan_folder
 from schemas import (
     CollectionRead,
     DiffRead,
@@ -19,6 +20,8 @@ from schemas import (
     ImportRequest,
     ImportResultRead,
     OperationResultRead,
+    ScanRequest,
+    ScanResultRead,
     TrackRead,
 )
 
@@ -278,3 +281,61 @@ def execute_import(
     )
 
     return import_result
+
+
+@app.post("/api/collections/scan", response_model=ScanResultRead)
+def scan_collection(
+    request: ScanRequest,
+    session: Session = Depends(get_session),
+):
+    if not os.path.isdir(request.root_path):
+        raise HTTPException(
+            status_code=400,
+            detail="Collection path does not exist or is not a directory.",
+        )
+    clash = next(
+        (
+            existing
+            for existing in session.exec(select(Collection)).all()
+            if existing.name.casefold() == request.name.casefold()
+        ),
+        None,
+    )
+    if clash is not None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"A collection named {clash.name!r} already exists.",
+        )
+
+    collection = create_collection(
+        Collection(
+            name=request.name,
+            root_path=os.path.normpath(request.root_path),
+            last_scanned_at=None,
+        ),
+        session,
+    )
+
+    scan_result = scan_folder(collection.root_path, collection.id, session)
+
+    return scan_result
+
+
+@app.post("/api/collections/{collection_id}/rescan", response_model=ScanResultRead)
+def rescan_collection(
+    collection_id: int,
+    session: Session = Depends(get_session),
+):
+    collection = session.get(Collection, collection_id)
+    if collection is None:
+        raise HTTPException(status_code=404, detail="Collection not found.")
+
+    if not os.path.isdir(collection.root_path):
+        raise HTTPException(
+            status_code=400,
+            detail="Collection path not found. It may not be mounted.",
+        )
+
+    scan_result = scan_folder(collection.root_path, collection.id, session)
+
+    return scan_result

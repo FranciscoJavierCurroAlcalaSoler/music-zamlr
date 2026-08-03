@@ -1,8 +1,33 @@
+from pathlib import Path
+
 import pytest
+from sqlalchemy import create_engine as _sa_create_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
+import database
+import main
+import scanner
 from models import Collection, Track
+
+
+@pytest.fixture
+def fixtures_dir() -> Path:
+    return Path(__file__).parent / "fixtures"
+
+
+def _refuse_connection():
+    raise RuntimeError(
+        "A test opened the production database. Pass the test session in "
+        "explicitly; don't import `engine` from database.py."
+    )
+
+
+@pytest.fixture(autouse=True)
+def no_production_engine(monkeypatch):
+    poisoned = _sa_create_engine("sqlite://", creator=_refuse_connection)
+    for module in (database, main, scanner):
+        monkeypatch.setattr(module, "engine", poisoned, raising=False)
 
 
 @pytest.fixture
