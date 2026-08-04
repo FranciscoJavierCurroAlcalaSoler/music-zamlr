@@ -25,6 +25,18 @@ export interface Match {
   theirs: Track;
 }
 
+export interface ScanResult {
+  scanned: number;
+  added: number;
+  updated: number;
+  deleted: number;
+  skipped_non_audio: number;
+  matched: number;
+  unreadable_files: string[];
+  unreadable_directories: string[];
+  collection: Collection;
+}
+
 export interface MatchResult {
   missing: Track[];
   upgrade_available: Match[];
@@ -77,4 +89,13 @@ export interface ImportResult {
   status_counts: Record<string, number>;
   log_path: string | null;
   log_error: string | null;
+}
+
+export interface ImportRequestBody {
+  track_ids: number[];
+  mine_collection_id: number;
+  theirs_collection_id: number;
+  destination_root: string;
+  structure_mode: StructureMode;
+  upgrade_action: UpgradeAction;
 }

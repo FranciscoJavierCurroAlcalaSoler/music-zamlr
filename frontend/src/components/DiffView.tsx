@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useState, useMemo } from "react";
 import {
   Alert,
   Box,
@@ -29,15 +29,18 @@ import type {
   ImportSettingsValues,
   ImportResult,
 } from "../types";
+import {
+  fetchDiff,
+  previewImport,
+  executeImport,
+  describeFetchError,
+} from "../api";
 import { ImportSettings } from "./ImportSettings";
 import { ImportPreviewDialog } from "./ImportPreviewDialog";
 import { ImportResultView } from "./ImportResultView";
 
 type BucketKey =
-  | "missing"
-  | "upgrade_available"
-  | "already_have"
-  | "needs_review";
+  "missing" | "upgrade_available" | "already_have" | "needs_review";
 
 interface DiffRow {
   id: number;
@@ -83,9 +86,12 @@ const onlyInMineColumns: GridColDef[] = [
   { field: "duration", headerName: "Duration", width: 100 },
 ];
 
-export function DiffView() {
-  const [collections, setCollections] = useState<Collection[]>([]);
-  const [loadingCollections, setLoadingCollections] = useState(true);
+interface DiffViewProps {
+  collections: Collection[];
+  loadingCollections: boolean;
+}
+
+export function DiffView({ collections, loadingCollections }: DiffViewProps) {
   const [loadingDiff, setLoadingDiff] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
@@ -105,31 +111,10 @@ export function DiffView() {
   );
   const [result, setResult] = useState<ImportResult | null>(null);
   const [executing, setExecuting] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    fetch("http://localhost:8000/api/collections")
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(`Server responded with ${res.status}`);
-        }
-        return res.json();
-      })
-      .then((data) => {
-        if (!cancelled) setCollections(data);
-      })
-      .catch((err) => {
-        if (!cancelled) setDiffError(err.message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingCollections(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const [diffScannedAt, setDiffScannedAt] = useState<{
+    mine: string | null;
+    theirs: string | null;
+  } | null>(null);
 
   const rows: DiffRow[] = useMemo(() => {
     if (!diff) return [];
@@ -176,8 +161,17 @@ export function DiffView() {
     }));
   }, [diff]);
 
+  const scannedAt = (id: number | "") =>
+    collections.find((c) => c.id === id)?.last_scanned_at ?? null;
+
   const visibleRows =
     bucket === "all" ? rows : rows.filter((r) => r.bucket === bucket);
+
+  const stale =
+    diff !== null &&
+    diffScannedAt !== null &&
+    (scannedAt(mineId) !== diffScannedAt.mine ||
+      scannedAt(theirsId) !== diffScannedAt.theirs);
 
   async function runDiff() {
     setLoadingDiff(true);
@@ -186,26 +180,30 @@ export function DiffView() {
     setPreview(null);
     setLastSettings(null);
     try {
-      const res = await fetch(
-        `http://localhost:8000/api/diff?mine=${mineId}&theirs=${theirsId}`,
-      );
-      if (!res.ok) {
-        const body = await res.json();
-        setDiffError(body.detail ?? "Diff failed");
-        return;
+      if (mineId === "" || theirsId === "") {
+        throw new Error("Select both collections first.");
       }
-      const data: Diff = await res.json();
-      setDiff(data);
-    } catch {
-      setDiffError("Could not reach the server");
+      const result: Diff = await fetchDiff(mineId, theirsId);
+      setDiff(result);
+      setDiffScannedAt({
+        mine: scannedAt(mineId),
+        theirs: scannedAt(theirsId),
+      });
+    } catch (error: unknown) {
+      setDiffError(describeFetchError(error));
     } finally {
       setLoadingDiff(false);
     }
   }
 
   function importRequestBody(settings: ImportSettingsValues) {
+    if (mineId === "" || theirsId === "") {
+      throw new Error("Select both collections first.");
+    }
     return {
-      track_ids: [...selection.ids],
+      // DataGrid types row ids as string | number in general; ours are Track.id,
+      // which is always a number.
+      track_ids: [...selection.ids].map(Number),
       mine_collection_id: mineId,
       theirs_collection_id: theirsId,
       destination_root: settings.destinationRoot,
@@ -219,19 +217,10 @@ export function DiffView() {
     setPreviewing(true);
     setImportError(null);
     try {
-      const res = await fetch("http://localhost:8000/api/import/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(importRequestBody(settings)),
-      });
-      if (!res.ok) {
-        const body = await res.json();
-        setImportError(body.detail ?? "Preview failed");
-        return;
-      }
-      setPreview(await res.json());
-    } catch {
-      setImportError("Could not reach the server");
+      const result = await previewImport(importRequestBody(settings));
+      setPreview(result);
+    } catch (error: unknown) {
+      setImportError(describeFetchError(error));
     } finally {
       setPreviewing(false);
     }
@@ -243,23 +232,13 @@ export function DiffView() {
     setExecuting(true);
     setImportError(null);
     try {
-      const res = await fetch("http://localhost:8000/api/import/execute", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(importRequestBody(lastSettings)),
-      });
-      if (!res.ok) {
-        const body = await res.json();
-        setImportError(body.detail ?? "Import failed");
-        return;
-      }
-      const data: ImportResult = await res.json();
+      const result = await executeImport(importRequestBody(lastSettings));
       setPreview(null);
-      setResult(data);
+      setResult(result);
       setDiff(null);
       setSelection({ type: "include", ids: new Set() });
-    } catch {
-      setImportError("Could not reach the server");
+    } catch (error: unknown) {
+      setImportError(describeFetchError(error));
     } finally {
       setExecuting(false);
     }
@@ -326,6 +305,12 @@ export function DiffView() {
                 flexDirection: "column",
               }}
             >
+              {stale && (
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  These collections were re-scanned since this comparison. Run
+                  Compare again for current results.
+                </Alert>
+              )}
               <Tabs value={tab} onChange={(_, next) => setTab(next)}>
                 <Tab label={`Import candidates (${rows.length})`} />
                 <Tab
@@ -388,7 +373,7 @@ export function DiffView() {
               )}
             </Box>
             <ImportSettings
-              disabled={selection.ids.size === 0}
+              disabled={selection.ids.size === 0 || stale}
               loading={previewing}
               error={importError}
               onPreview={runPreview}
