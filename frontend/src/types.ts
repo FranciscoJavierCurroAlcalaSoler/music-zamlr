@@ -75,6 +75,7 @@ export interface PlannedOperation {
 
 export interface ImportPreview {
   operations: PlannedOperation[];
+  upgrades: Match[];
   operation_counts: Record<string, number>;
 }
 

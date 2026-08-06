@@ -1,5 +1,6 @@
 import {
   Alert,
+  Box,
   Button,
   Dialog,
   DialogActions,
@@ -13,7 +14,7 @@ import {
   TableCell,
   Chip,
 } from "@mui/material";
-import type { ImportPreview } from "../types";
+import type { ImportPreview, Match } from "../types";
 
 interface ImportPreviewDialogProps {
   preview: ImportPreview | null;
@@ -53,6 +54,81 @@ function describeDestructive(counts: Record<string, number>): string {
   return `This will ${list} of your existing files.`;
 }
 
+const PLACEHOLDER = "—";
+
+const text = (value: string | number | null) =>
+  value === null || value === "" ? PLACEHOLDER : String(value);
+
+const duration = (seconds: number | null) => {
+  if (seconds === null) return PLACEHOLDER;
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+};
+
+// read_track stores audio.info.bitrate, which is bits per second.
+const bitrate = (bitsPerSecond: number | null) =>
+  bitsPerSecond === null
+    ? PLACEHOLDER
+    : `${Math.round(bitsPerSecond / 1000)} kbps`;
+
+interface ComparisonRow {
+  label: string;
+  mine: string;
+  theirs: string;
+  flagWhenDifferent: boolean;
+}
+
+function comparisonRows(match: Match): ComparisonRow[] {
+  const { mine, theirs } = match;
+  return [
+    // Identity fields: a difference here is the remaster/different-release
+    // tell, so it gets flagged.
+    {
+      label: "Title",
+      mine: text(mine.title),
+      theirs: text(theirs.title),
+      flagWhenDifferent: true,
+    },
+    {
+      label: "Artist",
+      mine: text(mine.artist),
+      theirs: text(theirs.artist),
+      flagWhenDifferent: true,
+    },
+    {
+      label: "Album",
+      mine: text(mine.album),
+      theirs: text(theirs.album),
+      flagWhenDifferent: true,
+    },
+    {
+      label: "Year",
+      mine: text(mine.year),
+      theirs: text(theirs.year),
+      flagWhenDifferent: true,
+    },
+    // Quality fields: these are *expected* to differ — that is what makes it
+    // an upgrade — so flagging them would be noise on every row.
+    {
+      label: "Duration",
+      mine: duration(mine.duration),
+      theirs: duration(theirs.duration),
+      flagWhenDifferent: false,
+    },
+    {
+      label: "Format",
+      mine: text(mine.format),
+      theirs: text(theirs.format),
+      flagWhenDifferent: false,
+    },
+    {
+      label: "Bitrate",
+      mine: bitrate(mine.bit_rate),
+      theirs: bitrate(theirs.bit_rate),
+      flagWhenDifferent: false,
+    },
+  ];
+}
+
 export function ImportPreviewDialog({
   preview,
   destinationRoot,
@@ -89,6 +165,60 @@ export function ImportPreviewDialog({
               </Alert>
             )}
           </>
+        )}
+
+        {preview && preview.upgrades.length > 0 && (
+          <Box sx={{ mt: 3 }}>
+            <Typography variant="subtitle1">
+              Files being replaced ({preview.upgrades.length})
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Check that each pair is the same recording. A differing album or
+              year often means a remaster or another release.
+            </Typography>
+
+            {preview.upgrades.map((match) => (
+              <Table key={match.theirs.id} size="small" sx={{ mt: 2 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ width: "20%" }} />
+                    <TableCell sx={{ width: "40%" }}>Yours</TableCell>
+                    <TableCell sx={{ width: "40%" }}>Theirs</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {comparisonRows(match).map((row) => {
+                    const differs =
+                      row.flagWhenDifferent && row.mine !== row.theirs;
+                    return (
+                      <TableRow key={row.label}>
+                        <TableCell>
+                          {row.label}
+                          {differs && (
+                            <Chip
+                              label="differs"
+                              size="small"
+                              color="warning"
+                              variant="outlined"
+                              sx={{ ml: 1 }}
+                            />
+                          )}
+                        </TableCell>
+                        <TableCell>{row.mine}</TableCell>
+                        <TableCell>{row.theirs}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  <TableRow>
+                    <TableCell>Your file</TableCell>
+                    <TableCell colSpan={2} sx={{ wordBreak: "break-all" }}>
+                      {match.mine.file_path}
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            ))}
+          </Box>
         )}
 
         {preview && (

@@ -103,7 +103,13 @@ def diff_collections(
     return diff_result
 
 
-def _build_plan(request: ImportRequest, session: Session) -> list[PlannedOperation]:
+@dataclass
+class BuiltPlan:
+    operations: list[PlannedOperation]
+    upgrades: list[Match]
+
+
+def _build_plan(request: ImportRequest, session: Session) -> BuiltPlan:
     """Load, diff, filter, and plan. Shared by preview and execute.
 
     The request carries track ids, not classifications: the client says
@@ -166,12 +172,13 @@ def _build_plan(request: ImportRequest, session: Session) -> list[PlannedOperati
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
-    return import_plan
+    return BuiltPlan(operations=import_plan, upgrades=upgrade_available)
 
 
 @dataclass
 class PreviewResult:
     operations: list[PlannedOperation]
+    upgrades: list[Match]
     operation_counts: dict[str, int]
 
 
@@ -184,12 +191,19 @@ def preview_import(
     import_plan = _build_plan(request, session)
 
     preview = PreviewResult(
-        operations=import_plan,
+        operations=import_plan.operations,
+        upgrades=import_plan.upgrades,
         operation_counts={
-            "copy": sum(1 for op in import_plan if op.action == ActionType.COPY),
-            "delete": sum(1 for op in import_plan if op.action == ActionType.DELETE),
-            "move": sum(1 for op in import_plan if op.action == ActionType.MOVE),
-            "overwrites": sum(1 for op in import_plan if op.overwrites),
+            "copy": sum(
+                1 for op in import_plan.operations if op.action == ActionType.COPY
+            ),
+            "delete": sum(
+                1 for op in import_plan.operations if op.action == ActionType.DELETE
+            ),
+            "move": sum(
+                1 for op in import_plan.operations if op.action == ActionType.MOVE
+            ),
+            "overwrites": sum(1 for op in import_plan.operations if op.overwrites),
         },
     )
 
@@ -237,7 +251,7 @@ def execute_import(
 
     import_plan = _build_plan(request, session)
 
-    operation_results = execute_plan(import_plan)
+    operation_results = execute_plan(import_plan.operations)
 
     # Successful deletes and moves leave rows pointing at files that no
     # longer exist; the next diff would offer the same upgrade again and

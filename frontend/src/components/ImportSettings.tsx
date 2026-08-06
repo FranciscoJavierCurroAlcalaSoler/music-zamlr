@@ -9,6 +9,7 @@ import {
   RadioGroup,
   Stack,
   TextField,
+  Typography,
 } from "@mui/material";
 import type {
   ImportSettingsValues,
@@ -65,24 +66,48 @@ export function ImportSettings({
       <FormControl>
         <FormLabel>Upgrade action</FormLabel>
         <RadioGroup
-          row
           value={upgradeAction}
           onChange={(e) => setUpgradeAction(e.target.value as UpgradeAction)}
         >
           <FormControlLabel
-            value="delete"
-            control={<Radio />}
-            label="Delete my tracks"
-          />
-          <FormControlLabel
+            sx={{ alignItems: "flex-start", mb: 2 }}
             value="keep_both"
-            control={<Radio />}
-            label="Keep both tracks"
+            control={<Radio sx={{ py: 0 }} />}
+            label={
+              <>
+                <Typography variant="body2">Keep both tracks</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Your file stays where it is; theirs is added alongside it.
+                </Typography>
+              </>
+            }
           />
           <FormControlLabel
+            sx={{ alignItems: "flex-start", mb: 2 }}
             value="move"
-            control={<Radio />}
-            label="Move my track to superseded folder"
+            control={<Radio sx={{ py: 0 }} />}
+            label={
+              <>
+                <Typography variant="body2">Move my track aside</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Your file moves to a <code>_superseded</code> folder under the
+                  destination. You can put it back.
+                </Typography>
+              </>
+            }
+          />
+          <FormControlLabel
+            sx={{ alignItems: "flex-start", mb: 2 }}
+            value="delete"
+            control={<Radio sx={{ py: 0 }} />}
+            label={
+              <>
+                <Typography variant="body2">Delete my track</Typography>
+                <Typography variant="caption" color="error">
+                  Your file is deleted. This cannot be undone.
+                </Typography>
+              </>
+            }
           />
         </RadioGroup>
       </FormControl>

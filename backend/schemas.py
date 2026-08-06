@@ -76,6 +76,7 @@ class OperationResultRead(BaseModel):
 
 class ImportPreviewRead(BaseModel):
     operations: list[PlannedOperationRead]
+    upgrades: list[MatchRead] = []
     operation_counts: dict[str, int]
 
     model_config = ConfigDict(from_attributes=True)

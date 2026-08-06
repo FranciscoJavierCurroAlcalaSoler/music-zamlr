@@ -47,6 +47,7 @@ def test_preview_returns_a_plan(
     assert response.status_code == 200
     body = response.json()
     assert len(body["operations"]) == 1
+    assert len(body["upgrades"]) == 0
     assert body["operations"][0]["action"] == "copy"
     assert body["operation_counts"]["copy"] == 1
     assert body["operations"][0]["source"] == str(tmp_path / "theirs" / "song.mp3")
@@ -92,7 +93,51 @@ def test_preview_accepts_a_destination_root_with_surrounding_whitespace(
     assert operation["destination"] == os.path.normpath(str(destination / "song.mp3"))
 
 
-def test_already_have_track_is_rejected(
+def test_preview_with_upgrade(
+    client, session, tmp_path, make_track, collections, destination
+):
+    # The pairing is server-derived, so this test also proves the client never sent it.
+    mine, theirs = collections
+
+    my_track = make_track(
+        collection_id=mine.id,
+        format="MP3",
+        file_path=str(tmp_path / "mine" / "song.mp3"),
+        file_size=1_000_000,
+    )
+    their_track = make_track(
+        collection_id=theirs.id,
+        format="FLAC",
+        file_path=str(tmp_path / "theirs" / "song.flac"),
+        file_size=2_000_000,
+    )
+    session.add(my_track)
+    session.add(their_track)
+    session.commit()
+
+    mine_id = my_track.id
+    their_id = their_track.id
+
+    response = client.post(
+        "/api/import/preview",
+        json={
+            "track_ids": [their_id],
+            "mine_collection_id": mine.id,
+            "theirs_collection_id": theirs.id,
+            "destination_root": str(destination),
+            "structure_mode": "flat",
+            "upgrade_action": "keep_both",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["upgrades"]) == 1
+    assert body["upgrades"][0]["mine"]["id"] == mine_id
+    assert body["upgrades"][0]["theirs"]["id"] == their_id
+
+
+def test_preview_already_have_track_is_rejected(
     client, session, tmp_path, make_track, collections, destination
 ):
     mine, theirs = collections
