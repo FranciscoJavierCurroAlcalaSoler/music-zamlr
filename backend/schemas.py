@@ -3,7 +3,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
-from enums import ActionType, OperationStatus, StructureMode, UpgradeAction
+from enums import ActionType, Bucket, OperationStatus, StructureMode, UpgradeAction
 
 
 class TrackRead(BaseModel):
@@ -39,11 +39,25 @@ class MatchRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ReviewCandidateRead(BaseModel):
+    mine: TrackRead
+    would_be: Bucket
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AmbiguousMatchRead(BaseModel):
+    theirs: TrackRead
+    candidates: list[ReviewCandidateRead]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class MatchResultRead(BaseModel):
     missing: list[TrackRead] = []
     upgrade_available: list[MatchRead] = []
     already_have: list[MatchRead] = []
-    needs_review: list[TrackRead] = []
+    needs_review: list[AmbiguousMatchRead] = []
     only_in_mine: list[TrackRead] = []
 
     model_config = ConfigDict(from_attributes=True)

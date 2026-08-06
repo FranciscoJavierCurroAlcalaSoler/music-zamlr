@@ -28,8 +28,8 @@ against plain in-memory objects.
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from enum import Enum, auto
 
+from enums import Bucket
 from hashing import compute_file_hash
 from models import Track
 
@@ -41,25 +41,24 @@ class Match:
 
 
 @dataclass
+class ReviewCandidate:
+    mine: Track
+    would_be: Bucket
+
+
+@dataclass
+class AmbiguousMatch:
+    theirs: Track
+    candidates: list[ReviewCandidate]
+
+
+@dataclass
 class MatchResult:
     missing: list[Track] = field(default_factory=list)
     upgrade_available: list[Match] = field(default_factory=list)
     already_have: list[Match] = field(default_factory=list)
-    needs_review: list[Track] = field(default_factory=list)
+    needs_review: list[AmbiguousMatch] = field(default_factory=list)
     only_in_mine: list[Track] = field(default_factory=list)
-
-
-class Bucket(Enum):
-    """Internal routing key: which list a classified track belongs in.
-
-    only_in_mine has no member here because nothing classifies *into* it;
-    it's whatever is left over once every track of theirs is placed.
-    """
-
-    MISSING = auto()
-    UPGRADE_AVAILABLE = auto()
-    ALREADY_HAVE = auto()
-    NEEDS_REVIEW = auto()
 
 
 DURATION_TOLERANCE_SECONDS = 2
@@ -126,6 +125,43 @@ def route(result, consumed, bucket, payload):
         result.needs_review.append(payload)
 
 
+def classify_pairing(mine_track: Track, theirs_track: Track) -> Bucket:
+    """Decide which bucket a pairing of mine and theirs falls into.
+
+    Returns only UPGRADE_AVAILABLE or ALREADY_HAVE; the Bucket type is wider
+    than this function's range because it is shared with the routing that
+    also produces MISSING and NEEDS_REVIEW. It judges quality, never
+    identity — whether these two are the same recording was settled by the
+    caller, and for a fuzzy match that is a guess inside a ±2s window (§5a).
+
+    This is the only definition of "what counts as an upgrade", called both
+    for a confirmed single candidate and to label each candidate of an
+    ambiguous one. One definition is what stops the review UI promising an
+    upgrade the planner would then decline; it is also the single point
+    Phase 6's configurable ranking has to reach.
+    """
+    theirs_rank = format_rank(theirs_track.format)
+    mine_rank = format_rank(mine_track.format)
+
+    if theirs_rank > mine_rank:
+        return Bucket.UPGRADE_AVAILABLE
+    elif theirs_rank < mine_rank:
+        return Bucket.ALREADY_HAVE
+    else:
+        # Same format rank, so bitrate breaks the tie. An unreadable
+        # bitrate on either side claims no upgrade: treating None as 0
+        # would let a known 320 kbps "beat" a file we simply couldn't
+        # measure, and with the delete action that removes an original
+        # we never evaluated. Equal bitrates fall the same way, since
+        # without a strict improvement the copy is pointless.
+        if theirs_track.bit_rate is None or mine_track.bit_rate is None:
+            return Bucket.ALREADY_HAVE
+        elif theirs_track.bit_rate > mine_track.bit_rate:
+            return Bucket.UPGRADE_AVAILABLE
+        else:
+            return Bucket.ALREADY_HAVE
+
+
 def attempt_fuzzy_match(
     theirs_track: Track, tracks_mine: list[Track], consumed: set[int]
 ):
@@ -166,46 +202,26 @@ def attempt_fuzzy_match(
         return (Bucket.MISSING, theirs_track)
     elif len(fuzzy_candidates) == 1:
         mine_track = fuzzy_candidates[0]
-
-        theirs_rank = format_rank(theirs_track.format)
-        mine_rank = format_rank(mine_track.format)
-
-        if theirs_rank > mine_rank:
-            return (
-                Bucket.UPGRADE_AVAILABLE,
-                Match(mine=mine_track, theirs=theirs_track),
-            )
-        elif theirs_rank < mine_rank:
-            return (Bucket.ALREADY_HAVE, Match(mine=mine_track, theirs=theirs_track))
-        else:
-            # Same format rank, so bitrate breaks the tie. An unreadable
-            # bitrate on either side claims no upgrade: treating None as 0
-            # would let a known 320 kbps "beat" a file we simply couldn't
-            # measure, and with the delete action that removes an original
-            # we never evaluated. Equal bitrates fall the same way, since
-            # without a strict improvement the copy is pointless.
-            if theirs_track.bit_rate is None or mine_track.bit_rate is None:
-                return (
-                    Bucket.ALREADY_HAVE,
-                    Match(mine=mine_track, theirs=theirs_track),
-                )
-            elif theirs_track.bit_rate > mine_track.bit_rate:
-                return (
-                    Bucket.UPGRADE_AVAILABLE,
-                    Match(mine=mine_track, theirs=theirs_track),
-                )
-            else:
-                return (
-                    Bucket.ALREADY_HAVE,
-                    Match(mine=mine_track, theirs=theirs_track),
-                )
+        return (
+            classify_pairing(mine_track, theirs_track),
+            Match(mine=mine_track, theirs=theirs_track),
+        )
     else:
         # Two or more candidates within tolerance. Picking one (first,
         # closest duration, best quality) would be a guess that silently
         # decides which of my files gets replaced, so it goes to the user
         # instead. Note this consumes nothing, so every candidate stays
         # available.
-        return (Bucket.NEEDS_REVIEW, theirs_track)
+        return (
+            Bucket.NEEDS_REVIEW,
+            AmbiguousMatch(
+                theirs=theirs_track,
+                candidates=[
+                    ReviewCandidate(mine=m, would_be=classify_pairing(m, theirs_track))
+                    for m in fuzzy_candidates
+                ],
+            ),
+        )
 
 
 def match_collections(

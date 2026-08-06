@@ -92,7 +92,31 @@ def test_ambiguous_match_is_needs_review(make_track):
     theirs = [make_track(duration=121, file_size=2_000_000)]
     result = match_collections(mine, theirs)
 
-    assert len(result.needs_review) == 1
+    (ambiguous,) = result.needs_review
+    assert len(ambiguous.candidates) == 2
+    # Neither candidate is worth acting on, so the UI has nothing to ask.
+    assert {c.would_be for c in ambiguous.candidates} == {"already_have"}
+    assert len(result.only_in_mine) == 2
+
+
+def test_ambiguous_match_with_different_would_be(make_track):
+    mine = [
+        make_track(format="MP3", duration=120, file_size=1_000_000),
+        make_track(format="FLAC", duration=123, file_size=3_000_000),
+    ]
+    theirs = [make_track(format="FLAC", duration=121, file_size=2_000_000)]
+    result = match_collections(mine, theirs)
+
+    (ambiguous,) = result.needs_review
+    # Keyed by the attribute that decides the verdict rather than by
+    # position: candidate order is currently the order of tracks_mine, but
+    # the review dialog may well want them sorted, and that would break a
+    # positional assertion without anything actually being wrong.
+    would_be_by_format = {c.mine.format: c.would_be for c in ambiguous.candidates}
+    assert would_be_by_format == {
+        "FLAC": "already_have",
+        "MP3": "upgrade_available",
+    }
     assert len(result.only_in_mine) == 2
 
 

@@ -40,7 +40,10 @@ import { ImportPreviewDialog } from "./ImportPreviewDialog";
 import { ImportResultView } from "./ImportResultView";
 
 type BucketKey =
-  "missing" | "upgrade_available" | "already_have" | "needs_review";
+  | "missing"
+  | "upgrade_available"
+  | "already_have"
+  | "needs_review";
 
 interface DiffRow {
   id: number;
@@ -141,7 +144,7 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
 
     return [
       ...r.missing.map((t) => fromTrack(t, "missing")),
-      ...r.needs_review.map((t) => fromTrack(t, "needs_review")),
+      ...r.needs_review.map((a) => fromTrack(a.theirs, "needs_review")),
       ...r.upgrade_available.map((m) => fromMatch(m, "upgrade_available")),
       ...r.already_have.map((m) => fromMatch(m, "already_have")),
     ];

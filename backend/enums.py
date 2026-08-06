@@ -28,3 +28,20 @@ class OperationStatus(StrEnum):
     SUCCESS = "success"
     FAILED = "failed"
     SKIPPED = "skipped"
+
+
+class Bucket(StrEnum):
+    """Internal routing key and API contract: which list a classified track belongs in.
+
+    only_in_mine has no member here because nothing classifies *into* it;
+    it's whatever is left over once every track of theirs is placed.
+
+    Use == instead of "is" for comparisons. A raw string from a request body compares
+    equal to a StrEnum member, so == keeps working when the value arrives as JSON rather
+    than as an enum.
+    """
+
+    MISSING = "missing"
+    UPGRADE_AVAILABLE = "upgrade_available"
+    ALREADY_HAVE = "already_have"
+    NEEDS_REVIEW = "needs_review"

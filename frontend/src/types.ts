@@ -37,11 +37,23 @@ export interface ScanResult {
   collection: Collection;
 }
 
+export type WouldBe = "upgrade_available" | "already_have";
+
+export interface Candidate {
+  mine: Track;
+  would_be: WouldBe;
+}
+
+export interface AmbiguousMatch {
+  theirs: Track;
+  candidates: Candidate[];
+}
+
 export interface MatchResult {
   missing: Track[];
   upgrade_available: Match[];
   already_have: Match[];
-  needs_review: Track[];
+  needs_review: AmbiguousMatch[];
   only_in_mine: Track[];
 }
 
