@@ -1,6 +1,9 @@
+from itertools import count
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine as _sa_create_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
@@ -8,6 +11,8 @@ from sqlmodel import Session, SQLModel, create_engine
 import database
 import main
 import scanner
+from database import get_session
+from main import app
 from models import Collection, Track
 
 
@@ -109,3 +114,79 @@ def destination(tmp_path):
     path = tmp_path / "dest"
     path.mkdir()
     return path
+
+
+@pytest.fixture
+def client(session):
+    app.dependency_overrides[get_session] = lambda: session
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
+
+class Ambiguity(NamedTuple):
+    """One or more tracks of theirs that all match the same candidates of mine."""
+
+    theirs: list[Track]
+    candidates: list[Track]
+
+
+@pytest.fixture
+def make_ambiguity(session, tmp_path, make_track, collections):
+    """Build a track of theirs that lands in needs_review, with its candidates.
+
+    Two things put a track in that bucket and both are easy to break by
+    accident, which is why this is a fixture rather than repeated setup:
+    two or more of my tracks must fall inside the inclusive ±2s window, and
+    every file size must be distinct so the hash tier does not resolve the
+    pairing before the fuzzy tier ever runs.
+
+    File names are unique per track. make_track defaults every file_name to
+    the same string, which would make any assertion naming a file in an
+    error message pass without meaning anything.
+
+    Pass theirs_count=2 for two tracks of theirs sharing one candidate set,
+    which is what it takes to double-book a single file of mine.
+    """
+    mine, theirs = collections
+    group_numbers = count(1)
+
+    def _make_ambiguity(
+        *, duration=120, theirs_format="MP3", mine_format="MP3", theirs_count=1
+    ):
+        group = next(group_numbers)
+        # Distinct per group as well as within it, so two ambiguities built
+        # in one test cannot collide on size and fall into the hash tier.
+        sizes = count(group * 10_000_000, 1_000_000)
+
+        def add(collection_id, folder, name, fmt, track_duration):
+            track = make_track(
+                collection_id=collection_id,
+                file_path=str(tmp_path / folder / name),
+                file_name=name,
+                format=fmt,
+                duration=track_duration,
+                file_size=next(sizes),
+            )
+            session.add(track)
+            return track
+
+        # duration and duration + 2 straddle theirs at duration + 1, so both
+        # are 1s away and both qualify.
+        candidates = [
+            add(mine.id, "mine", f"mine{group}a.mp3", mine_format, duration),
+            add(mine.id, "mine", f"mine{group}b.mp3", mine_format, duration + 2),
+        ]
+        their_tracks = [
+            add(
+                theirs.id,
+                "theirs",
+                f"theirs{group}{chr(ord('a') + n)}.{theirs_format.lower()}",
+                theirs_format,
+                duration + 1,
+            )
+            for n in range(theirs_count)
+        ]
+        session.commit()
+        return Ambiguity(theirs=their_tracks, candidates=candidates)
+
+    return _make_ambiguity

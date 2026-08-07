@@ -2,20 +2,9 @@ import json
 import os
 import shutil
 
-import pytest
-from fastapi.testclient import TestClient
 from sqlmodel import select
 
-from database import get_session
-from main import app
 from models import Track
-
-
-@pytest.fixture
-def client(session):
-    app.dependency_overrides[get_session] = lambda: session
-    yield TestClient(app)
-    app.dependency_overrides.clear()
 
 
 def test_preview_returns_a_plan(
@@ -146,15 +135,18 @@ def test_preview_already_have_track_is_rejected(
     # defaults), so the fuzzy tier pairs them and neither is an upgrade: the
     # verdict is already_have. Only file_size differs, which keeps the hash
     # tier from opening files that don't exist.
+    title = "A Pompous Title"
     my_track = make_track(
         collection_id=mine.id,
         file_path=str(tmp_path / "mine" / "song.mp3"),
         file_size=1_000_000,
+        title=title,
     )
     their_track = make_track(
         collection_id=theirs.id,
         file_path=str(tmp_path / "theirs" / "song.mp3"),
         file_size=2_000_000,
+        title=title,
     )
     session.add(my_track)
     session.add(their_track)
@@ -175,7 +167,7 @@ def test_preview_already_have_track_is_rejected(
     )
 
     assert response.status_code == 400
-    assert str(their_id) in response.json()["detail"]
+    assert title in response.json()["detail"]
 
 
 def test_unknown_collection_id_returns_404(client, collections, destination):
@@ -854,15 +846,18 @@ def test_execute_rejects_a_non_candidate_id(
     # fuzzy tier pairs them and neither wins: the verdict is already_have,
     # which is not an import candidate. Only file_size differs, which keeps
     # the hash tier from opening files.
+    title = "Any Title"
     my_track = make_track(
         collection_id=mine.id,
         file_path=str(tmp_path / "mine" / "song.mp3"),
         file_size=1_000_000,
+        title=title,
     )
     their_track = make_track(
         collection_id=theirs.id,
         file_path=str(tmp_path / "theirs" / "song.mp3"),
         file_size=2_000_000,
+        title=title,
     )
     session.add(my_track)
     session.add(their_track)
@@ -883,7 +878,7 @@ def test_execute_rejects_a_non_candidate_id(
     )
 
     assert response.status_code == 400
-    assert str(their_id) in response.json()["detail"]
+    assert title in response.json()["detail"]
 
     # Nothing ran: validation happens before any file is touched.
     assert list(destination.iterdir()) == []
@@ -1084,3 +1079,205 @@ def test_rescan_nonexistent_root_returns_400(client, tmp_path, fixtures_dir):
     response2 = client.post(f"/api/collections/{collection_id}/rescan")
     assert response2.status_code == 400
     assert "not found" in response2.json()["detail"]
+
+
+def _import_body(mine, theirs, destination, track_ids, resolutions=None, **overrides):
+    body = {
+        "track_ids": track_ids,
+        "mine_collection_id": mine.id,
+        "theirs_collection_id": theirs.id,
+        "destination_root": str(destination),
+        "structure_mode": "flat",
+        "upgrade_action": "keep_both",
+    }
+    if resolutions is not None:
+        body["resolutions"] = resolutions
+    body.update(overrides)
+    return body
+
+
+def test_ambiguous_track_without_a_resolution_is_rejected(
+    client, collections, destination, make_ambiguity
+):
+    mine, theirs = collections
+    ambiguity = make_ambiguity()
+    their_track = ambiguity.theirs[0]
+
+    response = client.post(
+        "/api/import/preview",
+        json=_import_body(mine, theirs, destination, [their_track.id]),
+    )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    # Names the track and says what to do, rather than just refusing: this is
+    # the message a user sees for every unresolved review row.
+    assert "Not import candidates" in detail
+    assert their_track.file_name in detail
+    assert "run Compare again" in detail
+
+
+def test_resolution_none_of_these_routes_to_missing(
+    client, collections, destination, make_ambiguity
+):
+    mine, theirs = collections
+    ambiguity = make_ambiguity()
+    their_track = ambiguity.theirs[0]
+
+    response = client.post(
+        "/api/import/preview",
+        json=_import_body(
+            mine,
+            theirs,
+            destination,
+            [their_track.id],
+            resolutions=[{"theirs_id": their_track.id, "mine_id": None}],
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["operations"]) == 1
+    assert body["operations"][0]["action"] == "copy"
+    assert body["operations"][0]["source"] == their_track.file_path
+    # The point of "none of these": routed to missing, not paired with either
+    # candidate. Without this the test passes even on a wrong pairing, since
+    # an upgrade also produces a copy.
+    assert body["upgrades"] == []
+
+
+def test_resolution_deletes_the_chosen_file_only(
+    client, collections, destination, make_ambiguity
+):
+    mine, theirs = collections
+    ambiguity = make_ambiguity(theirs_format="FLAC", mine_format="MP3")
+    their_track = ambiguity.theirs[0]
+    chosen, not_chosen = ambiguity.candidates
+
+    response = client.post(
+        "/api/import/preview",
+        json=_import_body(
+            mine,
+            theirs,
+            destination,
+            [their_track.id],
+            resolutions=[{"theirs_id": their_track.id, "mine_id": chosen.id}],
+            upgrade_action="delete",
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    # Copy first, then the destructive step: the order is the safety
+    # mechanism, not a formatting detail (§5b).
+    assert [op["action"] for op in body["operations"]] == ["copy", "delete"]
+    assert body["operations"][0]["source"] == their_track.file_path
+    assert body["operations"][1]["source"] == chosen.file_path
+    assert not_chosen.file_path not in {op["source"] for op in body["operations"]}
+
+
+def test_resolution_naming_a_file_that_is_not_a_candidate_is_rejected(
+    client, session, tmp_path, make_track, collections, destination, make_ambiguity
+):
+    mine, theirs = collections
+    ambiguity = make_ambiguity()
+    their_track = ambiguity.theirs[0]
+
+    unrelated = make_track(
+        collection_id=mine.id,
+        file_path=str(tmp_path / "mine" / "unrelated.mp3"),
+        file_name="unrelated.mp3",
+        title="A Different One",
+        artist="Somebody Else",
+        duration=300,
+        file_size=99_000_000,
+    )
+    session.add(unrelated)
+    session.commit()
+
+    response = client.post(
+        "/api/import/preview",
+        json=_import_body(
+            mine,
+            theirs,
+            destination,
+            [their_track.id],
+            resolutions=[{"theirs_id": their_track.id, "mine_id": unrelated.id}],
+        ),
+    )
+
+    # The §5c guard: the server re-derives the candidate set, so a client can
+    # only ever pick a wrong candidate among genuine ones, never any file it
+    # likes. If this ever passes silently the protection is gone.
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert unrelated.file_name in detail
+    assert their_track.file_name in detail
+    assert "not one of the files matched" in detail
+
+
+def test_two_resolutions_claiming_the_same_file_are_rejected(
+    client, collections, destination, make_ambiguity
+):
+    mine, theirs = collections
+    # Two tracks of theirs sharing one candidate set, so both can name the
+    # same file of mine. FLAC over MP3 so both classify as upgrades and
+    # actually reach the double-booking check.
+    ambiguity = make_ambiguity(theirs_format="FLAC", mine_format="MP3", theirs_count=2)
+    first, second = ambiguity.theirs
+    contested = ambiguity.candidates[0]
+
+    response = client.post(
+        "/api/import/preview",
+        json=_import_body(
+            mine,
+            theirs,
+            destination,
+            [first.id, second.id],
+            resolutions=[
+                {"theirs_id": first.id, "mine_id": contested.id},
+                {"theirs_id": second.id, "mine_id": contested.id},
+            ],
+            upgrade_action="delete",
+        ),
+    )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    # Both tracks of theirs share artist and title — that is why they matched
+    # the same file — so the message has to name them by file to be usable.
+    # Pins which check fired: several other conditions also return 400, so a
+    # bare status assertion would pass on the wrong rejection.
+    assert "would both replace" in detail
+    assert first.file_name in detail
+    assert second.file_name in detail
+    assert contested.file_name in detail
+
+
+def test_resolution_to_a_better_file_of_mine_is_rejected(
+    client, collections, destination, make_ambiguity
+):
+    mine, theirs = collections
+    # Theirs is the lossy one, so either candidate of mine wins on quality.
+    ambiguity = make_ambiguity(theirs_format="MP3", mine_format="FLAC")
+    their_track = ambiguity.theirs[0]
+    chosen = ambiguity.candidates[0]
+
+    response = client.post(
+        "/api/import/preview",
+        json=_import_body(
+            mine,
+            theirs,
+            destination,
+            [their_track.id],
+            resolutions=[{"theirs_id": their_track.id, "mine_id": chosen.id}],
+        ),
+    )
+
+    # Refusing is right — copying would hand back a worse duplicate — but the
+    # generic "not import candidates" message would list three reasons that
+    # all happen to be false here, so this path has its own.
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "Nothing to import" in detail
+    assert their_track.file_name in detail

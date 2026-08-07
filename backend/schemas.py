@@ -96,6 +96,13 @@ class ImportPreviewRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class TrackResolution(BaseModel):
+    theirs_id: int
+    mine_id: int | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ImportRequest(BaseModel):
     track_ids: list[int] = Field(min_length=1)
     mine_collection_id: int
@@ -103,6 +110,7 @@ class ImportRequest(BaseModel):
     destination_root: str
     structure_mode: StructureMode
     upgrade_action: UpgradeAction
+    resolutions: list[TrackResolution] = []
 
     @field_validator("destination_root")
     @classmethod
