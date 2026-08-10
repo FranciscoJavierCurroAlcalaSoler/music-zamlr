@@ -15,6 +15,7 @@ import {
   Chip,
 } from "@mui/material";
 import type { ImportPreview, Match } from "../types";
+import { text, duration, bitrate } from "../format";
 
 interface ImportPreviewDialogProps {
   preview: ImportPreview | null;
@@ -53,22 +54,6 @@ function describeDestructive(counts: Record<string, number>): string {
       : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
   return `This will ${list} of your existing files.`;
 }
-
-const PLACEHOLDER = "—";
-
-const text = (value: string | number | null) =>
-  value === null || value === "" ? PLACEHOLDER : String(value);
-
-const duration = (seconds: number | null) => {
-  if (seconds === null) return PLACEHOLDER;
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-};
-
-// read_track stores audio.info.bitrate, which is bits per second.
-const bitrate = (bitsPerSecond: number | null) =>
-  bitsPerSecond === null
-    ? PLACEHOLDER
-    : `${Math.round(bitsPerSecond / 1000)} kbps`;
 
 interface ComparisonRow {
   label: string;

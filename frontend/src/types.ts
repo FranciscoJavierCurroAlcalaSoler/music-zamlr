@@ -2,6 +2,7 @@ export interface Track {
   id: number;
   collection_id: number;
   file_path: string;
+  file_name: string;
   artist: string | null;
   album: string | null;
   title: string | null;
@@ -47,6 +48,11 @@ export interface Candidate {
 export interface AmbiguousMatch {
   theirs: Track;
   candidates: Candidate[];
+}
+
+export interface TrackResolution {
+  theirs_id: number;
+  mine_id: number | null;
 }
 
 export interface MatchResult {
@@ -111,4 +117,5 @@ export interface ImportRequestBody {
   destination_root: string;
   structure_mode: StructureMode;
   upgrade_action: UpgradeAction;
+  resolutions: TrackResolution[];
 }

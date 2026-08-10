@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import {
   Alert,
   Box,
@@ -19,6 +19,7 @@ import type {
   GridColDef,
   GridRowSelectionModel,
   GridRowParams,
+  GridRenderCellParams,
 } from "@mui/x-data-grid";
 import type {
   Track,
@@ -28,6 +29,7 @@ import type {
   ImportPreview,
   ImportSettingsValues,
   ImportResult,
+  AmbiguousMatch,
 } from "../types";
 import {
   fetchDiff,
@@ -38,16 +40,15 @@ import {
 import { ImportSettings } from "./ImportSettings";
 import { ImportPreviewDialog } from "./ImportPreviewDialog";
 import { ImportResultView } from "./ImportResultView";
+import { ResolveMatchDialog } from "./ResolveMatchDialog";
 
 type BucketKey =
-  | "missing"
-  | "upgrade_available"
-  | "already_have"
-  | "needs_review";
+  "missing" | "upgrade_available" | "already_have" | "needs_review";
 
 interface DiffRow {
   id: number;
   bucket: BucketKey;
+  resolvedTo: number | null | undefined;
   title: string | null;
   artist: string | null;
   album: string | null;
@@ -68,8 +69,14 @@ interface OnlyInMineRow {
   duration: number | null;
 }
 
-const columns: GridColDef[] = [
-  { field: "bucket", headerName: "Status", width: 140 },
+const diffColumns: GridColDef[] = [
+  {
+    field: "bucket",
+    headerName: "Status",
+    width: 200,
+    valueGetter: (_value, row: DiffRow) =>
+      describeStatus(row.bucket, row.resolvedTo),
+  },
   { field: "title", headerName: "Title", flex: 1 },
   { field: "artist", headerName: "Artist", flex: 1 },
   { field: "album", headerName: "Album", flex: 1 },
@@ -92,6 +99,22 @@ const onlyInMineColumns: GridColDef[] = [
 interface DiffViewProps {
   collections: Collection[];
   loadingCollections: boolean;
+}
+
+function describeStatus(
+  bucket: BucketKey,
+  resolvedTo: number | null | undefined,
+): string {
+  if (bucket === "missing") return "Missing";
+  if (bucket === "upgrade_available") return "Upgrade";
+  if (bucket === "already_have") return "Already have";
+  // Checked, not asserted in a comment: a fifth bucket would break the build
+  // here rather than quietly falling through to the "replaces yours" label.
+  bucket satisfies "needs_review";
+  if (resolvedTo === undefined) return "Needs review";
+  if (resolvedTo === null) return "Resolved · import as new";
+  /* From here on, resolvedTo can only be a number. */
+  return "Resolved · replaces yours";
 }
 
 export function DiffView({ collections, loadingCollections }: DiffViewProps) {
@@ -118,14 +141,23 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
     mine: string | null;
     theirs: string | null;
   } | null>(null);
+  const [reviewing, setReviewing] = useState<AmbiguousMatch | null>(null);
+  const [resolutions, setResolutions] = useState<Map<number, number | null>>(
+    new Map(),
+  );
 
   const rows: DiffRow[] = useMemo(() => {
     if (!diff) return [];
     const r = diff.match_results;
 
-    const fromTrack = (t: Track, bucketKey: BucketKey): DiffRow => ({
+    const fromTrack = (
+      t: Track,
+      bucketKey: BucketKey,
+      resolvedTo?: number | null,
+    ): DiffRow => ({
       id: t.id,
       bucket: bucketKey,
+      resolvedTo,
       title: t.title,
       artist: t.artist,
       album: t.album,
@@ -144,11 +176,13 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
 
     return [
       ...r.missing.map((t) => fromTrack(t, "missing")),
-      ...r.needs_review.map((a) => fromTrack(a.theirs, "needs_review")),
+      ...r.needs_review.map((a) =>
+        fromTrack(a.theirs, "needs_review", resolutions.get(a.theirs.id)),
+      ),
       ...r.upgrade_available.map((m) => fromMatch(m, "upgrade_available")),
       ...r.already_have.map((m) => fromMatch(m, "already_have")),
     ];
-  }, [diff]);
+  }, [diff, resolutions]);
 
   const onlyInMineRows: OnlyInMineRow[] = useMemo(() => {
     if (!diff) return [];
@@ -163,6 +197,68 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
       duration: t.duration,
     }));
   }, [diff]);
+
+  const ambiguityByTheirsId = useMemo(() => {
+    if (!diff) return new Map<number, AmbiguousMatch>();
+
+    return new Map<number, AmbiguousMatch>(
+      diff.match_results.needs_review.map((ambiguity) => [
+        ambiguity.theirs.id,
+        ambiguity,
+      ]),
+    );
+  }, [diff]);
+
+  const claimedElsewhere = useMemo(() => {
+    const claims = new Map<number, string>();
+    resolutions.forEach((mineTrackId, theirsTrackId) => {
+      if (mineTrackId === null) return;
+      if (theirsTrackId === reviewing?.theirs.id) return;
+      if (!selection.ids.has(theirsTrackId)) return;
+      claims.set(
+        mineTrackId,
+        ambiguityByTheirsId.get(theirsTrackId)?.theirs.file_name ??
+          "another track",
+      );
+    });
+    return claims;
+  }, [selection, resolutions, reviewing, ambiguityByTheirsId]);
+
+  const openReview = useCallback(
+    (trackId: number) => {
+      const ambiguity = ambiguityByTheirsId.get(trackId);
+      if (ambiguity !== undefined) {
+        setReviewing(ambiguity);
+      }
+    },
+    [ambiguityByTheirsId],
+  );
+
+  const columns = useMemo<GridColDef[]>(
+    () => [
+      ...diffColumns,
+      {
+        field: "review",
+        headerName: "Review",
+        width: 110,
+        sortable: false,
+        filterable: false,
+        disableColumnMenu: true,
+        renderCell: (params: GridRenderCellParams) =>
+          params.row.bucket === "needs_review" ? (
+            <Button
+              onClick={(e) => {
+                e.stopPropagation();
+                openReview(params.row.id);
+              }}
+            >
+              {params.row.resolvedTo !== undefined ? "Change" : "Review"}
+            </Button>
+          ) : null,
+      },
+    ],
+    [openReview],
+  );
 
   const scannedAt = (id: number | "") =>
     collections.find((c) => c.id === id)?.last_scanned_at ?? null;
@@ -182,6 +278,7 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
     setSelection({ type: "include", ids: new Set() });
     setPreview(null);
     setLastSettings(null);
+    setResolutions(new Map());
     try {
       if (mineId === "" || theirsId === "") {
         throw new Error("Select both collections first.");
@@ -199,6 +296,21 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
     }
   }
 
+  function resolveReviewing(mineId: number | null) {
+    if (reviewing === null) return;
+    const theirsTrackId = reviewing.theirs.id;
+    setResolutions((resolutions) => {
+      const newResolutions = new Map(resolutions);
+      newResolutions.set(theirsTrackId, mineId);
+      return newResolutions;
+    });
+    setSelection((previous) => ({
+      ...previous,
+      ids: new Set(previous.ids).add(theirsTrackId),
+    }));
+    setReviewing(null);
+  }
+
   function importRequestBody(settings: ImportSettingsValues) {
     if (mineId === "" || theirsId === "") {
       throw new Error("Select both collections first.");
@@ -212,6 +324,10 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
       destination_root: settings.destinationRoot,
       structure_mode: settings.structureMode,
       upgrade_action: settings.upgradeAction,
+      resolutions: [...resolutions].map(([theirsTrackId, mineTrackId]) => ({
+        theirs_id: theirsTrackId,
+        mine_id: mineTrackId,
+      })),
     };
   }
 
@@ -359,7 +475,9 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
                     onRowSelectionModelChange={setSelection}
                     isRowSelectable={(params: GridRowParams) =>
                       params.row.bucket === "missing" ||
-                      params.row.bucket === "upgrade_available"
+                      params.row.bucket === "upgrade_available" ||
+                      (params.row.bucket === "needs_review" &&
+                        params.row.resolvedTo !== undefined)
                     }
                     sx={{ flex: 1, minHeight: 0 }}
                   />
@@ -391,6 +509,16 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
         executing={executing}
         onCancel={() => setPreview(null)}
         onConfirm={runExecute}
+      />
+      <ResolveMatchDialog
+        key={reviewing?.theirs.id}
+        ambiguity={reviewing}
+        chosenMineId={
+          reviewing ? resolutions?.get(reviewing.theirs.id) : undefined
+        }
+        claimedElsewhere={claimedElsewhere}
+        onResolve={resolveReviewing}
+        onCancel={() => setReviewing(null)}
       />
     </>
   );

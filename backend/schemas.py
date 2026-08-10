@@ -9,6 +9,10 @@ from enums import ActionType, Bucket, OperationStatus, StructureMode, UpgradeAct
 class TrackRead(BaseModel):
     id: int
     file_path: str
+    # Exposed because the UI needs to tell two candidates apart, and tracks
+    # that land in the same review group matched each other on artist and
+    # title — so the file name is the only field that distinguishes them.
+    file_name: str
     artist: str | None = None
     album: str | None = None
     title: str | None = None

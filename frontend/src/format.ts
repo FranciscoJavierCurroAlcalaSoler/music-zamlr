@@ -39,3 +39,21 @@ export function formatTimestamp(
   }
   return TIMESTAMP_FORMAT.format(parsed);
 }
+
+const PLACEHOLDER = "—";
+
+export function text(value: string | number | null): string {
+  return value === null || value === "" ? PLACEHOLDER : String(value);
+}
+
+export function duration(seconds: number | null): string {
+  if (seconds === null) return PLACEHOLDER;
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+// read_track stores audio.info.bitrate, which is bits per second.
+export function bitrate(bitsPerSecond: number | null): string {
+  return bitsPerSecond === null
+    ? PLACEHOLDER
+    : `${Math.round(bitsPerSecond / 1000)} kbps`;
+}
