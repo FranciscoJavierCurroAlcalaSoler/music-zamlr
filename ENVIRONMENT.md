@@ -32,6 +32,17 @@ Last updated: 2026-07-01
 
 Extension versions float on auto-update; pin one only if it ever matters.
 
+Prettier is the exception, and is pinned as an exact devDependency in
+`frontend/package.json`. The extension bundles its own copy but prefers a
+workspace-local install, so pinning is what keeps the editor and `npx prettier`
+on the same version. Without it the two drifted and disagreed about formatting,
+so files reformatted themselves back and forth between a save and a CLI run.
+
+Format-on-save is configured per language in `.vscode/settings.json`: Prettier
+for TS/TSX/CSS/JSON, Ruff for Python (with organize-imports on save). Markdown
+is deliberately excluded — Prettier realigns every table in these docs, which is
+diff noise rather than a fix.
+
 ## Git configuration (global)
 ```
 user.name          = Curro
