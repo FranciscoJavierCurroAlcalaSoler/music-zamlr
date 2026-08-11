@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -81,6 +82,17 @@ SCANNED_FIELDS = (
 
 
 @dataclass
+class ScanProgress:
+    scanned: int
+    added: int
+    skipped_non_audio: int
+    updated: int
+    deleted: int
+    matched: int
+    current_path: str | None
+
+
+@dataclass
 class ScanResult:
     scanned: int
     added: int
@@ -97,7 +109,14 @@ class ScanResult:
     unreadable_directories: list[str] = field(default_factory=list)
 
 
-def scan_folder(folder_path: str, collection_id: int, session) -> ScanResult:
+def scan_folder(
+    folder_path: str,
+    collection_id: int,
+    session,
+    # The on_progress default value None keeps existing call sites (tests,
+    # endpoints, CLI) working.
+    on_progress: Callable[[ScanProgress], None] | None = None,
+) -> ScanResult:
     scanned_count = 0
     matched_count = 0
     updated_count = 0
@@ -105,6 +124,19 @@ def scan_folder(folder_path: str, collection_id: int, session) -> ScanResult:
     skipped_non_audio_count = 0
     deleted_count = 0
     pending_inserts = 0
+
+    def report(current_path: str | None = None) -> None:
+        if on_progress is not None:
+            scan_progress = ScanProgress(
+                scanned=scanned_count,
+                added=added_count,
+                updated=updated_count,
+                matched=matched_count,
+                deleted=deleted_count,
+                skipped_non_audio=skipped_non_audio_count,
+                current_path=current_path,
+            )
+            on_progress(scan_progress)
 
     collection = session.get(Collection, collection_id)
     if collection is None:
@@ -133,13 +165,14 @@ def scan_folder(folder_path: str, collection_id: int, session) -> ScanResult:
         if error.filename:
             unreadable_directories.append(os.path.normpath(error.filename))
 
+    report()
     for root, dirs, files in os.walk(folder_path, onerror=record_unreadable_directory):
         # Skip the superseded directory at any depth.
         dirs[:] = [d for d in dirs if d.casefold() != superseded_folded]
         for file in files:
             scanned_count += 1
+            file_key = os.path.normpath(os.path.join(root, file))
             if file.lower().endswith(tuple(ALLOWED_EXTENSIONS)):
-                file_key = os.path.normpath(os.path.join(root, file))
                 visited_keys.add(file_key)
                 if file_key in expected_keys:
                     matched_count += 1
@@ -174,6 +207,7 @@ def scan_folder(folder_path: str, collection_id: int, session) -> ScanResult:
                     pending_inserts = 0
             else:
                 skipped_non_audio_count += 1
+            report(file_key)
 
     def under_unreadable_directory(path: str) -> bool:
         for bad_path in unreadable_directories:
@@ -184,6 +218,7 @@ def scan_folder(folder_path: str, collection_id: int, session) -> ScanResult:
                 continue  # different drives: not comparable, so not under it
         return False
 
+    report()
     stale_keys = expected_keys - visited_keys
     for stale_key in stale_keys:
         if under_unreadable_directory(stale_key):
@@ -191,6 +226,7 @@ def scan_folder(folder_path: str, collection_id: int, session) -> ScanResult:
         stale_track = existing_by_path[stale_key]
         session.delete(stale_track)
         deleted_count += 1
+    report()
 
     collection.last_scanned_at = datetime.now().isoformat()
     # This commit also flushes any pending inserts, so we don't need to flush before it.

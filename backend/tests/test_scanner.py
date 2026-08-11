@@ -413,3 +413,93 @@ def test_scan_still_deletes_rows_outside_an_unreadable_subtree(
     assert result.deleted == 1
     assert result.unreadable_directories == [os.path.normpath(str(locked_dir))]
     assert session.exec(select(Track)).one().file_name == "a.mp3"
+
+
+def test_scan_progress_runs_once_for_each_file(
+    tmp_path, test_collection, session, fixtures_dir
+):
+    copies = {
+        "a.mp3": "test_track.mp3",
+        "b.flac": "test_track.flac",
+        "c.mp3": "test_track.mp3",
+    }
+    for name, fixture in copies.items():
+        shutil.copy(fixtures_dir / fixture, tmp_path / name)
+    # Cover art is what gives this test the power to fail. The reported path
+    # is computed once for every file, but only the audio branch used to
+    # compute it, so a folder whose first entry is not audio raised
+    # UnboundLocalError. Without a non-audio file here, that branch never runs.
+    (tmp_path / "cover.jpg").write_text("not audio")
+
+    files_on_disk = {
+        os.path.normpath(str(tmp_path / name)) for name in (*copies, "cover.jpg")
+    }
+
+    collection_id = test_collection
+    events = []
+    result = scan_folder(
+        str(tmp_path),
+        collection_id=collection_id,
+        session=session,
+        on_progress=events.append,
+    )
+
+    paths = [e.current_path for e in events if e.current_path is not None]
+
+    # scanned, not added: every file gets a report, audio or not. The two
+    # agree only while every file is both audio and new, which is exactly the
+    # fixture this test deliberately no longer has.
+    assert len(paths) == result.scanned
+    assert set(paths) == files_on_disk
+
+
+def test_scan_progress_last_report_counts_equal_scan_result(
+    tmp_path, test_collection, session, fixtures_dir
+):
+    shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "unchanged.mp3")
+    shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "grown.mp3")
+    shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "removed.mp3")
+
+    collection_id = test_collection
+    scan_folder(str(tmp_path), collection_id=collection_id, session=session)
+
+    # The second scan is arranged so no counter lands on zero. An assertion
+    # comparing 0 with 0 holds whatever the code does, and deleted was exactly
+    # that: it is only ever non-zero because report() runs after the stale-row
+    # loop, so a first-scan-only fixture cannot detect that call going missing.
+    #
+    # composer is not a tag read_track reads, so a long one grows the file
+    # while every other scanned field stays identical. Same method, and same
+    # reason, as test_scan_clears_hash_when_only_file_size_changes above.
+    audio = mutagen.File(str(tmp_path / "grown.mp3"), easy=True)
+    audio["composer"] = "x" * 20_000
+    audio.save()
+    os.remove(tmp_path / "removed.mp3")
+    shutil.copy(fixtures_dir / "test_track.flac", tmp_path / "added.flac")
+    (tmp_path / "cover.jpg").write_text("not audio")
+
+    events = []
+    result = scan_folder(
+        str(tmp_path),
+        collection_id=collection_id,
+        session=session,
+        on_progress=events.append,
+    )
+
+    assert (
+        result.scanned,
+        result.added,
+        result.skipped_non_audio,
+        result.updated,
+        result.deleted,
+        result.matched,
+    ) == (4, 1, 1, 1, 1, 2)
+
+    last_event = events[-1]
+
+    assert last_event.scanned == result.scanned
+    assert last_event.added == result.added
+    assert last_event.skipped_non_audio == result.skipped_non_audio
+    assert last_event.updated == result.updated
+    assert last_event.deleted == result.deleted
+    assert last_event.matched == result.matched
