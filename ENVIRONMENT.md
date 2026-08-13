@@ -2,7 +2,7 @@
 
 Reproducible inventory of the dev/runtime setup. Update whenever something is installed, upgraded, or reconfigured. Language-level packages are tracked by their lockfiles, not here — see "Not tracked here" at the bottom.
 
-Last updated: 2026-07-01
+Last updated: 2026-08-13
 
 ## Machine
 | | |
@@ -42,6 +42,23 @@ Format-on-save is configured per language in `.vscode/settings.json`: Prettier
 for TS/TSX/CSS/JSON, Ruff for Python (with organize-imports on save). Markdown
 is deliberately excluded — Prettier realigns every table in these docs, which is
 diff noise rather than a fix.
+
+**Line endings are pinned to LF in two places, and both are needed** (added
+2026-08-13). Every text file in the repo is stored as LF, but Git's
+`core.autocrlf=true` rewrites them to CRLF on checkout, and Prettier's
+`endOfLine` defaults to `lf` — so a fresh clone failed
+`npx prettier --check src/` on files nobody had touched.
+
+- `.gitattributes` (`* text=auto eol=lf`) governs files **Git** writes. Being
+  committed, it applies on every machine whatever that machine's
+  `core.autocrlf` is set to, so no per-developer Git config is required.
+  `text=auto` still lets Git detect binaries, so the audio fixtures under
+  `backend/tests/fixtures/` are untouched.
+- `"files.eol": "\n"` in `.vscode/settings.json` governs files the **editor**
+  creates, which no checkout rule ever sees. VS Code on Windows creates new
+  files with `\r\n`, and format-on-save does not rescue them: Prettier
+  normalizes the content while the editor writes the endings. Two new
+  components failed the format check on their first save before this was set.
 
 ## Git configuration (global)
 ```
