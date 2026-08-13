@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -10,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 
-from database import create_collection, get_session
+from database import create_collection, create_db_and_tables, get_session
 from enums import ActionType, Bucket, OperationStatus
 from importing import OperationResult, PlannedOperation, execute_plan, plan_import
 from matching import Match, MatchResult, classify_pairing, match_collections
@@ -29,7 +30,28 @@ from schemas import (
     TrackRead,
 )
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Make sure the schema exists before the first request.
+
+    Until this existed, only scanner.py's CLI main() ever created the tables,
+    so the server could not start from nothing: delete db/music.db and SQLite
+    obligingly creates an empty file on the first connection, with no tables
+    in it, and every request then fails on "no such table". create_all only
+    adds what is missing, so running it on every start costs nothing.
+
+    Note for the tests: conftest.py replaces database.engine with one that
+    raises on connect, and this would reach it. It does not today, because
+    the client fixture builds TestClient(app) without using it as a context
+    manager, and TestClient only runs lifespan inside a `with`. Changing that
+    means giving the fixture a real engine here too.
+    """
+    create_db_and_tables()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
