@@ -1,4 +1,9 @@
 {
+  // New files on Windows are created with \r\n unless this says otherwise,
+  // and format-on-save does not rescue them: Prettier normalizes the content
+  // but the editor writes the line endings. Every file in this repo is LF, so
+  // a CRLF newcomer fails `npx prettier --check src/` on its first commit.
+  "files.eol": "\n",
   "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.formatOnSave": true,

@@ -1,0 +1,12 @@
+# Git stores text as LF, but core.autocrlf=true on Windows converts it to
+# CRLF on checkout. Prettier's endOfLine defaults to lf, so a fresh clone
+# would fail `npx prettier --check src/` on files nobody had touched.
+#
+# Pinning the checkout to LF makes every working tree match what is stored,
+# on every machine, whatever each developer's core.autocrlf happens to be.
+# This is the half that .vscode/settings.json cannot do: files.eol governs
+# files the editor creates, and this governs files Git writes.
+#
+# text=auto still lets Git detect binaries, so the audio fixtures under
+# backend/tests/fixtures/ are left exactly as they are.
+* text=auto eol=lf
