@@ -1,3 +1,4 @@
+import json
 from itertools import count
 from pathlib import Path
 from typing import NamedTuple
@@ -121,6 +122,70 @@ def client(session):
     app.dependency_overrides[get_session] = lambda: session
     yield TestClient(app)
     app.dependency_overrides.clear()
+
+
+class ScanStream(NamedTuple):
+    """The frames one scan endpoint sent, in order and split by kind."""
+
+    events: list[str]
+    progress: list[dict]
+    done: dict | None
+    error: dict | None
+
+
+def parse_sse(body: str) -> ScanStream:
+    """Split an SSE body into frames.
+
+    Frames are separated by a blank line, which is why splitting on "\\n\\n"
+    is enough here: json.dumps never emits a bare newline, so a payload can
+    not contain the separator.
+    """
+    events: list[str] = []
+    progress: list[dict] = []
+    done = None
+    error = None
+    for block in body.split("\n\n"):
+        if not block.strip():
+            continue
+        event = None
+        data = None
+        for line in block.splitlines():
+            if line.startswith("event: "):
+                event = line.removeprefix("event: ")
+            elif line.startswith("data: "):
+                data = json.loads(line.removeprefix("data: "))
+        events.append(event)
+        if event == "progress":
+            progress.append(data)
+        elif event == "done":
+            done = data
+        elif event == "error":
+            error = data
+    return ScanStream(events=events, progress=progress, done=done, error=error)
+
+
+@pytest.fixture
+def scan_stream(client):
+    """POST to a scan endpoint, consume the stream, and return its frames.
+
+    The scan endpoints no longer answer with JSON. They stream Server-Sent
+    Events, and the final frame carries what the response body used to, so a
+    test that read response.json() reads .done instead.
+
+    Success paths only. A request that fails validation never opens a stream,
+    so those tests keep using client.post and a status code — which is what
+    makes them the regression test for "validate before the stream opens".
+    """
+
+    def _scan_stream(url, **kwargs) -> ScanStream:
+        with client.stream("POST", url, **kwargs) as response:
+            assert response.status_code == 200, (
+                f"{url} answered {response.status_code}, so no stream was opened"
+            )
+            body = "".join(response.iter_text())
+        return parse_sse(body)
+
+    return _scan_stream
 
 
 class Ambiguity(NamedTuple):

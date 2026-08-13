@@ -1,10 +1,13 @@
 import json
 import os
 import shutil
+import time
 
 from sqlmodel import select
 
-from models import Track
+import main
+from models import Collection, Track
+from scanner import ScanProgress, ScanResult
 
 
 def test_preview_returns_a_plan(
@@ -925,16 +928,15 @@ def test_diff_same_collection_returns_400(client, collections):
     assert response.status_code == 400
 
 
-def test_scan_returns_collection_and_stats(client, tmp_path, fixtures_dir):
+def test_scan_returns_collection_and_stats(scan_stream, tmp_path, fixtures_dir):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 
-    response = client.post(
+    stream = scan_stream(
         "/api/collections/scan",
         json={"root_path": str(tmp_path), "name": "Theirs"},
     )
 
-    assert response.status_code == 200
-    body = response.json()
+    body = stream.done
     assert body["scanned"] == 1
     assert body["added"] == 1
     assert body["updated"] == 0
@@ -942,14 +944,15 @@ def test_scan_returns_collection_and_stats(client, tmp_path, fixtures_dir):
     assert body["collection"]["name"] == "Theirs"
 
 
-def test_scan_duplicate_collection_name_returns_400(client, tmp_path, fixtures_dir):
+def test_scan_duplicate_collection_name_returns_400(
+    client, scan_stream, tmp_path, fixtures_dir
+):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 
-    response1 = client.post(
+    scan_stream(
         "/api/collections/scan",
         json={"root_path": str(tmp_path), "name": "Theirs"},
     )
-    assert response1.status_code == 200
 
     response2 = client.post(
         "/api/collections/scan",
@@ -964,15 +967,14 @@ def test_scan_duplicate_collection_name_returns_400(client, tmp_path, fixtures_d
 
 
 def test_scan_duplicate_collection_name_is_case_insensitive(
-    client, tmp_path, fixtures_dir
+    client, scan_stream, tmp_path, fixtures_dir
 ):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 
-    first = client.post(
+    scan_stream(
         "/api/collections/scan",
         json={"root_path": str(tmp_path), "name": "Theirs"},
     )
-    assert first.status_code == 200
 
     # Names are compared casefolded even though the unique constraint is not:
     # collection ids drive every diff and import, so a clash is cosmetic, but
@@ -998,7 +1000,7 @@ def test_scan_nonexistent_root_returns_400(client):
 
 
 def test_scan_accepts_a_root_path_with_surrounding_whitespace(
-    client, tmp_path, fixtures_dir
+    scan_stream, tmp_path, fixtures_dir
 ):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 
@@ -1006,30 +1008,26 @@ def test_scan_accepts_a_root_path_with_surrounding_whitespace(
     # leading or trailing space. normpath does not strip whitespace, so
     # without the validator's strip() the padded string reaches isdir and
     # the request 400s on a directory that plainly exists.
-    response = client.post(
+    stream = scan_stream(
         "/api/collections/scan",
         json={"root_path": f"  {tmp_path}  ", "name": "Padded"},
     )
 
-    assert response.status_code == 200
-    body = response.json()
+    body = stream.done
     assert body["added"] == 1
     assert body["collection"]["root_path"] == os.path.normpath(str(tmp_path))
 
 
-def test_rescan_returns_collection_and_stats(client, tmp_path, fixtures_dir):
+def test_rescan_returns_collection_and_stats(scan_stream, tmp_path, fixtures_dir):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 
-    response1 = client.post(
+    first = scan_stream(
         "/api/collections/scan",
         json={"root_path": str(tmp_path), "name": "Theirs"},
     )
-    assert response1.status_code == 200
-    collection_id = response1.json()["collection"]["id"]
+    collection_id = first.done["collection"]["id"]
 
-    response2 = client.post(f"/api/collections/{collection_id}/rescan")
-    assert response2.status_code == 200
-    body = response2.json()
+    body = scan_stream(f"/api/collections/{collection_id}/rescan").done
     assert body["scanned"] == 1
     assert body["added"] == 0
     assert body["updated"] == 0
@@ -1042,36 +1040,34 @@ def test_rescan_unknown_collection_returns_404(client):
     assert "Collection not found" in response.json()["detail"]
 
 
-def test_rescan_triggers_deletion(client, tmp_path, fixtures_dir):
+def test_rescan_triggers_deletion(scan_stream, tmp_path, fixtures_dir):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 
-    response1 = client.post(
+    first = scan_stream(
         "/api/collections/scan",
         json={"root_path": str(tmp_path), "name": "Theirs"},
     )
-    assert response1.status_code == 200
-    collection_id = response1.json()["collection"]["id"]
+    collection_id = first.done["collection"]["id"]
 
     os.remove(tmp_path / "test_track.mp3")
 
-    response2 = client.post(f"/api/collections/{collection_id}/rescan")
-    assert response2.status_code == 200
-    body = response2.json()
+    body = scan_stream(f"/api/collections/{collection_id}/rescan").done
     assert body["scanned"] == 0
     assert body["added"] == 0
     assert body["updated"] == 0
     assert body["deleted"] == 1
 
 
-def test_rescan_nonexistent_root_returns_400(client, tmp_path, fixtures_dir):
+def test_rescan_nonexistent_root_returns_400(
+    client, scan_stream, tmp_path, fixtures_dir
+):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 
-    response1 = client.post(
+    first = scan_stream(
         "/api/collections/scan",
         json={"root_path": str(tmp_path), "name": "Theirs"},
     )
-    assert response1.status_code == 200
-    collection_id = response1.json()["collection"]["id"]
+    collection_id = first.done["collection"]["id"]
 
     # Simulate the collection root being unmounted or deleted.
     shutil.rmtree(tmp_path)
@@ -1079,6 +1075,140 @@ def test_rescan_nonexistent_root_returns_400(client, tmp_path, fixtures_dir):
     response2 = client.post(f"/api/collections/{collection_id}/rescan")
     assert response2.status_code == 400
     assert "not found" in response2.json()["detail"]
+
+
+def test_scan_stream_ends_with_a_done_frame(scan_stream, tmp_path, fixtures_dir):
+    shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
+
+    stream = scan_stream(
+        "/api/collections/scan",
+        json={"root_path": str(tmp_path), "name": "Theirs"},
+    )
+
+    # The sequence, not the count. A fixture folder scans in microseconds, so
+    # the poll loop can finish before any progress exists and zero progress
+    # frames is a correct stream. Asserting a count here passes on a slow
+    # machine and fails on a fast one.
+    assert stream.events[-1] == "done"
+    assert set(stream.events[:-1]) <= {"progress"}
+    assert stream.events.count("done") == 1
+    assert stream.error is None
+
+
+def test_scan_stream_reports_progress_frames(scan_stream, monkeypatch, tmp_path):
+    # A real scan is far too fast to observe, so the poll interval shrinks and
+    # the scan is slowed. The margin is deliberate: the scan outlasts the poll
+    # by 300x, which is what keeps this from being a race dressed as a test.
+    monkeypatch.setattr(main, "PROGRESS_INTERVAL_SECONDS", 0.001)
+
+    def slow_scan(root_path, collection_id, session, on_progress=None):
+        on_progress(
+            ScanProgress(
+                scanned=7,
+                added=3,
+                skipped_non_audio=1,
+                updated=1,
+                deleted=0,
+                matched=2,
+                # A Windows path, so this also pins that json.dumps escapes
+                # the backslashes rather than breaking the frame.
+                current_path=r"C:\music\Radiohead\Creep.mp3",
+            )
+        )
+        time.sleep(0.3)
+        return ScanResult(
+            scanned=7,
+            added=3,
+            skipped_non_audio=1,
+            updated=1,
+            deleted=0,
+            matched=2,
+            collection=session.get(Collection, collection_id),
+        )
+
+    monkeypatch.setattr(main, "scan_folder", slow_scan)
+
+    stream = scan_stream(
+        "/api/collections/scan",
+        json={"root_path": str(tmp_path), "name": "Theirs"},
+    )
+
+    assert stream.progress
+    assert stream.progress[-1] == {
+        "scanned": 7,
+        "added": 3,
+        "skipped_non_audio": 1,
+        "updated": 1,
+        "deleted": 0,
+        "matched": 2,
+        "current_path": r"C:\music\Radiohead\Creep.mp3",
+    }
+    assert stream.done["scanned"] == 7
+
+
+def test_scan_stream_reports_a_scan_failure_as_an_error_frame(
+    scan_stream, monkeypatch, caplog, tmp_path
+):
+    def exploding_scan(root_path, collection_id, session, on_progress=None):
+        raise OSError("the drive went away")
+
+    monkeypatch.setattr(main, "scan_folder", exploding_scan)
+
+    stream = scan_stream(
+        "/api/collections/scan",
+        json={"root_path": str(tmp_path), "name": "Theirs"},
+    )
+
+    # A 200 carrying an error frame, not a 500. Once the stream opens the
+    # status is already sent and cannot be taken back, so a failure after that
+    # point has nowhere else to go.
+    assert stream.done is None
+    assert stream.events[-1] == "error"
+    assert stream.error == {"detail": "the drive went away"}
+    # The catch is broad, which the project's convention normally forbids. It
+    # is allowed here only because the traceback still reaches the log, so a
+    # bug is as loud as it was before, just in a different place.
+    assert "Scan of" in caplog.text
+    assert "OSError" in caplog.text
+
+
+def test_scan_validation_failure_never_opens_a_stream(client):
+    response = client.post(
+        "/api/collections/scan",
+        json={"root_path": "/nonexistent/path", "name": "Theirs"},
+    )
+
+    # Every guard runs before the StreamingResponse is returned, so a bad
+    # request still gets a real status and a JSON detail. If a guard ever
+    # moves after the stream opens this becomes a 200 event-stream, and
+    # throwForResponse in api.ts stops seeing failures entirely.
+    assert response.status_code == 400
+    assert response.headers["content-type"].startswith("application/json")
+
+
+def test_rescan_commit_from_the_worker_thread_is_visible(
+    scan_stream, session, tmp_path, fixtures_dir
+):
+    shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
+
+    first = scan_stream(
+        "/api/collections/scan",
+        json={"root_path": str(tmp_path), "name": "Theirs"},
+    )
+    collection_id = first.done["collection"]["id"]
+    session.expire_all()
+    before = session.get(Collection, collection_id).last_scanned_at
+    assert before is not None
+
+    scan_stream(f"/api/collections/{collection_id}/rescan")
+
+    # Expire before reading, every time. Whether this session would otherwise
+    # answer from its identity map depends on where its own transaction
+    # happened to end, which is not something a test should rely on in either
+    # direction. What is asserted here is the part that must hold: a commit
+    # made on the worker thread's own Session reaches the request side.
+    session.expire_all()
+    assert session.get(Collection, collection_id).last_scanned_at > before
 
 
 def _import_body(mine, theirs, destination, track_ids, resolutions=None, **overrides):

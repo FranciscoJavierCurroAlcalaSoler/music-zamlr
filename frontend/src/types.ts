@@ -26,6 +26,16 @@ export interface Match {
   theirs: Track;
 }
 
+export interface ScanProgress {
+  scanned: number;
+  added: number;
+  updated: number;
+  deleted: number;
+  skipped_non_audio: number;
+  matched: number;
+  current_path: string | null;
+}
+
 export interface ScanResult {
   scanned: number;
   added: number;

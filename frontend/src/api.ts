@@ -4,6 +4,7 @@ import type {
   ImportResult,
   ImportRequestBody,
   Collection,
+  ScanProgress,
   ScanResult,
 } from "./types";
 
@@ -27,7 +28,16 @@ interface ErrorBody {
   detail?: string | ValidationErrorDetail[];
 }
 
+interface ScanErrorPayload {
+  detail: string;
+}
+
 const VALUE_ERROR_PREFIX = "Value error, ";
+const FRAME_SEPARATOR = "\n\n";
+const EVENT_PREFIX = "event: ";
+const DATA_PREFIX = "data: ";
+
+export type ScanProgressCallback = (progress: ScanProgress) => void;
 
 function detailToMessage(detail: string | ValidationErrorDetail[]): string {
   if (!Array.isArray(detail)) {
@@ -75,9 +85,79 @@ export async function fetchCollections(): Promise<Collection[]> {
   return response.json();
 }
 
+function parseFrame(frame: string): [string, string] {
+  let eventName = "";
+  let data = "";
+
+  for (const line of frame.split("\n")) {
+    if (line.startsWith(EVENT_PREFIX))
+      eventName = line.slice(EVENT_PREFIX.length);
+    else if (line.startsWith(DATA_PREFIX))
+      data = line.slice(DATA_PREFIX.length);
+  }
+  return [eventName, data];
+}
+
+async function readScanStream(
+  response: Response,
+  onProgress?: ScanProgressCallback,
+): Promise<ScanResult> {
+  // A 200 that is not an event stream is almost always a backend running
+  // older code, which answers these endpoints with a plain JSON body. Without
+  // this the symptom is the generic "ended without a result" below, which
+  // sends you looking at the stream reader instead of at the server.
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/event-stream")) {
+    throw new Error(
+      `Expected an event stream, but the server sent ${contentType || "no content type"}. ` +
+        `The backend may be running older code — restart it with "fastapi dev main.py".`,
+    );
+  }
+  if (response.body === null)
+    throw new Error("The server sent no response body.");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: ScanResult | null = null;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let index = buffer.indexOf(FRAME_SEPARATOR);
+    while (index !== -1) {
+      const [eventName, data] = parseFrame(buffer.slice(0, index));
+      buffer = buffer.slice(index + FRAME_SEPARATOR.length);
+      switch (eventName) {
+        case "progress":
+          onProgress?.(JSON.parse(data) as ScanProgress);
+          break;
+        case "done":
+          result = JSON.parse(data) as ScanResult;
+          break;
+        case "error":
+          void reader.cancel();
+          throw new Error((JSON.parse(data) as ScanErrorPayload).detail);
+        // An unknown event name is ignored rather than treated as a fault, so
+        // an older frontend keeps working against a backend that adds a frame.
+        default:
+          break;
+      }
+      index = buffer.indexOf(FRAME_SEPARATOR);
+    }
+  }
+  if (result === null)
+    throw new Error(
+      "The scan ended without a result. The server may have stopped.",
+    );
+  return result;
+}
+
 export async function createCollection(
   name: string,
   rootPath: string,
+  onProgress?: ScanProgressCallback,
 ): Promise<ScanResult> {
   const response = await fetch(`${API_BASE}/api/collections/scan`, {
     method: "POST",
@@ -89,11 +169,12 @@ export async function createCollection(
   if (!response.ok) {
     await throwForResponse(response);
   }
-  return response.json();
+  return readScanStream(response, onProgress);
 }
 
 export async function rescanCollection(
   collectionId: number,
+  onProgress?: ScanProgressCallback,
 ): Promise<ScanResult> {
   const response = await fetch(
     `${API_BASE}/api/collections/${collectionId}/rescan`,
@@ -104,7 +185,7 @@ export async function rescanCollection(
   if (!response.ok) {
     await throwForResponse(response);
   }
-  return response.json();
+  return readScanStream(response, onProgress);
 }
 
 /** Turn whatever a failed fetch produced into something worth showing. */

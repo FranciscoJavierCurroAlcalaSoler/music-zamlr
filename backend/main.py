@@ -1,10 +1,13 @@
+import asyncio
 import json
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 
 from database import create_collection, get_session
@@ -12,7 +15,7 @@ from enums import ActionType, Bucket, OperationStatus
 from importing import OperationResult, PlannedOperation, execute_plan, plan_import
 from matching import Match, MatchResult, classify_pairing, match_collections
 from models import Collection, Track
-from scanner import scan_folder
+from scanner import ScanProgress, scan_folder
 from schemas import (
     CollectionRead,
     DiffRead,
@@ -20,6 +23,7 @@ from schemas import (
     ImportRequest,
     ImportResultRead,
     OperationResultRead,
+    ScanProgressRead,
     ScanRequest,
     ScanResultRead,
     TrackRead,
@@ -423,7 +427,93 @@ def execute_import(
     return import_result
 
 
-@app.post("/api/collections/scan", response_model=ScanResultRead)
+PROGRESS_INTERVAL_SECONDS = 0.2
+
+
+def _sse(event: str, payload: dict) -> str:
+    """One Server-Sent Events frame: an event line, a data line, a blank line.
+
+    json.dumps escapes every newline inside a string, so no payload can split
+    a frame in two. That is why a single data: line is always enough here.
+    """
+    return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+
+
+def _scan_stream(root_path: str, collection_id: int, engine) -> StreamingResponse:
+    """Scan on a worker thread and stream the progress as Server-Sent Events.
+
+    Both scan endpoints end in a call to this, so the two cannot drift apart.
+
+    Every parameter is a plain value on purpose. The request's Session belongs
+    to the request's thread, and neither it nor anything it loaded may cross
+    into the worker; the engine is the one database object that is safe to
+    share, because it owns the pool and the Session is what is not thread-safe.
+    """
+    latest: ScanProgress | None = None
+
+    def remember(progress: ScanProgress) -> None:
+        # One rebinding per call, so the reader below always sees a whole
+        # ScanProgress and never a half-written one. Progress is a state
+        # rather than a log: only the newest value has any use, so this
+        # overwrites instead of collecting a backlog that nobody reads and
+        # that would hold one object per file for the length of the scan.
+        nonlocal latest
+        latest = progress
+
+    def run_scan() -> tuple[str, dict]:
+        """Do the scan and build the final frame. Runs on a worker thread.
+
+        The payload is built in here, while the session is still open.
+        ScanResult.collection is an ORM object, and serializing it after its
+        session closes raises DetachedInstanceError.
+
+        Every exception is caught, which the project's convention normally
+        forbids. It has to be: StreamingResponse has already sent 200 by the
+        time this runs, so a failure has nowhere to go except the stream
+        itself. The traceback still reaches the server log, so a bug stays as
+        loud as it was, only in a different place.
+        """
+        try:
+            with Session(engine) as session:
+                result = scan_folder(
+                    root_path, collection_id, session, on_progress=remember
+                )
+                payload = ScanResultRead.model_validate(result).model_dump(mode="json")
+            return "done", payload
+        except Exception as error:
+            logging.exception("Scan of %s failed", root_path)
+            return "error", {"detail": str(error)}
+
+    async def frames():
+        loop = asyncio.get_running_loop()
+        future = loop.run_in_executor(None, run_scan)
+        while not future.done():
+            # This sleep is what hands control back to the event loop, so the
+            # server still answers other requests while a drive is read.
+            await asyncio.sleep(PROGRESS_INTERVAL_SECONDS)
+            progress = latest
+            # None until the scanner's first report lands, and a fast scan can
+            # finish before any of them arrive, so a stream with no progress
+            # frame at all is normal rather than a fault.
+            if progress is not None:
+                yield _sse(
+                    "progress",
+                    ScanProgressRead.model_validate(progress).model_dump(mode="json"),
+                )
+        # run_scan catches its own failures, so this never re-raises. That
+        # also means a client that disconnects mid-scan leaves no exception
+        # sitting unretrieved on the future.
+        event, payload = future.result()
+        yield _sse(event, payload)
+
+    return StreamingResponse(
+        frames(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/collections/scan")
 def scan_collection(
     request: ScanRequest,
     session: Session = Depends(get_session),
@@ -456,12 +546,10 @@ def scan_collection(
         session,
     )
 
-    scan_result = scan_folder(collection.root_path, collection.id, session)
-
-    return scan_result
+    return _scan_stream(collection.root_path, collection.id, session.get_bind())
 
 
-@app.post("/api/collections/{collection_id}/rescan", response_model=ScanResultRead)
+@app.post("/api/collections/{collection_id}/rescan")
 def rescan_collection(
     collection_id: int,
     session: Session = Depends(get_session),
@@ -476,6 +564,4 @@ def rescan_collection(
             detail="Collection path not found. It may not be mounted.",
         )
 
-    scan_result = scan_folder(collection.root_path, collection.id, session)
-
-    return scan_result
+    return _scan_stream(collection.root_path, collection.id, session.get_bind())

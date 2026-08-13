@@ -179,6 +179,22 @@ class ScanRequest(BaseModel):
         return os.path.normpath(stripped)
 
 
+class ScanProgressRead(BaseModel):
+    # The running counts only. The accumulated lists stay on ScanResultRead:
+    # progress is a state the stream overwrites, and a log would then travel
+    # twice. current_path is the file being read at that moment, so it is the
+    # one field with no counterpart in the result.
+    scanned: int
+    added: int
+    updated: int
+    deleted: int
+    skipped_non_audio: int
+    matched: int
+    current_path: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ScanResultRead(BaseModel):
     scanned: int
     added: int
