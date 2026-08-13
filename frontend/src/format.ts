@@ -57,3 +57,24 @@ export function bitrate(bitsPerSecond: number | null): string {
     ? PLACEHOLDER
     : `${Math.round(bitsPerSecond / 1000)} kbps`;
 }
+
+/**
+ * The last two segments of a path: "D:\Music\Radiohead\Creep.mp3" becomes
+ * "Radiohead\Creep.mp3".
+ *
+ * Slices the original string rather than splitting it and joining it back
+ * together, so the separators survive exactly as they were and none has to be
+ * guessed. Rejoining would need to know which separator the path used, and
+ * there is no safe test for that: a backslash is a legal character inside a
+ * Linux filename, so finding one does not make a path a Windows path.
+ *
+ * A path with fewer than two separators is returned unchanged.
+ */
+export function shortenPath(path: string): string {
+  const lastIndex = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+  if (lastIndex <= 0) return path;
+  const head = path.slice(0, lastIndex);
+  const previousIndex = Math.max(head.lastIndexOf("\\"), head.lastIndexOf("/"));
+  if (previousIndex === -1) return path;
+  return path.slice(previousIndex + 1);
+}

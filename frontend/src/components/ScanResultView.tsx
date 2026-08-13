@@ -1,6 +1,7 @@
-import { Alert, Box, Button, Chip, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, Typography } from "@mui/material";
 import type { ScanResult } from "../types";
 import { pluralize } from "../format";
+import { CountChips } from "./CountChips";
 
 interface ScanResultViewProps {
   result: ScanResult | null;
@@ -53,15 +54,6 @@ export function ScanResultView({ result, onDismiss }: ScanResultViewProps) {
     );
   }
 
-  const counts = [
-    { label: "Scanned", value: result.scanned },
-    { label: "Added", value: result.added },
-    { label: "Updated", value: result.updated },
-    { label: "Deleted", value: result.deleted },
-    { label: "Matched", value: result.matched },
-    { label: "Not audio", value: result.skipped_non_audio },
-  ];
-
   return (
     <Box sx={{ mt: 2 }}>
       {/* Names the collection: this panel sits under a table of several, and
@@ -74,16 +66,7 @@ export function ScanResultView({ result, onDismiss }: ScanResultViewProps) {
         {hasProblems ? problems.join(" ") : "No problems."}
       </Alert>
 
-      <Stack
-        direction="row"
-        spacing={1}
-        useFlexGap
-        sx={{ mt: 2, flexWrap: "wrap" }}
-      >
-        {counts.map(({ label, value }) => (
-          <Chip key={label} size="small" label={`${label}: ${value}`} />
-        ))}
-      </Stack>
+      <CountChips counts={result} />
 
       {unreadableDirectories.length > 0 && (
         <Box sx={{ mt: 2 }}>

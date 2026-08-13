@@ -10,11 +10,12 @@ import {
   TableCell,
   CircularProgress,
 } from "@mui/material";
-import type { Collection, ScanResult } from "../types";
+import type { Collection, ScanProgress, ScanResult } from "../types";
 import { formatTimestamp } from "../format";
 import { useState } from "react";
 import { rescanCollection, describeFetchError, createCollection } from "../api";
 import { ScanResultView } from "./ScanResultView";
+import { ScanProgressView } from "./ScanProgressView";
 import { AddCollectionForm } from "./AddCollectionForm";
 
 interface CollectionsViewProps {
@@ -32,6 +33,7 @@ export function CollectionsView({
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [progress, setProgress] = useState<ScanProgress | null>(null);
 
   async function runRescan(id: number) {
     setScanningId(id);
@@ -39,13 +41,18 @@ export function CollectionsView({
     setScanError(null);
 
     try {
-      const result: ScanResult = await rescanCollection(id);
+      const result: ScanResult = await rescanCollection(id, setProgress);
+      // On success only, unlike runCreate. scan_folder commits once at the
+      // very end, so a re-scan that failed left nothing new for the list to
+      // show. runCreate refreshes either way, because there the collection
+      // row is written before the scan starts and outlives its failure.
       await onScanned();
       setScanResult(result);
     } catch (error: unknown) {
       setScanError(describeFetchError(error));
     } finally {
       setScanningId(null);
+      setProgress(null);
     }
   }
 
@@ -55,15 +62,26 @@ export function CollectionsView({
     setScanError(null);
 
     try {
-      const result: ScanResult = await createCollection(name, rootPath);
-      await onScanned();
+      const result: ScanResult = await createCollection(
+        name,
+        rootPath,
+        setProgress,
+      );
       setScanResult(result);
       return true;
     } catch (error: unknown) {
       setScanError(describeFetchError(error));
       return false;
     } finally {
+      // Even after a failure. The backend writes the collection row before
+      // the scan begins, so a scan that dies partway leaves a real row that
+      // the list would otherwise never show — and creating it again then
+      // fails with "already exists". Awaiting inside finally is fine: it
+      // completes before the promise settles, so AddCollectionForm clears
+      // its fields only once the refreshed list has arrived.
+      await onScanned();
       setCreating(false);
+      setProgress(null);
     }
   }
 
@@ -126,6 +144,7 @@ export function CollectionsView({
         </Alert>
       )}
 
+      <ScanProgressView progress={progress} />
       <ScanResultView
         result={scanResult}
         onDismiss={() => setScanResult(null)}
