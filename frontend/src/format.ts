@@ -1,10 +1,46 @@
+// Constructed once at module load, for the same reason as TIMESTAMP_FORMAT
+// below: this runs per row and per progress frame.
+//
+// No locale argument on purpose, so the browser's own decides the separator —
+// a German browser shows 1.240 where an English one shows 1,240. These numbers
+// are read, never parsed back, so following the reader is right.
+const COUNT_FORMAT = new Intl.NumberFormat();
+
+/**
+ * "1,240" rather than "1240".
+ *
+ * Every count in this app can reach four digits: a library of a few thousand
+ * tracks is the ordinary case, not the large one, and the separator is what
+ * makes 1240 and 12400 tell apart at a glance.
+ */
+export function formatCount(value: number): string {
+  return COUNT_FORMAT.format(value);
+}
+
+/**
+ * How far through, as a whole number out of 100 for MUI's determinate bars.
+ *
+ * Zero total is the collection that has never been scanned, and the guard is
+ * why this is a function rather than one expression at the call site: 0/0 is
+ * NaN, and MUI renders a NaN value as an empty bar with a console warning
+ * rather than failing outright.
+ *
+ * Lives here, not in DiffProgressView, so the arithmetic can be tested
+ * without a DOM. It shipped once returning 0 for 1240 of 3500, because the
+ * multiplication by 100 was missing, and nothing but running a long
+ * comparison could have noticed.
+ */
+export function progressPercent(done: number, total: number): number {
+  return total === 0 ? 0 : Math.round((done / total) * 100);
+}
+
 /** "1 folder", "3 folders" — so counts never read as "1 folders". */
 export function pluralize(
   count: number,
   singular: string,
   plural = `${singular}s`,
 ): string {
-  return `${count} ${count === 1 ? singular : plural}`;
+  return `${formatCount(count)} ${count === 1 ? singular : plural}`;
 }
 
 // sv-SE is chosen for its format, not its language: it is the locale that

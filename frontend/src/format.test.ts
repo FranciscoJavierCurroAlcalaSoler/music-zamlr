@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shortenPath } from "./format";
+import { progressPercent, shortenPath } from "./format";
 
 // A real backslash, built rather than typed. A literal "\M" in a TS string is
 // not an escape sequence, so the compiler silently drops the backslash and the
@@ -51,5 +51,36 @@ describe("shortenPath", () => {
 
   it("returns a drive-root path unchanged", () => {
     expect(shortenPath(`D:${B}Creep.mp3`)).toBe(`D:${B}Creep.mp3`);
+  });
+});
+
+describe("progressPercent", () => {
+  // The regression. This shipped returning 0, because the multiplication by
+  // 100 was missing, and every other case below still looked plausible: 0 of
+  // anything is 0, and a finished run rounded to 1. Only a value in the
+  // middle of a run tells the two apart, which is why the bar sat empty
+  // through an entire comparison without anything failing.
+  it("scales to 100, not to 1", () => {
+    expect(progressPercent(1240, 3500)).toBe(35);
+  });
+
+  it("is 0 before anything is done", () => {
+    expect(progressPercent(0, 3500)).toBe(0);
+  });
+
+  it("is 100 when everything is done", () => {
+    expect(progressPercent(3500, 3500)).toBe(100);
+  });
+
+  // 0 of 0 is a collection that has never been scanned, and without the guard
+  // it is NaN — which MUI renders as an empty bar plus a console warning
+  // rather than as an error, so it would reach a user looking merely stuck.
+  it("is 0 rather than NaN when there is nothing to do", () => {
+    expect(progressPercent(0, 0)).toBe(0);
+  });
+
+  it("rounds to whole numbers in both directions", () => {
+    expect(progressPercent(1, 3)).toBe(33);
+    expect(progressPercent(2, 3)).toBe(67);
   });
 });

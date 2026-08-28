@@ -13,7 +13,9 @@ export function ScanProgressView({ progress }: ScanProgressViewProps) {
     <>
       {/* Indeterminate on purpose. A percentage needs a total, and the only
           way to know one is a second walk of the drive that can disagree
-          with the real one. */}
+          with the real one. DiffProgressView is determinate for exactly the
+          opposite reason: the matcher knows how many tracks it will visit
+          before it starts. */}
       <LinearProgress />
       <CountChips counts={progress} />
       {/* This line is deliberately blank at both ends of a scan: current_path

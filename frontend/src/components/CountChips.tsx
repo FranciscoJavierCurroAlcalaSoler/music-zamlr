@@ -1,4 +1,5 @@
 import { Chip, Stack } from "@mui/material";
+import { formatCount } from "../format";
 
 interface CountChipsProps {
   counts: {
@@ -29,7 +30,11 @@ export function CountChips({ counts }: CountChipsProps) {
       sx={{ mt: 2, flexWrap: "wrap" }}
     >
       {countsArray.map(({ label, value }) => (
-        <Chip key={label} size="small" label={`${label}: ${value}`} />
+        <Chip
+          key={label}
+          size="small"
+          label={`${label}: ${formatCount(value)}`}
+        />
       ))}
     </Stack>
   );
