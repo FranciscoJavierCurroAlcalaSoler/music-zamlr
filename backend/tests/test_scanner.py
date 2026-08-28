@@ -503,3 +503,28 @@ def test_scan_progress_last_report_counts_equal_scan_result(
     assert last_event.updated == result.updated
     assert last_event.deleted == result.deleted
     assert last_event.matched == result.matched
+
+
+def test_scan_skips_apple_double_sidecars(
+    tmp_path, test_collection, session, fixtures_dir
+):
+    # A real AppleDouble file: magic 0x00051607, then version and filler. macOS
+    # leaves one beside every file it copies to exFAT, FAT32 or NTFS, so a
+    # friend's Mac-written USB drive carries one per track — and each inherits
+    # the real track's extension, which is what gets it past the allowlist.
+    apple_double = bytes([0x00, 0x05, 0x16, 0x07, 0x00, 0x02, 0x00, 0x00]) + bytes(4000)
+    shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "Creep.mp3")
+    (tmp_path / "._Creep.mp3").write_bytes(apple_double)
+
+    result = scan_folder(str(tmp_path), collection_id=test_collection, session=session)
+
+    # Not on unreadable_files, which is the point. Before this guard, mutagen
+    # raised HeaderNotFoundError on every sidecar and the scan reported a
+    # warning naming thousands of files that were never broken.
+    assert result.unreadable_files == []
+    assert result.scanned == 2
+    assert result.skipped_non_audio == 1
+    # The real track beside it still lands. A guard that matched too greedily
+    # would take Creep.mp3 along with ._Creep.mp3.
+    assert result.added == 1
+    assert session.exec(select(Track)).one().file_name == "Creep.mp3"

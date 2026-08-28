@@ -65,7 +65,22 @@ def read_track(file_path: str, collection_id: int) -> Track | None:
         return None
 
 
-ALLOWED_EXTENSIONS = {".mp3", ".flac"}  # placeholder, config file comes later
+ALLOWED_EXTENSIONS = {
+    ".mp3",
+    ".flac",
+    ".wav",
+}  # placeholder, config file comes later
+
+# macOS writes one of these beside every file it copies to a filesystem with
+# no resource-fork support — which is every filesystem a drive needs to be
+# readable on Windows: exFAT, FAT32, NTFS. So a friend's Mac-written USB drive
+# carries one per track, and each one inherits the real track's extension:
+# Creep.mp3 gets a ._Creep.mp3 next to it.
+#
+# They pass the extension allowlist, mutagen then raises HeaderNotFoundError,
+# and without this they land on unreadable_files by the thousand — reported to
+# the user as a warning that their drive could not be read.
+APPLE_DOUBLE_PREFIX = "._"
 BATCH_SIZE = 100  # placeholder, config file comes later
 SCANNED_FIELDS = (
     "file_size",
@@ -172,7 +187,13 @@ def scan_folder(
         for file in files:
             scanned_count += 1
             file_key = os.path.normpath(os.path.join(root, file))
-            if file.lower().endswith(tuple(ALLOWED_EXTENSIONS)):
+            # Both conditions in one place, so there is exactly one branch that
+            # counts a file as not-audio. That counter now means "seen and not
+            # a track" rather than only "wrong extension".
+            is_audio = file.lower().endswith(
+                tuple(ALLOWED_EXTENSIONS)
+            ) and not file.startswith(APPLE_DOUBLE_PREFIX)
+            if is_audio:
                 visited_keys.add(file_key)
                 if file_key in expected_keys:
                     matched_count += 1

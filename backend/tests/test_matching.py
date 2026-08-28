@@ -400,3 +400,29 @@ def test_match_progress_counts_only_the_files_it_hashed(make_track, fixtures_dir
     # files opened gives 4 here, and on a real re-run makes the number climb
     # while the diff reads no bytes at all.
     assert events[-1].hashed_count == 3
+
+
+def test_lossless_wav_of_mine_is_not_upgraded_by_a_lossy_mp3(make_track):
+    # WAV is uncompressed PCM, so it belongs with the other lossless formats.
+    # Left out of FORMAT_RANK it scored 0 — below MP3 — and a 128 kbps file
+    # counted as an upgrade over it. With the delete upgrade action that
+    # destroys the WAV, which is why this pairing has a test of its own.
+    mine = make_track(format="WAV", bit_rate=1_411_200, file_size=1_000_000)
+    theirs = make_track(format="MP3", bit_rate=128_000, file_size=2_000_000)
+
+    result = match_collections([mine], [theirs])
+
+    assert result.upgrade_available == []
+    assert len(result.already_have) == 1
+
+
+def test_lossless_wav_of_theirs_upgrades_a_lossy_mp3_of_mine(make_track):
+    # The other direction, which the missing rank got wrong too: theirs scored
+    # 0 against my MP3's 1, so a real upgrade was hidden as already_have.
+    mine = make_track(format="MP3", bit_rate=320_000, file_size=1_000_000)
+    theirs = make_track(format="WAV", bit_rate=1_411_200, file_size=2_000_000)
+
+    result = match_collections([mine], [theirs])
+
+    assert len(result.upgrade_available) == 1
+    assert result.already_have == []

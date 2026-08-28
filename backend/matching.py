@@ -97,9 +97,19 @@ def durations_close(a: int, b: int) -> bool:
 # AAC (lossy) and the extension alone can't tell them apart, so anything
 # scanned as "M4A" is currently unranked; disambiguating that needs the
 # codec read out of the file itself.
+#
+# WAV sits with the other two losslessly-encoded formats because it is
+# uncompressed PCM: audio-identical to a FLAC of the same source, just larger.
+# Ranking it by its absence — unknown formats score 0 — put a 128 kbps MP3
+# above a lossless WAV, and with the delete upgrade action that destroys the
+# WAV. Note the tie-break then favours WAV over FLAC on every pairing, since
+# uncompressed always carries the higher bitrate; that offers a bigger file
+# rather than a better one, and it is one more reason the ranking wants to be
+# a real setting (§12) rather than a table of formats we happened to meet.
 FORMAT_RANK = {
     "FLAC": 3,
     "ALAC": 3,
+    "WAV": 3,
     "MP3": 1,
     "AAC": 1,
 }
