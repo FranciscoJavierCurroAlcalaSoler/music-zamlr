@@ -27,6 +27,7 @@ against plain in-memory objects.
 """
 
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from enums import Bucket
@@ -59,6 +60,22 @@ class MatchResult:
     already_have: list[Match] = field(default_factory=list)
     needs_review: list[AmbiguousMatch] = field(default_factory=list)
     only_in_mine: list[Track] = field(default_factory=list)
+
+
+@dataclass
+class DiffProgress:
+    """How far match_collections has got, reported as it goes.
+
+    theirs_count is fixed before any work starts, so unlike a scan this can
+    drive a real percentage. Be aware it measures tracks and not time: an
+    iteration with no same-size candidate is a dictionary lookup, and one with
+    a candidate hashes whole files. hashed_count is the honest cost signal.
+    """
+
+    theirs_processed_count: int
+    theirs_count: int
+    hashed_count: int
+    current_path: str | None = None
 
 
 DURATION_TOLERANCE_SECONDS = 2
@@ -225,7 +242,9 @@ def attempt_fuzzy_match(
 
 
 def match_collections(
-    tracks_mine: list[Track], tracks_theirs: list[Track]
+    tracks_mine: list[Track],
+    tracks_theirs: list[Track],
+    on_progress: Callable[[DiffProgress], None] | None = None,
 ) -> MatchResult:
     result = MatchResult()
     # Tracks of mine already paired with something, held by id() rather
@@ -235,12 +254,34 @@ def match_collections(
     # all. Object identity is the only key that's always available and
     # always unique here.
     consumed: set[int] = set()
+    hashed_count = 0
+    theirs_processed_count = 0
+
+    def report(current_path: str | None = None) -> None:
+        if on_progress is not None:
+            # A new object per call. The value handed to a callback is a
+            # statement about one moment, and a caller that keeps what it
+            # receives must not watch it change underneath.
+            on_progress(
+                DiffProgress(
+                    theirs_processed_count=theirs_processed_count,
+                    theirs_count=len(tracks_theirs),
+                    hashed_count=hashed_count,
+                    current_path=current_path,
+                )
+            )
 
     mine_by_size: dict[int, list[Track]] = defaultdict(list)
     for track in tracks_mine:
         mine_by_size[track.file_size].append(track)
 
     for theirs_track in tracks_theirs:
+        # Reported before the work, not after it. The expensive part of an
+        # iteration is the hashing below, and a report at the end would leave
+        # the caller naming a file that finished while a 300 MB FLAC is being
+        # read. Announcing the file first makes current_path mean "working on
+        # this", which is what a progress display is for.
+        report(theirs_track.file_path)
         if theirs_track.file_size in mine_by_size:
             candidates = mine_by_size.get(theirs_track.file_size, [])
             hash_match = False
@@ -249,11 +290,17 @@ def match_collections(
             # both collections for nothing.
             if theirs_track.file_hash is None:
                 theirs_track.file_hash = compute_file_hash(theirs_track.file_path)
+                hashed_count += 1
             for mine_track in candidates:
                 if id(mine_track) in consumed:
                     continue
                 if mine_track.file_hash is None:
                     mine_track.file_hash = compute_file_hash(mine_track.file_path)
+                    # Inside the guard, so this counts files actually read and
+                    # not candidates examined. A cached hash costs nothing, and
+                    # a counter that climbed for it would say the diff is busy
+                    # while it reads no bytes at all.
+                    hashed_count += 1
                 if theirs_track.file_hash == mine_track.file_hash:
                     hash_match = True
                     result.already_have.append(
@@ -274,6 +321,12 @@ def match_collections(
         else:
             bucket, payload = attempt_fuzzy_match(theirs_track, tracks_mine, consumed)
             route(result, consumed, bucket, payload)
+        theirs_processed_count += 1
+
+    # The closing report, and the only one with no file in progress. It exists
+    # so the caller ends on processed == total rather than one short. The loop
+    # below moves none of these numbers and does no I/O, so it needs none.
+    report()
 
     # Whatever was never paired is mine alone: informational, and also the
     # list to hand back to the other collection's owner.

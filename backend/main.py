@@ -2,24 +2,34 @@ import asyncio
 import json
 import logging
 import os
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from database import create_collection, create_db_and_tables, get_session
 from enums import ActionType, Bucket, OperationStatus
 from importing import OperationResult, PlannedOperation, execute_plan, plan_import
-from matching import Match, MatchResult, classify_pairing, match_collections
+from matching import (
+    DiffProgress,
+    Match,
+    MatchResult,
+    classify_pairing,
+    match_collections,
+)
 from models import Collection, Track
 from scanner import ScanProgress, scan_folder
 from schemas import (
     CollectionRead,
-    DiffRead,
+    DiffProgressRead,
+    DiffResultRead,
     ImportPreviewRead,
     ImportRequest,
     ImportResultRead,
@@ -93,7 +103,10 @@ def _load_collections(
 
 
 def _run_diff(
-    session: Session, mine_collection: Collection, theirs_collection: Collection
+    session: Session,
+    mine_collection: Collection,
+    theirs_collection: Collection,
+    on_progress: Callable[[DiffProgress], None] | None = None,
 ) -> MatchResult:
     tracks_mine = session.exec(
         select(Track).where(Track.collection_id == mine_collection.id)
@@ -101,32 +114,180 @@ def _run_diff(
     tracks_theirs = session.exec(
         select(Track).where(Track.collection_id == theirs_collection.id)
     ).all()
-    match_result = match_collections(tracks_mine, tracks_theirs)
+    match_result = match_collections(
+        tracks_mine, tracks_theirs, on_progress=on_progress
+    )
     session.commit()  # persist the hashes the matcher computed
     return match_result
 
 
-@app.get("/api/diff", response_model=DiffRead)
+PROGRESS_INTERVAL_SECONDS = 0.2
+
+# What a worker reports as it goes. The two are unrelated shapes; the union
+# exists only so _stream can hold one without caring which it has.
+Progress = ScanProgress | DiffProgress
+ProgressCallback = Callable[[Progress], None]
+
+
+def _sse(event: str, payload: dict) -> str:
+    """One Server-Sent Events frame: an event line, a data line, a blank line.
+
+    json.dumps escapes every newline inside a string, so no payload can split
+    a frame in two. That is why a single data: line is always enough here.
+    """
+    return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+
+
+def _scan_worker(
+    root_path: str, collection_id: int, engine, on_progress: ProgressCallback
+) -> tuple[str, dict]:
+    """Scan, and build the frame that ends the stream. Runs on a worker thread.
+
+    The payload is built in here, while the session is still open.
+    ScanResult.collection is an ORM object, and serializing it after its
+    session closes raises DetachedInstanceError.
+
+    Every exception is caught, which the project's convention normally
+    forbids. It has to be: StreamingResponse has already sent 200 by the time
+    this runs, so a failure has nowhere to go except the stream itself. The
+    traceback still reaches the server log, so a bug stays as loud as it was,
+    only in a different place.
+    """
+    try:
+        with Session(engine) as session:
+            scan_result = scan_folder(
+                root_path, collection_id, session, on_progress=on_progress
+            )
+            payload = ScanResultRead.model_validate(scan_result).model_dump(mode="json")
+        return "done", payload
+    except Exception as error:
+        logging.exception("Scan of %s failed", root_path)
+        return "error", {"detail": str(error)}
+
+
+def _diff_worker(
+    mine_id: int, theirs_id: int, engine, on_progress: ProgressCallback
+) -> tuple[str, dict]:
+    """Diff, and build the frame that ends the stream. Runs on a worker thread.
+
+    The collections are loaded again here rather than handed in. The endpoint
+    already loaded them to validate the request, but those objects belong to
+    the request's session and to the request's thread, and DiffResultRead
+    reaches every matched Track on both sides. Two lookups by primary key is
+    the price of keeping the guards ahead of the stream and the ORM objects
+    inside one thread.
+
+    The broad catch is the same deliberate exception as in _scan_worker, and
+    it logs the two ids rather than the collections: if _load_collections is
+    what raised, no collection was ever bound, and reading .name in here would
+    replace the real failure with an UnboundLocalError.
+    """
+    try:
+        with Session(engine) as session:
+            mine_collection, theirs_collection = _load_collections(
+                session, mine_id, theirs_id
+            )
+            match_result = _run_diff(
+                session, mine_collection, theirs_collection, on_progress=on_progress
+            )
+            diff_result = DiffResult(
+                match_results=match_result,
+                match_counts=dict(
+                    missing=len(match_result.missing),
+                    upgrade_available=len(match_result.upgrade_available),
+                    already_have=len(match_result.already_have),
+                    needs_review=len(match_result.needs_review),
+                    only_in_mine=len(match_result.only_in_mine),
+                ),
+            )
+            payload = DiffResultRead.model_validate(diff_result).model_dump(mode="json")
+        return "done", payload
+    except Exception as error:
+        logging.exception("Diff of collections %s and %s failed", mine_id, theirs_id)
+        return "error", {"detail": str(error)}
+
+
+def _stream(
+    run: Callable[[ProgressCallback], tuple[str, dict]],
+    progress_schema: type[BaseModel],
+) -> StreamingResponse:
+    """Run blocking work on a worker thread and stream its progress as SSE.
+
+    Every streaming endpoint ends in a call to this, so none of them can drift
+    apart on the frame format, the poll interval or the failure handling.
+
+    `run` is the only thing that differs between them. It is handed the
+    progress callback and returns the event name and payload of the final
+    frame. Passing the work in, rather than passing a description of which
+    work to do, is what keeps this function from having to know that scans and
+    diffs exist.
+
+    Nothing about a request's Session may cross in here. The worker opens its
+    own; the engine is the one database object safe to share, because it owns
+    the pool and the Session is what is not thread-safe.
+    """
+    latest: Progress | None = None
+
+    def remember(progress: Progress) -> None:
+        # One rebinding per call, so the reader below always sees a whole
+        # object and never a half-written one. Progress is a state rather than
+        # a log: only the newest value has any use, so this overwrites instead
+        # of collecting a backlog that nobody reads and that would hold one
+        # object per file for the length of the work.
+        nonlocal latest
+        latest = progress
+
+    async def frames():
+        loop = asyncio.get_running_loop()
+        # get_running_loop belongs in here, not in the body above: _stream runs
+        # on the request thread, which has no loop, while this generator is
+        # iterated by Starlette on the event loop.
+        future = loop.run_in_executor(None, run, remember)
+        while not future.done():
+            # This sleep is what hands control back to the event loop, so the
+            # server still answers other requests while a drive is read.
+            await asyncio.sleep(PROGRESS_INTERVAL_SECONDS)
+            progress = latest
+            # None until the first report lands, and fast work can finish
+            # before any arrive, so a stream with no progress frame at all is
+            # normal rather than a fault.
+            if progress is not None:
+                yield _sse(
+                    "progress",
+                    progress_schema.model_validate(progress).model_dump(mode="json"),
+                )
+        # run catches its own failures, so this never re-raises. That also
+        # means a client that disconnects midway leaves no exception sitting
+        # unretrieved on the future.
+        event, payload = future.result()
+        yield _sse(event, payload)
+
+    return StreamingResponse(
+        frames(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/diff")
 def diff_collections(
     mine: int,
     theirs: int,
     session: Session = Depends(get_session),
 ):
+    # Validated here, on the request thread, so a bad request still gets a real
+    # 400 or 404. Once _stream returns, 200 has been sent and cannot be undone.
     mine_collection, theirs_collection = _load_collections(session, mine, theirs)
-    match_result = _run_diff(session, mine_collection, theirs_collection)
 
-    diff_result = DiffResult(
-        match_results=match_result,
-        match_counts=dict(
-            missing=len(match_result.missing),
-            upgrade_available=len(match_result.upgrade_available),
-            already_have=len(match_result.already_have),
-            needs_review=len(match_result.needs_review),
-            only_in_mine=len(match_result.only_in_mine),
+    return _stream(
+        partial(
+            _diff_worker,
+            mine_collection.id,
+            theirs_collection.id,
+            session.get_bind(),
         ),
+        DiffProgressRead,
     )
-
-    return diff_result
 
 
 def _describe_track(track: Track) -> str:
@@ -449,92 +610,6 @@ def execute_import(
     return import_result
 
 
-PROGRESS_INTERVAL_SECONDS = 0.2
-
-
-def _sse(event: str, payload: dict) -> str:
-    """One Server-Sent Events frame: an event line, a data line, a blank line.
-
-    json.dumps escapes every newline inside a string, so no payload can split
-    a frame in two. That is why a single data: line is always enough here.
-    """
-    return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
-
-
-def _scan_stream(root_path: str, collection_id: int, engine) -> StreamingResponse:
-    """Scan on a worker thread and stream the progress as Server-Sent Events.
-
-    Both scan endpoints end in a call to this, so the two cannot drift apart.
-
-    Every parameter is a plain value on purpose. The request's Session belongs
-    to the request's thread, and neither it nor anything it loaded may cross
-    into the worker; the engine is the one database object that is safe to
-    share, because it owns the pool and the Session is what is not thread-safe.
-    """
-    latest: ScanProgress | None = None
-
-    def remember(progress: ScanProgress) -> None:
-        # One rebinding per call, so the reader below always sees a whole
-        # ScanProgress and never a half-written one. Progress is a state
-        # rather than a log: only the newest value has any use, so this
-        # overwrites instead of collecting a backlog that nobody reads and
-        # that would hold one object per file for the length of the scan.
-        nonlocal latest
-        latest = progress
-
-    def run_scan() -> tuple[str, dict]:
-        """Do the scan and build the final frame. Runs on a worker thread.
-
-        The payload is built in here, while the session is still open.
-        ScanResult.collection is an ORM object, and serializing it after its
-        session closes raises DetachedInstanceError.
-
-        Every exception is caught, which the project's convention normally
-        forbids. It has to be: StreamingResponse has already sent 200 by the
-        time this runs, so a failure has nowhere to go except the stream
-        itself. The traceback still reaches the server log, so a bug stays as
-        loud as it was, only in a different place.
-        """
-        try:
-            with Session(engine) as session:
-                result = scan_folder(
-                    root_path, collection_id, session, on_progress=remember
-                )
-                payload = ScanResultRead.model_validate(result).model_dump(mode="json")
-            return "done", payload
-        except Exception as error:
-            logging.exception("Scan of %s failed", root_path)
-            return "error", {"detail": str(error)}
-
-    async def frames():
-        loop = asyncio.get_running_loop()
-        future = loop.run_in_executor(None, run_scan)
-        while not future.done():
-            # This sleep is what hands control back to the event loop, so the
-            # server still answers other requests while a drive is read.
-            await asyncio.sleep(PROGRESS_INTERVAL_SECONDS)
-            progress = latest
-            # None until the scanner's first report lands, and a fast scan can
-            # finish before any of them arrive, so a stream with no progress
-            # frame at all is normal rather than a fault.
-            if progress is not None:
-                yield _sse(
-                    "progress",
-                    ScanProgressRead.model_validate(progress).model_dump(mode="json"),
-                )
-        # run_scan catches its own failures, so this never re-raises. That
-        # also means a client that disconnects mid-scan leaves no exception
-        # sitting unretrieved on the future.
-        event, payload = future.result()
-        yield _sse(event, payload)
-
-    return StreamingResponse(
-        frames(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
 @app.post("/api/collections/scan")
 def scan_collection(
     request: ScanRequest,
@@ -568,7 +643,10 @@ def scan_collection(
         session,
     )
 
-    return _scan_stream(collection.root_path, collection.id, session.get_bind())
+    return _stream(
+        partial(_scan_worker, collection.root_path, collection.id, session.get_bind()),
+        ScanProgressRead,
+    )
 
 
 @app.post("/api/collections/{collection_id}/rescan")
@@ -586,4 +664,7 @@ def rescan_collection(
             detail="Collection path not found. It may not be mounted.",
         )
 
-    return _scan_stream(collection.root_path, collection.id, session.get_bind())
+    return _stream(
+        partial(_scan_worker, collection.root_path, collection.id, session.get_bind()),
+        ScanProgressRead,
+    )

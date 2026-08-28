@@ -3,9 +3,11 @@ import os
 import shutil
 import time
 
+from fastapi import HTTPException
 from sqlmodel import select
 
 import main
+from matching import DiffProgress, MatchResult
 from models import Collection, Track
 from scanner import ScanProgress, ScanResult
 
@@ -888,7 +890,7 @@ def test_execute_rejects_a_non_candidate_id(
 
 
 def test_diff_buckets_a_missing_track(
-    client, session, tmp_path, make_track, collections
+    event_stream, session, tmp_path, make_track, collections
 ):
     mine, theirs = collections
 
@@ -906,10 +908,9 @@ def test_diff_buckets_a_missing_track(
 
     their_id = their_track.id
 
-    response = client.get(f"/api/diff?mine={mine.id}&theirs={theirs.id}")
+    stream = event_stream(f"/api/diff?mine={mine.id}&theirs={theirs.id}", "GET")
 
-    assert response.status_code == 200
-    body = response.json()
+    body = stream.done
     assert body["match_counts"]["missing"] == 1
     assert body["match_counts"]["already_have"] == 0
     assert body["match_counts"]["only_in_mine"] == 0
@@ -928,10 +929,10 @@ def test_diff_same_collection_returns_400(client, collections):
     assert response.status_code == 400
 
 
-def test_scan_returns_collection_and_stats(scan_stream, tmp_path, fixtures_dir):
+def test_scan_returns_collection_and_stats(event_stream, tmp_path, fixtures_dir):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 
-    stream = scan_stream(
+    stream = event_stream(
         "/api/collections/scan",
         json={"root_path": str(tmp_path), "name": "Theirs"},
     )
@@ -945,11 +946,11 @@ def test_scan_returns_collection_and_stats(scan_stream, tmp_path, fixtures_dir):
 
 
 def test_scan_duplicate_collection_name_returns_400(
-    client, scan_stream, tmp_path, fixtures_dir
+    client, event_stream, tmp_path, fixtures_dir
 ):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 
-    scan_stream(
+    event_stream(
         "/api/collections/scan",
         json={"root_path": str(tmp_path), "name": "Theirs"},
     )
@@ -967,11 +968,11 @@ def test_scan_duplicate_collection_name_returns_400(
 
 
 def test_scan_duplicate_collection_name_is_case_insensitive(
-    client, scan_stream, tmp_path, fixtures_dir
+    client, event_stream, tmp_path, fixtures_dir
 ):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 
-    scan_stream(
+    event_stream(
         "/api/collections/scan",
         json={"root_path": str(tmp_path), "name": "Theirs"},
     )
@@ -1000,7 +1001,7 @@ def test_scan_nonexistent_root_returns_400(client):
 
 
 def test_scan_accepts_a_root_path_with_surrounding_whitespace(
-    scan_stream, tmp_path, fixtures_dir
+    event_stream, tmp_path, fixtures_dir
 ):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 
@@ -1008,7 +1009,7 @@ def test_scan_accepts_a_root_path_with_surrounding_whitespace(
     # leading or trailing space. normpath does not strip whitespace, so
     # without the validator's strip() the padded string reaches isdir and
     # the request 400s on a directory that plainly exists.
-    stream = scan_stream(
+    stream = event_stream(
         "/api/collections/scan",
         json={"root_path": f"  {tmp_path}  ", "name": "Padded"},
     )
@@ -1018,16 +1019,16 @@ def test_scan_accepts_a_root_path_with_surrounding_whitespace(
     assert body["collection"]["root_path"] == os.path.normpath(str(tmp_path))
 
 
-def test_rescan_returns_collection_and_stats(scan_stream, tmp_path, fixtures_dir):
+def test_rescan_returns_collection_and_stats(event_stream, tmp_path, fixtures_dir):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 
-    first = scan_stream(
+    first = event_stream(
         "/api/collections/scan",
         json={"root_path": str(tmp_path), "name": "Theirs"},
     )
     collection_id = first.done["collection"]["id"]
 
-    body = scan_stream(f"/api/collections/{collection_id}/rescan").done
+    body = event_stream(f"/api/collections/{collection_id}/rescan").done
     assert body["scanned"] == 1
     assert body["added"] == 0
     assert body["updated"] == 0
@@ -1040,10 +1041,10 @@ def test_rescan_unknown_collection_returns_404(client):
     assert "Collection not found" in response.json()["detail"]
 
 
-def test_rescan_triggers_deletion(scan_stream, tmp_path, fixtures_dir):
+def test_rescan_triggers_deletion(event_stream, tmp_path, fixtures_dir):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 
-    first = scan_stream(
+    first = event_stream(
         "/api/collections/scan",
         json={"root_path": str(tmp_path), "name": "Theirs"},
     )
@@ -1051,7 +1052,7 @@ def test_rescan_triggers_deletion(scan_stream, tmp_path, fixtures_dir):
 
     os.remove(tmp_path / "test_track.mp3")
 
-    body = scan_stream(f"/api/collections/{collection_id}/rescan").done
+    body = event_stream(f"/api/collections/{collection_id}/rescan").done
     assert body["scanned"] == 0
     assert body["added"] == 0
     assert body["updated"] == 0
@@ -1059,11 +1060,11 @@ def test_rescan_triggers_deletion(scan_stream, tmp_path, fixtures_dir):
 
 
 def test_rescan_nonexistent_root_returns_400(
-    client, scan_stream, tmp_path, fixtures_dir
+    client, event_stream, tmp_path, fixtures_dir
 ):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 
-    first = scan_stream(
+    first = event_stream(
         "/api/collections/scan",
         json={"root_path": str(tmp_path), "name": "Theirs"},
     )
@@ -1077,10 +1078,10 @@ def test_rescan_nonexistent_root_returns_400(
     assert "not found" in response2.json()["detail"]
 
 
-def test_scan_stream_ends_with_a_done_frame(scan_stream, tmp_path, fixtures_dir):
+def test_event_stream_ends_with_a_done_frame(event_stream, tmp_path, fixtures_dir):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 
-    stream = scan_stream(
+    stream = event_stream(
         "/api/collections/scan",
         json={"root_path": str(tmp_path), "name": "Theirs"},
     )
@@ -1095,7 +1096,7 @@ def test_scan_stream_ends_with_a_done_frame(scan_stream, tmp_path, fixtures_dir)
     assert stream.error is None
 
 
-def test_scan_stream_reports_progress_frames(scan_stream, monkeypatch, tmp_path):
+def test_event_stream_reports_progress_frames(event_stream, monkeypatch, tmp_path):
     # A real scan is far too fast to observe, so the poll interval shrinks and
     # the scan is slowed. The margin is deliberate: the scan outlasts the poll
     # by 300x, which is what keeps this from being a race dressed as a test.
@@ -1128,7 +1129,7 @@ def test_scan_stream_reports_progress_frames(scan_stream, monkeypatch, tmp_path)
 
     monkeypatch.setattr(main, "scan_folder", slow_scan)
 
-    stream = scan_stream(
+    stream = event_stream(
         "/api/collections/scan",
         json={"root_path": str(tmp_path), "name": "Theirs"},
     )
@@ -1146,15 +1147,15 @@ def test_scan_stream_reports_progress_frames(scan_stream, monkeypatch, tmp_path)
     assert stream.done["scanned"] == 7
 
 
-def test_scan_stream_reports_a_scan_failure_as_an_error_frame(
-    scan_stream, monkeypatch, caplog, tmp_path
+def test_event_stream_reports_a_scan_failure_as_an_error_frame(
+    event_stream, monkeypatch, caplog, tmp_path
 ):
     def exploding_scan(root_path, collection_id, session, on_progress=None):
         raise OSError("the drive went away")
 
     monkeypatch.setattr(main, "scan_folder", exploding_scan)
 
-    stream = scan_stream(
+    stream = event_stream(
         "/api/collections/scan",
         json={"root_path": str(tmp_path), "name": "Theirs"},
     )
@@ -1187,11 +1188,11 @@ def test_scan_validation_failure_never_opens_a_stream(client):
 
 
 def test_rescan_commit_from_the_worker_thread_is_visible(
-    scan_stream, session, tmp_path, fixtures_dir
+    event_stream, session, tmp_path, fixtures_dir
 ):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 
-    first = scan_stream(
+    first = event_stream(
         "/api/collections/scan",
         json={"root_path": str(tmp_path), "name": "Theirs"},
     )
@@ -1200,7 +1201,7 @@ def test_rescan_commit_from_the_worker_thread_is_visible(
     before = session.get(Collection, collection_id).last_scanned_at
     assert before is not None
 
-    scan_stream(f"/api/collections/{collection_id}/rescan")
+    event_stream(f"/api/collections/{collection_id}/rescan")
 
     # Expire before reading, every time. Whether this session would otherwise
     # answer from its identity map depends on where its own transaction
@@ -1411,3 +1412,124 @@ def test_resolution_to_a_better_file_of_mine_is_rejected(
     detail = response.json()["detail"]
     assert "Nothing to import" in detail
     assert their_track.file_name in detail
+
+
+def test_diff_stream_ends_with_a_done_frame(
+    event_stream, tmp_path, collections, session, make_track
+):
+    mine, theirs = collections
+    their_track = make_track(
+        file_path=str(tmp_path / "theirs" / "song.mp3"),
+        collection_id=theirs.id,
+        file_size=1_000_000,
+        title="Only Theirs",
+    )
+    session.add(their_track)
+    session.commit()
+
+    stream = event_stream(f"/api/diff?mine={mine.id}&theirs={theirs.id}", "GET")
+
+    assert stream.events[-1] == "done"
+    assert set(stream.events[:-1]) <= {"progress"}
+    assert stream.events.count("done") == 1
+    assert stream.error is None
+
+
+def test_diff_stream_reports_progress_frames(event_stream, monkeypatch, collections):
+    monkeypatch.setattr(main, "PROGRESS_INTERVAL_SECONDS", 0.001)
+    mine, theirs = collections
+
+    def slow_match(tracks_mine, tracks_theirs, on_progress=None):
+        on_progress(
+            # One of three, not three of three: a fake that claims to be
+            # finished while it is still running is a small lie for the next
+            # person to copy out of this file.
+            DiffProgress(
+                theirs_processed_count=1,
+                theirs_count=3,
+                hashed_count=0,
+                current_path=r"C:\music\Radiohead\Creep.mp3",
+            )
+        )
+        time.sleep(0.3)
+        return MatchResult()
+
+    monkeypatch.setattr(main, "match_collections", slow_match)
+
+    stream = event_stream(f"/api/diff?mine={mine.id}&theirs={theirs.id}", "GET")
+
+    assert stream.progress
+    assert stream.progress[-1] == {
+        "theirs_processed_count": 1,
+        "theirs_count": 3,
+        "hashed_count": 0,
+        "current_path": r"C:\music\Radiohead\Creep.mp3",
+    }
+
+
+def test_diff_stream_reports_a_failure_as_an_error_frame(
+    event_stream, monkeypatch, caplog, collections
+):
+    mine, theirs = collections
+
+    def exploding_match(tracks_mine, tracks_theirs, on_progress=None):
+        raise OSError("the drive went away")
+
+    monkeypatch.setattr(main, "match_collections", exploding_match)
+
+    stream = event_stream(f"/api/diff?mine={mine.id}&theirs={theirs.id}", "GET")
+
+    assert stream.done is None
+    assert stream.events[-1] == "error"
+    assert stream.error == {"detail": "the drive went away"}
+    assert "Diff of" in caplog.text
+    assert "OSError" in caplog.text
+
+
+def test_diff_stream_survives_a_failure_before_the_collections_load(
+    event_stream, monkeypatch, caplog, collections
+):
+    mine, theirs = collections
+    real_load_collections = main._load_collections
+    calls = []
+
+    # _load_collections runs twice per diff: once on the request thread to
+    # validate, and again inside the worker with its own session. This fake
+    # lets the first through and fails the second, which is the real race —
+    # another client deletes the collection in between.
+    def load_then_vanish(session, mine_id, theirs_id):
+        calls.append((mine_id, theirs_id))
+        if len(calls) == 1:
+            return real_load_collections(session, mine_id, theirs_id)
+        raise HTTPException(status_code=404, detail="Collection not found.")
+
+    monkeypatch.setattr(main, "_load_collections", load_then_vanish)
+
+    stream = event_stream(f"/api/diff?mine={mine.id}&theirs={theirs.id}", "GET")
+
+    # Two calls, so the worker really did load again rather than reuse the
+    # request's objects. That reload is what keeps the ORM objects inside one
+    # thread and one session.
+    assert len(calls) == 2
+    assert stream.done is None
+    assert stream.error == {"detail": "404: Collection not found."}
+    # The failure happens before either collection is bound. An error handler
+    # that named them instead of their ids would raise UnboundLocalError here,
+    # replace the real failure, and escape the worker entirely — after 200 had
+    # already gone out.
+    assert "Diff of" in caplog.text
+
+
+def test_diff_validation_failure_never_opens_a_stream(client, collections):
+    mine, theirs = collections
+
+    self_comparison = client.get(f"/api/diff?mine={mine.id}&theirs={mine.id}")
+    unknown_collection = client.get(f"/api/diff?mine={mine.id}&theirs=99999")
+
+    # Both guards run before the StreamingResponse is returned, so a bad
+    # request still gets a real status and a JSON detail. If either ever moves
+    # after the stream opens it becomes a 200 event-stream, and
+    # throwForResponse in api.ts stops seeing the failure at all.
+    for response, status in ((self_comparison, 400), (unknown_collection, 404)):
+        assert response.status_code == status
+        assert response.headers["content-type"].startswith("application/json")

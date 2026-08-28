@@ -124,8 +124,8 @@ def client(session):
     app.dependency_overrides.clear()
 
 
-class ScanStream(NamedTuple):
-    """The frames one scan endpoint sent, in order and split by kind."""
+class StreamFrames(NamedTuple):
+    """The frames one streaming endpoint sent, in order and split by kind."""
 
     events: list[str]
     progress: list[dict]
@@ -133,7 +133,7 @@ class ScanStream(NamedTuple):
     error: dict | None
 
 
-def parse_sse(body: str) -> ScanStream:
+def parse_sse(body: str) -> StreamFrames:
     """Split an SSE body into frames.
 
     Frames are separated by a blank line, which is why splitting on "\\n\\n"
@@ -161,31 +161,35 @@ def parse_sse(body: str) -> ScanStream:
             done = data
         elif event == "error":
             error = data
-    return ScanStream(events=events, progress=progress, done=done, error=error)
+    return StreamFrames(events=events, progress=progress, done=done, error=error)
 
 
 @pytest.fixture
-def scan_stream(client):
-    """POST to a scan endpoint, consume the stream, and return its frames.
+def event_stream(client):
+    """Call a streaming endpoint, consume the stream, and return its frames.
 
-    The scan endpoints no longer answer with JSON. They stream Server-Sent
-    Events, and the final frame carries what the response body used to, so a
-    test that read response.json() reads .done instead.
+    The two scan endpoints and /api/diff no longer answer with JSON. They
+    stream Server-Sent Events, and the final frame carries what the response
+    body used to, so a test that read response.json() reads .done instead.
+
+    The method is a parameter because the scans are POSTs and the diff is a
+    GET: the diff's only write is caching hashes onto rows that already exist,
+    which is a cache fill rather than a state change.
 
     Success paths only. A request that fails validation never opens a stream,
-    so those tests keep using client.post and a status code — which is what
-    makes them the regression test for "validate before the stream opens".
+    so those tests keep using client.get or client.post and a status code —
+    which is what makes them the regression test for "validate first".
     """
 
-    def _scan_stream(url, **kwargs) -> ScanStream:
-        with client.stream("POST", url, **kwargs) as response:
+    def _event_stream(url, method="POST", **kwargs) -> StreamFrames:
+        with client.stream(method, url, **kwargs) as response:
             assert response.status_code == 200, (
                 f"{url} answered {response.status_code}, so no stream was opened"
             )
             body = "".join(response.iter_text())
         return parse_sse(body)
 
-    return _scan_stream
+    return _event_stream
 
 
 class Ambiguity(NamedTuple):

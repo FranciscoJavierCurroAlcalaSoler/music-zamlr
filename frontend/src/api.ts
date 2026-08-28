@@ -1,5 +1,6 @@
 import type {
   Diff,
+  DiffProgress,
   ImportPreview,
   ImportResult,
   ImportRequestBody,
@@ -28,7 +29,7 @@ interface ErrorBody {
   detail?: string | ValidationErrorDetail[];
 }
 
-interface ScanErrorPayload {
+interface ErrorPayload {
   detail: string;
 }
 
@@ -38,6 +39,7 @@ const EVENT_PREFIX = "event: ";
 const DATA_PREFIX = "data: ";
 
 export type ScanProgressCallback = (progress: ScanProgress) => void;
+export type DiffProgressCallback = (progress: DiffProgress) => void;
 
 function detailToMessage(detail: string | ValidationErrorDetail[]): string {
   if (!Array.isArray(detail)) {
@@ -98,10 +100,11 @@ function parseFrame(frame: string): [string, string] {
   return [eventName, data];
 }
 
-async function readScanStream(
+async function readStream<TDone, TProgress>(
   response: Response,
-  onProgress?: ScanProgressCallback,
-): Promise<ScanResult> {
+  label: string,
+  onProgress?: (progress: TProgress) => void,
+): Promise<TDone> {
   // A 200 that is not an event stream is almost always a backend running
   // older code, which answers these endpoints with a plain JSON body. Without
   // this the symptom is the generic "ended without a result" below, which
@@ -118,7 +121,7 @@ async function readScanStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let result: ScanResult | null = null;
+  let result: TDone | null = null;
 
   for (;;) {
     const { done, value } = await reader.read();
@@ -131,14 +134,14 @@ async function readScanStream(
       buffer = buffer.slice(index + FRAME_SEPARATOR.length);
       switch (eventName) {
         case "progress":
-          onProgress?.(JSON.parse(data) as ScanProgress);
+          onProgress?.(JSON.parse(data) as TProgress);
           break;
         case "done":
-          result = JSON.parse(data) as ScanResult;
+          result = JSON.parse(data) as TDone;
           break;
         case "error":
           void reader.cancel();
-          throw new Error((JSON.parse(data) as ScanErrorPayload).detail);
+          throw new Error((JSON.parse(data) as ErrorPayload).detail);
         // An unknown event name is ignored rather than treated as a fault, so
         // an older frontend keeps working against a backend that adds a frame.
         default:
@@ -149,7 +152,7 @@ async function readScanStream(
   }
   if (result === null)
     throw new Error(
-      "The scan ended without a result. The server may have stopped.",
+      `The ${label} ended without a result. The server may have stopped.`,
     );
   return result;
 }
@@ -169,7 +172,7 @@ export async function createCollection(
   if (!response.ok) {
     await throwForResponse(response);
   }
-  return readScanStream(response, onProgress);
+  return readStream<ScanResult, ScanProgress>(response, "scan", onProgress);
 }
 
 export async function rescanCollection(
@@ -185,7 +188,7 @@ export async function rescanCollection(
   if (!response.ok) {
     await throwForResponse(response);
   }
-  return readScanStream(response, onProgress);
+  return readStream<ScanResult, ScanProgress>(response, "scan", onProgress);
 }
 
 /** Turn whatever a failed fetch produced into something worth showing. */
@@ -207,6 +210,7 @@ export function describeFetchError(error: unknown): string {
 export async function fetchDiff(
   mineId: number,
   theirsId: number,
+  onProgress?: DiffProgressCallback,
 ): Promise<Diff> {
   const response = await fetch(
     `${API_BASE}/api/diff?mine=${mineId}&theirs=${theirsId}`,
@@ -214,7 +218,7 @@ export async function fetchDiff(
   if (!response.ok) {
     await throwForResponse(response);
   }
-  return response.json();
+  return readStream<Diff, DiffProgress>(response, "comparison", onProgress);
 }
 
 export async function previewImport(

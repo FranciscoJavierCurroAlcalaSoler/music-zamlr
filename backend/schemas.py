@@ -67,7 +67,7 @@ class MatchResultRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class DiffRead(BaseModel):
+class DiffResultRead(BaseModel):
     match_results: MatchResultRead
     match_counts: dict[str, int]
 
@@ -190,6 +190,15 @@ class ScanProgressRead(BaseModel):
     deleted: int
     skipped_non_audio: int
     matched: int
+    current_path: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DiffProgressRead(BaseModel):
+    theirs_processed_count: int
+    theirs_count: int
+    hashed_count: int
     current_path: str | None = None
 
     model_config = ConfigDict(from_attributes=True)

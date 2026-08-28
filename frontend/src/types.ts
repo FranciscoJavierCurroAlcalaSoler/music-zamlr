@@ -73,6 +73,13 @@ export interface MatchResult {
   only_in_mine: Track[];
 }
 
+export interface DiffProgress {
+  theirs_processed_count: number;
+  theirs_count: number;
+  hashed_count: number;
+  current_path: string | null;
+}
+
 export interface Diff {
   match_results: MatchResult;
   match_counts: {
