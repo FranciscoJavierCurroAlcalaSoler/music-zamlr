@@ -26,6 +26,7 @@ import type {
   Match,
   Collection,
   Diff,
+  DiffProgress,
   ImportPreview,
   ImportSettingsValues,
   ImportResult,
@@ -41,6 +42,8 @@ import { ImportSettings } from "./ImportSettings";
 import { ImportPreviewDialog } from "./ImportPreviewDialog";
 import { ImportResultView } from "./ImportResultView";
 import { ResolveMatchDialog } from "./ResolveMatchDialog";
+import { DiffProgressView } from "./DiffProgressView";
+import { bitrate, duration, formatCount } from "../format";
 
 type BucketKey =
   "missing" | "upgrade_available" | "already_have" | "needs_review";
@@ -81,10 +84,28 @@ const diffColumns: GridColDef[] = [
   { field: "artist", headerName: "Artist", flex: 1 },
   { field: "album", headerName: "Album", flex: 1 },
   { field: "format", headerName: "Format", width: 90 },
-  { field: "bit_rate", headerName: "Bitrate", width: 100 },
-  { field: "duration", headerName: "Duration", width: 100 },
+  // Raw without these: a bitrate reads as 1411200 and a duration as 614.
+  // valueFormatter rather than renderCell, so sorting and filtering still use
+  // the underlying number — the same reason the Status column uses valueGetter.
+  {
+    field: "bit_rate",
+    headerName: "Bitrate",
+    width: 100,
+    valueFormatter: (value: number | null) => bitrate(value),
+  },
+  {
+    field: "duration",
+    headerName: "Duration",
+    width: 100,
+    valueFormatter: (value: number | null) => duration(value),
+  },
   { field: "mine_format", headerName: "Your format", width: 110 },
-  { field: "mine_bit_rate", headerName: "Your bitrate", width: 110 },
+  {
+    field: "mine_bit_rate",
+    headerName: "Your bitrate",
+    width: 110,
+    valueFormatter: (value: number | null) => bitrate(value),
+  },
 ];
 
 const onlyInMineColumns: GridColDef[] = [
@@ -92,8 +113,18 @@ const onlyInMineColumns: GridColDef[] = [
   { field: "artist", headerName: "Artist", flex: 1 },
   { field: "album", headerName: "Album", flex: 1 },
   { field: "format", headerName: "Format", width: 90 },
-  { field: "bit_rate", headerName: "Bitrate", width: 100 },
-  { field: "duration", headerName: "Duration", width: 100 },
+  {
+    field: "bit_rate",
+    headerName: "Bitrate",
+    width: 100,
+    valueFormatter: (value: number | null) => bitrate(value),
+  },
+  {
+    field: "duration",
+    headerName: "Duration",
+    width: 100,
+    valueFormatter: (value: number | null) => duration(value),
+  },
 ];
 
 interface DiffViewProps {
@@ -119,6 +150,7 @@ function describeStatus(
 
 export function DiffView({ collections, loadingCollections }: DiffViewProps) {
   const [loadingDiff, setLoadingDiff] = useState(false);
+  const [progress, setProgress] = useState<DiffProgress | null>(null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [mineId, setMineId] = useState<number | "">("");
@@ -283,7 +315,7 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
       if (mineId === "" || theirsId === "") {
         throw new Error("Select both collections first.");
       }
-      const result: Diff = await fetchDiff(mineId, theirsId);
+      const result: Diff = await fetchDiff(mineId, theirsId, setProgress);
       setDiff(result);
       setDiffScannedAt({
         mine: scannedAt(mineId),
@@ -293,6 +325,7 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
       setDiffError(describeFetchError(error));
     } finally {
       setLoadingDiff(false);
+      setProgress(null);
     }
   }
 
@@ -414,6 +447,7 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
         >
           {loadingDiff ? "Comparing…" : "Compare"}
         </Button>
+        <DiffProgressView progress={progress} />
         {diff && (
           <>
             <Box
@@ -431,9 +465,11 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
                 </Alert>
               )}
               <Tabs value={tab} onChange={(_, next) => setTab(next)}>
-                <Tab label={`Import candidates (${rows.length})`} />
                 <Tab
-                  label={`Only in mine (${diff.match_counts.only_in_mine})`}
+                  label={`Import candidates (${formatCount(rows.length)})`}
+                />
+                <Tab
+                  label={`Only in mine (${formatCount(diff.match_counts.only_in_mine)})`}
                 />
               </Tabs>
 
@@ -447,27 +483,38 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
                     }}
                     size="small"
                   >
-                    <ToggleButton value="all">All ({rows.length})</ToggleButton>
+                    <ToggleButton value="all">
+                      All ({formatCount(rows.length)})
+                    </ToggleButton>
                     <ToggleButton value="missing">
-                      Missing ({diff.match_counts.missing})
+                      Missing ({formatCount(diff.match_counts.missing)})
                     </ToggleButton>
                     <ToggleButton value="upgrade_available">
-                      Upgrades ({diff.match_counts.upgrade_available})
+                      Upgrades (
+                      {formatCount(diff.match_counts.upgrade_available)})
                     </ToggleButton>
                     <ToggleButton value="already_have">
-                      Already have ({diff.match_counts.already_have})
+                      Already have (
+                      {formatCount(diff.match_counts.already_have)})
                     </ToggleButton>
                     <ToggleButton value="needs_review">
-                      Needs review ({diff.match_counts.needs_review})
+                      Needs review (
+                      {formatCount(diff.match_counts.needs_review)})
                     </ToggleButton>
                   </ToggleButtonGroup>
                   <Typography variant="body2">
-                    {selection.ids.size} selected
+                    {formatCount(selection.ids.size)} selected
                   </Typography>
+                  {/* No loading prop, deliberately. DataGrid draws its own
+                      indeterminate bar under the header, and DiffProgressView
+                      above already shows a determinate one with counts and the
+                      current file. Two bars for one operation read as two
+                      operations. This grid only exists once a diff has been
+                      computed, so its bar could never appear except during a
+                      re-run, which is exactly when the other one is there. */}
                   <DataGrid
                     rows={visibleRows}
                     columns={columns}
-                    loading={loadingDiff}
                     checkboxSelection
                     disableRowSelectionExcludeModel
                     keepNonExistentRowsSelected
@@ -488,7 +535,6 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
                 <DataGrid
                   rows={onlyInMineRows}
                   columns={onlyInMineColumns}
-                  loading={loadingDiff}
                   sx={{ flex: 1, minHeight: 0 }}
                 />
               )}
