@@ -1,4 +1,4 @@
-import { LinearProgress, Typography } from "@mui/material";
+import { Box, LinearProgress, Stack, Typography } from "@mui/material";
 import { formatCount, progressPercent, shortenPath } from "../format";
 import type { DiffProgress } from "../types";
 
@@ -25,26 +25,45 @@ interface DiffProgressViewProps {
 export function DiffProgressView({ progress }: DiffProgressViewProps) {
   if (progress === null) return null;
   return (
-    <>
+    <Box sx={{ py: 1.5 }}>
       <LinearProgress
         variant="determinate"
         value={progressPercent(
           progress.theirs_processed_count,
           progress.theirs_count,
         )}
+        sx={{ height: 6, borderRadius: 1, mb: 1 }}
       />
-      <Typography variant="body2">
-        {formatCount(progress.theirs_processed_count)} of{" "}
-        {formatCount(progress.theirs_count)}.
-      </Typography>
-      <Typography variant="body2">
-        {formatCount(progress.hashed_count)} file hashes computed.
-      </Typography>
-      <Typography variant="body2" noWrap sx={{ minHeight: "1.5em" }}>
+      {/* The hash count is the reason the bar stalls, so it belongs beside the
+          count it explains rather than under it. flexShrink keeps the pair on
+          one line as the numbers grow. */}
+      <Stack
+        direction="row"
+        spacing={2}
+        sx={{ justifyContent: "space-between", alignItems: "baseline" }}
+      >
+        <Typography variant="body2">
+          Comparing {formatCount(progress.theirs_processed_count)} of{" "}
+          {formatCount(progress.theirs_count)}
+        </Typography>
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{ flexShrink: 0 }}
+        >
+          {formatCount(progress.hashed_count)} hashed
+        </Typography>
+      </Stack>
+      <Typography
+        variant="body2"
+        color="text.secondary"
+        noWrap
+        sx={{ minHeight: "1.5em" }}
+      >
         {progress.current_path === null
           ? ""
           : shortenPath(progress.current_path)}
       </Typography>
-    </>
+    </Box>
   );
 }
