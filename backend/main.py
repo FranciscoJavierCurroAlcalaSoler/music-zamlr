@@ -15,8 +15,14 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from database import create_collection, create_db_and_tables, get_session
-from enums import ActionType, Bucket, OperationStatus
-from importing import OperationResult, PlannedOperation, execute_plan, plan_import
+from enums import ActionType, Bucket, ImportPhase, OperationStatus
+from importing import (
+    ExecuteProgress,
+    OperationResult,
+    PlannedOperation,
+    execute_plan,
+    plan_import,
+)
 from matching import (
     DiffProgress,
     Match,
@@ -31,6 +37,7 @@ from schemas import (
     DiffProgressRead,
     DiffResultRead,
     ImportPreviewRead,
+    ImportProgressRead,
     ImportRequest,
     ImportResultRead,
     OperationResultRead,
@@ -123,9 +130,35 @@ def _run_diff(
 
 PROGRESS_INTERVAL_SECONDS = 0.2
 
-# What a worker reports as it goes. The two are unrelated shapes; the union
-# exists only so _stream can hold one without caring which it has.
-Progress = ScanProgress | DiffProgress
+
+@dataclass
+class ImportProgress:
+    """Progress for both import endpoints, across both of their phases.
+
+    Generic field names, unlike DiffProgress, because this describes two
+    different things depending on the phase: tracks compared, then files
+    copied. A name like theirs_processed_count would be a lie in the second.
+
+    The phase says which stage the work has reached, not which endpoint was
+    called — the client already knows that, having made the request. What it
+    cannot otherwise know is whether an execute is still comparing or has
+    begun writing to disk, which is the difference between a run that can be
+    abandoned harmlessly and one that cannot.
+    """
+
+    phase: ImportPhase
+    processed_count: int
+    total_count: int
+    current_path: str | None = None
+
+
+# What a worker reports as it goes. Unrelated shapes; the union exists only so
+# _stream can hold one without caring which it has.
+#
+# ExecuteProgress is deliberately absent even though execute_plan reports one.
+# It never reaches _stream: _execute_worker converts it, and DiffProgress, into
+# ImportProgress before either leaves the worker.
+Progress = ScanProgress | DiffProgress | ImportProgress
 ProgressCallback = Callable[[Progress], None]
 
 
@@ -204,6 +237,196 @@ def _diff_worker(
         return "done", payload
     except Exception as error:
         logging.exception("Diff of collections %s and %s failed", mine_id, theirs_id)
+        return "error", {"detail": str(error)}
+
+
+def _check_destination_root(destination_root: str) -> None:
+    """Reject a destination we cannot write to. Raises, or returns nothing.
+
+    Called twice per import request, and both calls earn their place. The
+    endpoint calls it before opening the stream, so a bad path is a 400 the
+    client can read; _build_plan calls it again on the worker thread, so the
+    function is safe to call on its own and its own tests still hold.
+    """
+    if not os.path.isdir(destination_root):
+        raise HTTPException(
+            status_code=400,
+            detail="Destination root does not exist or is not a directory.",
+        )
+    if not os.access(destination_root, os.W_OK):
+        raise HTTPException(status_code=400, detail="Destination root is not writable.")
+
+
+def _comparing_reporter(
+    on_progress: ProgressCallback,
+) -> Callable[[DiffProgress], None]:
+    """Adapt what _build_plan reports into what the stream carries.
+
+    match_collections counts tracks of theirs and knows nothing about imports;
+    the stream carries one shape for both phases. Translating here is what
+    keeps matching.py ignorant of ImportPhase and of the schema layer.
+    """
+
+    def report(progress: DiffProgress) -> None:
+        on_progress(
+            ImportProgress(
+                phase=ImportPhase.COMPARING,
+                processed_count=progress.theirs_processed_count,
+                total_count=progress.theirs_count,
+                current_path=progress.current_path,
+            )
+        )
+
+    return report
+
+
+def _copying_reporter(
+    on_progress: ProgressCallback,
+) -> Callable[[ExecuteProgress], None]:
+    """The same adaptation for the second phase, from importing.py's shape.
+
+    total_count drops from the number of tracks compared to the number of
+    operations planned, which is correct and will look like a reset in the UI.
+    The phase field is what tells the reader those two totals count different
+    things.
+    """
+
+    def report(progress: ExecuteProgress) -> None:
+        on_progress(
+            ImportProgress(
+                phase=ImportPhase.COPYING,
+                processed_count=progress.operations_processed_count,
+                total_count=progress.operations_count,
+                current_path=progress.current_path,
+            )
+        )
+
+    return report
+
+
+def _count_operations(operations: list[PlannedOperation]) -> dict[str, int]:
+    return {
+        "copy": sum(1 for op in operations if op.action == ActionType.COPY),
+        "delete": sum(1 for op in operations if op.action == ActionType.DELETE),
+        "move": sum(1 for op in operations if op.action == ActionType.MOVE),
+        "overwrites": sum(1 for op in operations if op.overwrites),
+    }
+
+
+def _preview_worker(
+    request: ImportRequest, engine, on_progress: ProgressCallback
+) -> tuple[str, dict]:
+    """Plan an import without touching anything. Runs on a worker thread.
+
+    One phase only: the whole cost is the diff _build_plan recomputes (§5c).
+    It still reports a phase, so both import endpoints share one payload shape
+    and one progress component on the frontend.
+
+    Most of _build_plan's rejections happen after that diff and cannot be HTTP
+    status codes — 200 has gone out by then — so they arrive as error frames
+    with the same message. Only the request-shaped checks stay statuses, and
+    the endpoint runs those before the stream opens.
+    """
+    try:
+        with Session(engine) as session:
+            import_plan = _build_plan(
+                request, session, on_progress=_comparing_reporter(on_progress)
+            )
+            preview = PreviewResult(
+                operations=import_plan.operations,
+                upgrades=import_plan.upgrades,
+                operation_counts=_count_operations(import_plan.operations),
+            )
+            payload = ImportPreviewRead.model_validate(preview).model_dump(mode="json")
+        return "done", payload
+    except Exception as error:
+        logging.exception(
+            "Preview of collection %s into %s failed",
+            request.theirs_collection_id,
+            request.destination_root,
+        )
+        return "error", {"detail": str(error)}
+
+
+def _execute_worker(
+    request: ImportRequest, engine, on_progress: ProgressCallback
+) -> tuple[str, dict]:
+    """Plan an import and carry it out. Runs on a worker thread.
+
+    Two phases, one stream, one done frame. The plan is rebuilt here rather
+    than carried over from a preview: the server recomputes rather than
+    trusting a client-supplied classification (§5c), and there is no preview
+    token, so an execute cannot assume a preview ever happened.
+
+    The phases differ in more than duration. Nothing on disk changes during
+    the first; everything does during the second, which is why the frames say
+    which one is running rather than only how far along it is.
+    """
+    try:
+        with Session(engine) as session:
+            import_plan = _build_plan(
+                request, session, on_progress=_comparing_reporter(on_progress)
+            )
+            operation_results = execute_plan(
+                import_plan.operations, on_progress=_copying_reporter(on_progress)
+            )
+
+            # Successful deletes and moves leave rows pointing at files that no
+            # longer exist; the next diff would offer the same upgrade again and
+            # then fail on the delete. Copies deliberately get no rows: the
+            # destination root is any folder the user picked, so nothing
+            # guarantees it sits inside mine's collection tree. A re-scan is how
+            # they appear.
+            for result in operation_results:
+                if (
+                    result.status == OperationStatus.SUCCESS
+                    and result.operation.action in (ActionType.DELETE, ActionType.MOVE)
+                ):
+                    stale_track = session.exec(
+                        select(Track).where(
+                            Track.collection_id == request.mine_collection_id,
+                            Track.file_path == result.operation.source,
+                        )
+                    ).first()
+                    if stale_track is not None:
+                        session.delete(stale_track)
+            session.commit()
+
+            (log_path, log_error) = _write_import_log(
+                request.destination_root, operation_results
+            )
+            import_result = ImportResult(
+                operations=operation_results,
+                status_counts={
+                    "success": sum(
+                        1
+                        for r in operation_results
+                        if r.status == OperationStatus.SUCCESS
+                    ),
+                    "failed": sum(
+                        1
+                        for r in operation_results
+                        if r.status == OperationStatus.FAILED
+                    ),
+                    "skipped": sum(
+                        1
+                        for r in operation_results
+                        if r.status == OperationStatus.SKIPPED
+                    ),
+                },
+                log_path=log_path,
+                log_error=log_error,
+            )
+            payload = ImportResultRead.model_validate(import_result).model_dump(
+                mode="json"
+            )
+        return "done", payload
+    except Exception as error:
+        logging.exception(
+            "Import of collection %s into %s failed",
+            request.theirs_collection_id,
+            request.destination_root,
+        )
         return "error", {"detail": str(error)}
 
 
@@ -315,7 +538,11 @@ class BuiltPlan:
     upgrades: list[Match]
 
 
-def _build_plan(request: ImportRequest, session: Session) -> BuiltPlan:
+def _build_plan(
+    request: ImportRequest,
+    session: Session,
+    on_progress: Callable[[DiffProgress], None] | None = None,
+) -> BuiltPlan:
     """Load, diff, filter, and plan. Shared by preview and execute.
 
     The request carries track ids, not classifications: the client says
@@ -333,18 +560,14 @@ def _build_plan(request: ImportRequest, session: Session) -> BuiltPlan:
     track_ids = set(request.track_ids)
     destination_root = request.destination_root
 
-    if not os.path.isdir(destination_root):
-        raise HTTPException(
-            status_code=400,
-            detail="Destination root does not exist or is not a directory.",
-        )
-    if not os.access(destination_root, os.W_OK):
-        raise HTTPException(status_code=400, detail="Destination root is not writable.")
+    _check_destination_root(destination_root)
 
     mine_collection, theirs_collection = _load_collections(
         session, mine_collection_id, theirs_collection_id
     )
-    match_result = _run_diff(session, mine_collection, theirs_collection)
+    match_result = _run_diff(
+        session, mine_collection, theirs_collection, on_progress=on_progress
+    )
 
     missing: list[Track] = []
     resolved_to_already_have: list[Track] = []
@@ -495,32 +718,21 @@ class PreviewResult:
     operation_counts: dict[str, int]
 
 
-@app.post("/api/import/preview", response_model=ImportPreviewRead)
+@app.post("/api/import/preview")
 def preview_import(
     request: ImportRequest,
     session: Session = Depends(get_session),
 ):
+    # Validated here, on the request thread, so a bad request still gets a
+    # real 400 or 404. Once _stream returns, 200 has been sent and cannot be
+    # undone — every later rejection arrives as an error frame instead.
+    _check_destination_root(request.destination_root)
+    _load_collections(session, request.mine_collection_id, request.theirs_collection_id)
 
-    import_plan = _build_plan(request, session)
-
-    preview = PreviewResult(
-        operations=import_plan.operations,
-        upgrades=import_plan.upgrades,
-        operation_counts={
-            "copy": sum(
-                1 for op in import_plan.operations if op.action == ActionType.COPY
-            ),
-            "delete": sum(
-                1 for op in import_plan.operations if op.action == ActionType.DELETE
-            ),
-            "move": sum(
-                1 for op in import_plan.operations if op.action == ActionType.MOVE
-            ),
-            "overwrites": sum(1 for op in import_plan.operations if op.overwrites),
-        },
+    return _stream(
+        partial(_preview_worker, request, session.get_bind()),
+        ImportProgressRead,
     )
-
-    return preview
 
 
 @dataclass
@@ -556,58 +768,24 @@ def _write_import_log(
     return log_path, log_error
 
 
-@app.post("/api/import/execute", response_model=ImportResultRead)
+@app.post("/api/import/execute")
 def execute_import(
     request: ImportRequest,
     session: Session = Depends(get_session),
 ):
 
-    import_plan = _build_plan(request, session)
+    _check_destination_root(request.destination_root)
+    _load_collections(session, request.mine_collection_id, request.theirs_collection_id)
 
-    operation_results = execute_plan(import_plan.operations)
-
-    # Successful deletes and moves leave rows pointing at files that no
-    # longer exist; the next diff would offer the same upgrade again and
-    # then fail on the delete. Copies deliberately get no rows: the
-    # destination root is any folder the user picked, so nothing guarantees
-    # it sits inside mine's collection tree. A re-scan is how they appear.
-    for result in operation_results:
-        if result.status == OperationStatus.SUCCESS and result.operation.action in (
-            ActionType.DELETE,
-            ActionType.MOVE,
-        ):
-            stale_track = session.exec(
-                select(Track).where(
-                    Track.collection_id == request.mine_collection_id,
-                    Track.file_path == result.operation.source,
-                )
-            ).first()
-            if stale_track is not None:
-                session.delete(stale_track)
-    session.commit()
-
-    (log_path, log_error) = _write_import_log(
-        request.destination_root, operation_results
+    # One call, one stream, one done frame. The two phases are not two
+    # streams: _execute_worker runs the diff and then the copying inside a
+    # single blocking function, and both report through the same callback, so
+    # a phase change is only the next value in the snapshot cell that _stream
+    # already polls.
+    return _stream(
+        partial(_execute_worker, request, session.get_bind()),
+        ImportProgressRead,
     )
-
-    import_result = ImportResult(
-        operations=operation_results,
-        status_counts={
-            "success": sum(
-                1 for r in operation_results if r.status == OperationStatus.SUCCESS
-            ),
-            "failed": sum(
-                1 for r in operation_results if r.status == OperationStatus.FAILED
-            ),
-            "skipped": sum(
-                1 for r in operation_results if r.status == OperationStatus.SKIPPED
-            ),
-        },
-        log_path=log_path,
-        log_error=log_error,
-    )
-
-    return import_result
 
 
 @app.post("/api/collections/scan")

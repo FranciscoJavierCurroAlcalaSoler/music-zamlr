@@ -1,6 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createCollection, fetchDiff, rescanCollection } from "./api";
-import type { ScanProgress, DiffProgress } from "./types";
+import {
+  createCollection,
+  fetchDiff,
+  rescanCollection,
+  previewImport,
+  executeImport,
+} from "./api";
+import type {
+  ScanProgress,
+  DiffProgress,
+  ImportProgress,
+  ImportRequestBody,
+} from "./types";
 
 /**
  * These drive the real fetch path with a stubbed server, because
@@ -71,6 +82,74 @@ const finishedDiff = {
   },
 };
 
+// The union, not string. A fixture typed string can build a phase the backend
+// cannot send, and the assertion then compares that typo against itself and
+// passes. It is also the second place a third phase breaks the build, after
+// describePhase's satisfies.
+const progressImport = (
+  phase: ImportProgress["phase"],
+  processedCount: number,
+  totalCount: number,
+  currentPath: string | null,
+) => ({
+  phase,
+  processed_count: processedCount,
+  total_count: totalCount,
+  current_path: currentPath,
+});
+
+const finishedPreview = {
+  operations: [
+    {
+      source: "track.mp3",
+      destination: "track.mp3",
+      action: "copy",
+      group_id: 1,
+      overwrites: false,
+    },
+  ],
+  upgrades: [],
+  operation_counts: { copy: 1, delete: 0, move: 0, overwrites: 0 },
+};
+
+const finishedImport = {
+  operations: [
+    {
+      operation: {
+        source: "track.mp3",
+        destination: "track.mp3",
+        action: "copy",
+        group_id: 1,
+        overwrites: false,
+      },
+      status: "success",
+      error: null,
+    },
+  ],
+  status_counts: { success: 1, failed: 0, skipped: 0 },
+  log_path: null,
+  log_error: null,
+};
+
+/**
+ * Both import endpoints take a body, and the stubbed fetch ignores it: it
+ * takes no parameters at all. So these values are never read by anything,
+ * and one shared fixture is right — a per-test body would imply the request
+ * changes the answer, which it cannot here.
+ *
+ * Annotated rather than inferred. A const literal widens "mirror" to string,
+ * and string is not a StructureMode.
+ */
+const importRequest: ImportRequestBody = {
+  track_ids: [1, 2],
+  mine_collection_id: 1,
+  theirs_collection_id: 2,
+  destination_root: `D:${B}Music`,
+  structure_mode: "mirror",
+  upgrade_action: "keep_both",
+  resolutions: [],
+};
+
 const PATH_ONE = `D:${B}Music${B}Sigur Rós${B}Hoppípolla.flac`;
 const PATH_TWO = `D:${B}Music${B}Björk${B}Jóga.flac`;
 
@@ -83,6 +162,18 @@ const wholeBodyDiff =
   frame("progress", progressDiff(1, PATH_ONE)) +
   frame("progress", progressDiff(2, PATH_TWO)) +
   frame("done", finishedDiff);
+
+const wholeBodyPreview =
+  frame("progress", progressImport("comparing", 111, 3500, PATH_ONE)) +
+  frame("progress", progressImport("comparing", 666, 3500, PATH_TWO)) +
+  frame("done", finishedPreview);
+
+const wholeBodyImport =
+  frame("progress", progressImport("comparing", 111, 3500, PATH_ONE)) +
+  frame("progress", progressImport("comparing", 666, 3500, PATH_TWO)) +
+  frame("progress", progressImport("copying", 11, 42, PATH_ONE)) +
+  frame("progress", progressImport("copying", 33, 42, PATH_TWO)) +
+  frame("done", finishedImport);
 
 /**
  * Hand the body over in fixed-size byte chunks. A chunk size of 1 puts a
@@ -271,5 +362,79 @@ describe("reading a diff stream", () => {
     streamServer(frame("progress", progressDiff(1, PATH_ONE)));
 
     await expect(fetchDiff(1, 2)).rejects.toThrow("comparison");
+  });
+});
+
+describe("reading an import stream", () => {
+  it("resolves with the preview and reports every progress frame", async () => {
+    streamServer(wholeBodyPreview);
+    const seen: ImportProgress[] = [];
+
+    const result = await previewImport(importRequest, (p) => seen.push(p));
+
+    expect(result).toEqual(finishedPreview);
+    expect(seen).toEqual([
+      progressImport("comparing", 111, 3500, PATH_ONE),
+      progressImport("comparing", 666, 3500, PATH_TWO),
+    ]);
+  });
+
+  it("resolves with the result and reports both phases in order", async () => {
+    streamServer(wholeBodyImport);
+    const seen: ImportProgress[] = [];
+
+    const result = await executeImport(importRequest, (p) => seen.push(p));
+
+    expect(result).toEqual(finishedImport);
+    expect(seen.map((p) => p.phase)).toEqual([
+      "comparing",
+      "comparing",
+      "copying",
+      "copying",
+    ]);
+  });
+
+  it("carries a different total in each phase", async () => {
+    streamServer(wholeBodyImport);
+    const seen: ImportProgress[] = [];
+
+    const result = await executeImport(importRequest, (p) => seen.push(p));
+
+    expect(result).toEqual(finishedImport);
+    expect(seen.map((p) => p.total_count)).toEqual([3500, 3500, 42, 42]);
+  });
+
+  it.each([1, 3, 17, 10_000])(
+    "gives the same answer at %i bytes per chunk",
+    async (chunkSize) => {
+      streamServer(wholeBodyImport, chunkSize);
+      const seen: ImportProgress[] = [];
+
+      const result = await executeImport(importRequest, (p) => seen.push(p));
+
+      expect(result).toEqual(finishedImport);
+      expect(seen.map((p) => p.current_path)).toEqual([
+        PATH_ONE,
+        PATH_TWO,
+        PATH_ONE,
+        PATH_TWO,
+      ]);
+    },
+  );
+
+  it("says preview, not scan or comparison, when the stream ends without a result", async () => {
+    streamServer(
+      frame("progress", progressImport("comparing", 111, 3500, PATH_ONE)),
+    );
+
+    await expect(previewImport(importRequest)).rejects.toThrow("preview");
+  });
+
+  it("says import, not scan, comparison or preview, when the stream ends without a result", async () => {
+    streamServer(
+      frame("progress", progressImport("comparing", 111, 3500, PATH_ONE)),
+    );
+
+    await expect(executeImport(importRequest)).rejects.toThrow("import");
   });
 });

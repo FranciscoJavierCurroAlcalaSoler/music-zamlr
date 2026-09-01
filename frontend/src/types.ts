@@ -80,7 +80,7 @@ export interface DiffProgress {
   current_path: string | null;
 }
 
-export interface Diff {
+export interface DiffResult {
   match_results: MatchResult;
   match_counts: {
     missing: number;
@@ -118,6 +118,13 @@ export interface OperationResult {
   operation: PlannedOperation;
   status: "success" | "failed" | "skipped";
   error: string | null;
+}
+
+export interface ImportProgress {
+  phase: "comparing" | "copying";
+  processed_count: number;
+  total_count: number;
+  current_path: string | null;
 }
 
 export interface ImportResult {

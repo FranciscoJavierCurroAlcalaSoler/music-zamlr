@@ -42,6 +42,13 @@ class OperationResult:
     error: str | None = None
 
 
+@dataclass
+class ExecuteProgress:
+    operations_processed_count: int
+    operations_count: int
+    current_path: str | None = None
+
+
 def compute_destination(
     track: Track, source_root: str, destination_root: str, structure_mode: StructureMode
 ) -> str:
@@ -310,7 +317,10 @@ def _perform(operation: PlannedOperation) -> None:
         raise ValueError(f"Invalid action value: {operation.action!r}")
 
 
-def execute_plan(operations: list[PlannedOperation]) -> list[OperationResult]:
+def execute_plan(
+    operations: list[PlannedOperation],
+    on_progress: Callable[[ExecuteProgress], None] | None = None,
+) -> list[OperationResult]:
     """Run a plan in order, returning one result per operation.
 
     Failures are per-operation rather than fatal: an OSError (a file locked
@@ -325,8 +335,34 @@ def execute_plan(operations: list[PlannedOperation]) -> list[OperationResult]:
     """
     results: list[OperationResult] = []
     failed_groups: set[int] = set()
+    operations_count = len(operations)
+    operations_processed_count = 0
+
+    def report(current_path: str | None = None) -> None:
+        if on_progress is not None:
+            # A new object per call. The value handed to a callback is a
+            # statement about one moment, and a caller that keeps what it
+            # receives must not watch it change underneath.
+            on_progress(
+                ExecuteProgress(
+                    operations_processed_count=operations_processed_count,
+                    operations_count=operations_count,
+                    current_path=current_path,
+                )
+            )
 
     for operation in operations:
+        # Report first, then count, then act: the count means "finished" and
+        # the path means "in progress", which is what a copy of a 300 MB FLAC
+        # needs it to mean.
+        #
+        # The increment stays above the skip below rather than at the foot of
+        # the loop, and that is load-bearing. A skipped operation has been
+        # dealt with, so it has to advance the count — moving this down would
+        # stall the bar for the whole of a failed group, exactly when someone
+        # is watching it hardest.
+        report(operation.source)
+        operations_processed_count += 1
         if operation.group_id in failed_groups:
             results.append(OperationResult(operation, OperationStatus.SKIPPED))
             continue
@@ -341,5 +377,7 @@ def execute_plan(operations: list[PlannedOperation]) -> list[OperationResult]:
             )
         else:
             results.append(OperationResult(operation, OperationStatus.SUCCESS))
+
+    report()
 
     return results

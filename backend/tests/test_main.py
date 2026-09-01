@@ -7,13 +7,15 @@ from fastapi import HTTPException
 from sqlmodel import select
 
 import main
+from enums import ImportPhase
+from importing import ExecuteProgress
 from matching import DiffProgress, MatchResult
 from models import Collection, Track
 from scanner import ScanProgress, ScanResult
 
 
 def test_preview_returns_a_plan(
-    client, session, tmp_path, make_track, collections, destination
+    session, tmp_path, make_track, collections, destination, event_stream
 ):
     mine, theirs = collections
 
@@ -26,8 +28,9 @@ def test_preview_returns_a_plan(
     session.add(their_track)
     session.commit()
 
-    response = client.post(
+    stream = event_stream(
         "/api/import/preview",
+        "POST",
         json={
             "track_ids": [their_track.id],
             "mine_collection_id": mine.id,
@@ -38,8 +41,7 @@ def test_preview_returns_a_plan(
         },
     )
 
-    assert response.status_code == 200
-    body = response.json()
+    body = stream.done
     assert len(body["operations"]) == 1
     assert len(body["upgrades"]) == 0
     assert body["operations"][0]["action"] == "copy"
@@ -52,7 +54,7 @@ def test_preview_returns_a_plan(
 
 
 def test_preview_accepts_a_destination_root_with_surrounding_whitespace(
-    client, session, tmp_path, make_track, collections, destination
+    session, tmp_path, make_track, collections, destination, event_stream
 ):
     mine, theirs = collections
 
@@ -70,8 +72,9 @@ def test_preview_accepts_a_destination_root_with_surrounding_whitespace(
     # ride along into every computed destination, the preview the user
     # confirms, and the log path. Linux keeps the space, so the same request
     # would 400 there instead.
-    response = client.post(
+    stream = event_stream(
         "/api/import/preview",
+        "POST",
         json={
             "track_ids": [their_track.id],
             "mine_collection_id": mine.id,
@@ -82,13 +85,13 @@ def test_preview_accepts_a_destination_root_with_surrounding_whitespace(
         },
     )
 
-    assert response.status_code == 200
-    operation = response.json()["operations"][0]
+    body = stream.done
+    operation = body["operations"][0]
     assert operation["destination"] == os.path.normpath(str(destination / "song.mp3"))
 
 
 def test_preview_with_upgrade(
-    client, session, tmp_path, make_track, collections, destination
+    session, tmp_path, make_track, collections, destination, event_stream
 ):
     # The pairing is server-derived, so this test also proves the client never sent it.
     mine, theirs = collections
@@ -112,8 +115,9 @@ def test_preview_with_upgrade(
     mine_id = my_track.id
     their_id = their_track.id
 
-    response = client.post(
+    stream = event_stream(
         "/api/import/preview",
+        "POST",
         json={
             "track_ids": [their_id],
             "mine_collection_id": mine.id,
@@ -124,15 +128,14 @@ def test_preview_with_upgrade(
         },
     )
 
-    assert response.status_code == 200
-    body = response.json()
+    body = stream.done
     assert len(body["upgrades"]) == 1
     assert body["upgrades"][0]["mine"]["id"] == mine_id
     assert body["upgrades"][0]["theirs"]["id"] == their_id
 
 
 def test_preview_already_have_track_is_rejected(
-    client, session, tmp_path, make_track, collections, destination
+    session, tmp_path, make_track, collections, destination, event_stream
 ):
     mine, theirs = collections
 
@@ -159,8 +162,9 @@ def test_preview_already_have_track_is_rejected(
 
     their_id = their_track.id
 
-    response = client.post(
+    stream = event_stream(
         "/api/import/preview",
+        "POST",
         json={
             "track_ids": [their_id],
             "mine_collection_id": mine.id,
@@ -171,8 +175,7 @@ def test_preview_already_have_track_is_rejected(
         },
     )
 
-    assert response.status_code == 400
-    assert title in response.json()["detail"]
+    assert title in stream.error["detail"]
 
 
 def test_unknown_collection_id_returns_404(client, collections, destination):
@@ -292,7 +295,7 @@ def test_whitespace_destination_root_returns_422(client, collections):
 
 
 def test_execute_copies_a_missing_track(
-    client, session, tmp_path, make_track, collections, destination
+    session, tmp_path, make_track, collections, destination, event_stream
 ):
     mine, theirs = collections
 
@@ -312,8 +315,9 @@ def test_execute_copies_a_missing_track(
 
     their_id = their_track.id
 
-    response = client.post(
+    stream = event_stream(
         "/api/import/execute",
+        "POST",
         json={
             "track_ids": [their_id],
             "mine_collection_id": mine.id,
@@ -324,8 +328,7 @@ def test_execute_copies_a_missing_track(
         },
     )
 
-    assert response.status_code == 200
-    body = response.json()
+    body = stream.done
     assert body["status_counts"]["success"] == 1
     assert body["status_counts"]["failed"] == 0
     assert body["operations"][0]["status"] == "success"
@@ -333,7 +336,7 @@ def test_execute_copies_a_missing_track(
 
 
 def test_execute_returns_status_counts(
-    client, session, tmp_path, make_track, collections, destination
+    session, tmp_path, make_track, collections, destination, event_stream
 ):
     mine, theirs = collections
 
@@ -353,8 +356,9 @@ def test_execute_returns_status_counts(
 
     their_id = their_track.id
 
-    response = client.post(
+    stream = event_stream(
         "/api/import/execute",
+        "POST",
         json={
             "track_ids": [their_id],
             "mine_collection_id": mine.id,
@@ -365,15 +369,14 @@ def test_execute_returns_status_counts(
         },
     )
 
-    assert response.status_code == 200
-    body = response.json()
+    body = stream.done
     assert body["status_counts"]["success"] == 1
     assert body["status_counts"]["failed"] == 0
     assert body["status_counts"]["skipped"] == 0
 
 
 def test_copied_files_get_no_track_rows(
-    client, session, tmp_path, make_track, collections, destination
+    session, tmp_path, make_track, collections, destination, event_stream
 ):
     mine, theirs = collections
 
@@ -394,8 +397,9 @@ def test_copied_files_get_no_track_rows(
     their_id = their_track.id
     tracks_before = len(session.exec(select(Track)).all())
 
-    response = client.post(
+    stream = event_stream(
         "/api/import/execute",
+        "POST",
         json={
             "track_ids": [their_id],
             "mine_collection_id": mine.id,
@@ -410,7 +414,9 @@ def test_copied_files_get_no_track_rows(
         select(Track).where(Track.file_path == str(destination / "song.mp3"))
     ).all()
 
-    assert response.status_code == 200
+    # The done frame, not a status code: every stream answers 200, including
+    # one carrying nothing but an error frame.
+    assert stream.done["status_counts"] == {"success": 1, "failed": 0, "skipped": 0}
     assert (destination / "song.mp3").exists()
 
     # Imported files are deliberately not registered: destination_root can be
@@ -421,7 +427,7 @@ def test_copied_files_get_no_track_rows(
 
 
 def test_delete_action_removes_the_track_row(
-    client, session, tmp_path, make_track, collections, destination
+    session, tmp_path, make_track, collections, destination, event_stream
 ):
     mine, theirs = collections
 
@@ -459,8 +465,9 @@ def test_delete_action_removes_the_track_row(
     their_id = their_track.id
     mine_id = mine_track.id
 
-    response = client.post(
+    event_stream(
         "/api/import/execute",
+        "POST",
         json={
             "track_ids": [their_id],
             "mine_collection_id": mine.id,
@@ -471,14 +478,13 @@ def test_delete_action_removes_the_track_row(
         },
     )
 
-    assert response.status_code == 200
     assert (destination / "their_song.mp3").exists()
     assert not source_file_mine.exists()
     assert session.get(Track, mine_id) is None
 
 
 def test_move_action_removes_the_track_row(
-    client, session, tmp_path, make_track, collections, destination
+    session, tmp_path, make_track, collections, destination, event_stream
 ):
     mine, theirs = collections
 
@@ -516,8 +522,9 @@ def test_move_action_removes_the_track_row(
     their_id = their_track.id
     mine_id = mine_track.id
 
-    response = client.post(
+    event_stream(
         "/api/import/execute",
+        "POST",
         json={
             "track_ids": [their_id],
             "mine_collection_id": mine.id,
@@ -528,14 +535,13 @@ def test_move_action_removes_the_track_row(
         },
     )
 
-    assert response.status_code == 200
     assert (destination / "their_song.mp3").exists()
     assert (destination / "_superseded" / "mine_song.mp3").exists()
     assert session.get(Track, mine_id) is None
 
 
 def test_keep_both_leaves_my_row_and_file(
-    client, session, tmp_path, make_track, collections, destination
+    session, tmp_path, make_track, collections, destination, event_stream
 ):
     mine, theirs = collections
 
@@ -573,8 +579,9 @@ def test_keep_both_leaves_my_row_and_file(
     their_id = their_track.id
     mine_id = mine_track.id
 
-    response = client.post(
+    stream = event_stream(
         "/api/import/execute",
+        "POST",
         json={
             "track_ids": [their_id],
             "mine_collection_id": mine.id,
@@ -585,7 +592,10 @@ def test_keep_both_leaves_my_row_and_file(
         },
     )
 
-    assert response.status_code == 200
+    # keep_both plans a copy and nothing else, so one successful operation is
+    # the whole plan. Asserting the counts rather than a status code: every
+    # stream answers 200, so that told us nothing about whether it worked.
+    assert stream.done["status_counts"] == {"success": 1, "failed": 0, "skipped": 0}
     assert (destination / "their_song.mp3").exists()
     assert source_file_mine.exists()
     assert not (destination / "_superseded" / "mine_song.mp3").exists()
@@ -593,7 +603,7 @@ def test_keep_both_leaves_my_row_and_file(
 
 
 def test_failed_copy_returns_200_with_failed_status(
-    client, session, tmp_path, make_track, collections, destination
+    session, tmp_path, make_track, collections, destination, event_stream
 ):
     mine, theirs = collections
 
@@ -618,8 +628,9 @@ def test_failed_copy_returns_200_with_failed_status(
 
     os.remove(source_file_theirs)
 
-    response = client.post(
+    stream = event_stream(
         "/api/import/execute",
+        "POST",
         json={
             "track_ids": [their_id],
             "mine_collection_id": mine.id,
@@ -630,16 +641,15 @@ def test_failed_copy_returns_200_with_failed_status(
         },
     )
 
-    assert response.status_code == 200
     assert not (destination / "their_song.mp3").exists()
-    body = response.json()
+    body = stream.done
     assert body["status_counts"]["success"] == 0
     assert body["status_counts"]["failed"] == 1
     assert body["status_counts"]["skipped"] == 0
 
 
 def test_failed_copy_skips_the_delete_and_keeps_my_file(
-    client, session, tmp_path, make_track, collections, destination
+    session, tmp_path, make_track, collections, destination, event_stream
 ):
     mine, theirs = collections
 
@@ -680,8 +690,9 @@ def test_failed_copy_skips_the_delete_and_keeps_my_file(
 
     os.remove(source_file_theirs)
 
-    response = client.post(
+    stream = event_stream(
         "/api/import/execute",
+        "POST",
         json={
             "track_ids": [their_id],
             "mine_collection_id": mine.id,
@@ -692,10 +703,9 @@ def test_failed_copy_skips_the_delete_and_keeps_my_file(
         },
     )
 
-    assert response.status_code == 200
     assert not (destination / "their_song.mp3").exists()
     assert source_file_mine.exists()
-    body = response.json()
+    body = stream.done
     assert body["status_counts"]["success"] == 0
     assert body["status_counts"]["failed"] == 1
     assert body["status_counts"]["skipped"] == 1
@@ -703,7 +713,7 @@ def test_failed_copy_skips_the_delete_and_keeps_my_file(
 
 
 def test_one_failed_group_does_not_stop_another(
-    client, session, tmp_path, make_track, collections, destination
+    session, tmp_path, make_track, collections, destination, event_stream
 ):
     mine, theirs = collections
 
@@ -770,8 +780,9 @@ def test_one_failed_group_does_not_stop_another(
 
     os.remove(source_file_theirs_g0)
 
-    response = client.post(
+    stream = event_stream(
         "/api/import/execute",
+        "POST",
         json={
             "track_ids": [their_id_g0, their_id_g1],
             "mine_collection_id": mine.id,
@@ -782,12 +793,11 @@ def test_one_failed_group_does_not_stop_another(
         },
     )
 
-    assert response.status_code == 200
     assert not (destination / "their_song_g0.mp3").exists()
     assert (destination / "their_song_g1.mp3").exists()
     assert source_file_mine_g0.exists()
     assert not source_file_mine_g1.exists()
-    body = response.json()
+    body = stream.done
     assert body["status_counts"]["success"] == 2
     assert body["status_counts"]["failed"] == 1
     assert body["status_counts"]["skipped"] == 1
@@ -796,7 +806,7 @@ def test_one_failed_group_does_not_stop_another(
 
 
 def test_log_file_is_written_to_destination_root(
-    client, session, tmp_path, make_track, collections, destination
+    session, tmp_path, make_track, collections, destination, event_stream
 ):
     mine, theirs = collections
 
@@ -816,8 +826,9 @@ def test_log_file_is_written_to_destination_root(
 
     their_id = their_track.id
 
-    response = client.post(
+    stream = event_stream(
         "/api/import/execute",
+        "POST",
         json={
             "track_ids": [their_id],
             "mine_collection_id": mine.id,
@@ -828,8 +839,8 @@ def test_log_file_is_written_to_destination_root(
         },
     )
 
-    assert response.status_code == 200
-    assert response.json()["log_error"] is None
+    body = stream.done
+    assert body["log_error"] is None
 
     logs = list(destination.glob("import_log_*.json"))
     assert len(logs) == 1
@@ -839,11 +850,11 @@ def test_log_file_is_written_to_destination_root(
     assert entries[0]["status"] == "success"
     assert entries[0]["operation"]["action"] == "copy"
 
-    assert response.json()["log_path"] == str(logs[0])
+    assert body["log_path"] == str(logs[0])
 
 
 def test_execute_rejects_a_non_candidate_id(
-    client, session, tmp_path, make_track, collections, destination
+    session, tmp_path, make_track, collections, destination, event_stream
 ):
     mine, theirs = collections
 
@@ -870,8 +881,9 @@ def test_execute_rejects_a_non_candidate_id(
 
     their_id = their_track.id
 
-    response = client.post(
+    stream = event_stream(
         "/api/import/execute",
+        "POST",
         json={
             "track_ids": [their_id],
             "mine_collection_id": mine.id,
@@ -882,8 +894,7 @@ def test_execute_rejects_a_non_candidate_id(
         },
     )
 
-    assert response.status_code == 400
-    assert title in response.json()["detail"]
+    assert title in stream.error["detail"]
 
     # Nothing ran: validation happens before any file is touched.
     assert list(destination.iterdir()) == []
@@ -1147,6 +1158,65 @@ def test_event_stream_reports_progress_frames(event_stream, monkeypatch, tmp_pat
     assert stream.done["scanned"] == 7
 
 
+# The next two call the adapters directly rather than reading an import
+# stream. A phase assertion made over a real stream would need the poll
+# interval shrunk and the work slowed, as above, and would then be timing
+# dependent for a claim that has nothing to do with timing. These are pure
+# functions: a callback in, a callback out.
+#
+# The phase is the reason they exist. Mislabelling the copy phase leaves the
+# UI saying "nothing on disk has changed yet" for the whole of the part where
+# it is being changed, and every other assertion in this file still passes.
+def test_comparing_reporter_labels_the_phase_and_maps_the_counts():
+    seen = []
+
+    report = main._comparing_reporter(seen.append)
+    report(
+        DiffProgress(
+            theirs_processed_count=111,
+            theirs_count=3500,
+            hashed_count=7,
+            current_path=r"C:\music\Radiohead\Creep.mp3",
+        )
+    )
+
+    # hashed_count has nowhere to go, and that is the adaptation: the stream
+    # carries one shape for both phases, and a copy has nothing to hash.
+    assert seen == [
+        main.ImportProgress(
+            phase=ImportPhase.COMPARING,
+            processed_count=111,
+            total_count=3500,
+            current_path=r"C:\music\Radiohead\Creep.mp3",
+        )
+    ]
+
+
+def test_copying_reporter_labels_the_phase_and_maps_the_counts():
+    seen = []
+
+    report = main._copying_reporter(seen.append)
+    report(
+        ExecuteProgress(
+            operations_processed_count=11,
+            operations_count=42,
+            current_path=r"C:\music\Radiohead\Creep.mp3",
+        )
+    )
+
+    # The two counts are deliberately unequal and unlike the ones above: this
+    # asserts the whole object, so crossing processed with total, or carrying
+    # the comparing phase's totals into this one, both fail here.
+    assert seen == [
+        main.ImportProgress(
+            phase=ImportPhase.COPYING,
+            processed_count=11,
+            total_count=42,
+            current_path=r"C:\music\Radiohead\Creep.mp3",
+        )
+    ]
+
+
 def test_event_stream_reports_a_scan_failure_as_an_error_frame(
     event_stream, monkeypatch, caplog, tmp_path
 ):
@@ -1228,19 +1298,19 @@ def _import_body(mine, theirs, destination, track_ids, resolutions=None, **overr
 
 
 def test_ambiguous_track_without_a_resolution_is_rejected(
-    client, collections, destination, make_ambiguity
+    collections, destination, make_ambiguity, event_stream
 ):
     mine, theirs = collections
     ambiguity = make_ambiguity()
     their_track = ambiguity.theirs[0]
 
-    response = client.post(
+    stream = event_stream(
         "/api/import/preview",
+        "POST",
         json=_import_body(mine, theirs, destination, [their_track.id]),
     )
 
-    assert response.status_code == 400
-    detail = response.json()["detail"]
+    detail = stream.error["detail"]
     # Names the track and says what to do, rather than just refusing: this is
     # the message a user sees for every unresolved review row.
     assert "Not import candidates" in detail
@@ -1249,14 +1319,15 @@ def test_ambiguous_track_without_a_resolution_is_rejected(
 
 
 def test_resolution_none_of_these_routes_to_missing(
-    client, collections, destination, make_ambiguity
+    collections, destination, make_ambiguity, event_stream
 ):
     mine, theirs = collections
     ambiguity = make_ambiguity()
     their_track = ambiguity.theirs[0]
 
-    response = client.post(
+    stream = event_stream(
         "/api/import/preview",
+        "POST",
         json=_import_body(
             mine,
             theirs,
@@ -1266,8 +1337,7 @@ def test_resolution_none_of_these_routes_to_missing(
         ),
     )
 
-    assert response.status_code == 200
-    body = response.json()
+    body = stream.done
     assert len(body["operations"]) == 1
     assert body["operations"][0]["action"] == "copy"
     assert body["operations"][0]["source"] == their_track.file_path
@@ -1278,15 +1348,16 @@ def test_resolution_none_of_these_routes_to_missing(
 
 
 def test_resolution_deletes_the_chosen_file_only(
-    client, collections, destination, make_ambiguity
+    collections, destination, make_ambiguity, event_stream
 ):
     mine, theirs = collections
     ambiguity = make_ambiguity(theirs_format="FLAC", mine_format="MP3")
     their_track = ambiguity.theirs[0]
     chosen, not_chosen = ambiguity.candidates
 
-    response = client.post(
+    stream = event_stream(
         "/api/import/preview",
+        "POST",
         json=_import_body(
             mine,
             theirs,
@@ -1297,8 +1368,7 @@ def test_resolution_deletes_the_chosen_file_only(
         ),
     )
 
-    assert response.status_code == 200
-    body = response.json()
+    body = stream.done
     # Copy first, then the destructive step: the order is the safety
     # mechanism, not a formatting detail (§5b).
     assert [op["action"] for op in body["operations"]] == ["copy", "delete"]
@@ -1308,7 +1378,13 @@ def test_resolution_deletes_the_chosen_file_only(
 
 
 def test_resolution_naming_a_file_that_is_not_a_candidate_is_rejected(
-    client, session, tmp_path, make_track, collections, destination, make_ambiguity
+    session,
+    tmp_path,
+    make_track,
+    collections,
+    destination,
+    make_ambiguity,
+    event_stream,
 ):
     mine, theirs = collections
     ambiguity = make_ambiguity()
@@ -1326,8 +1402,9 @@ def test_resolution_naming_a_file_that_is_not_a_candidate_is_rejected(
     session.add(unrelated)
     session.commit()
 
-    response = client.post(
+    stream = event_stream(
         "/api/import/preview",
+        "POST",
         json=_import_body(
             mine,
             theirs,
@@ -1340,15 +1417,14 @@ def test_resolution_naming_a_file_that_is_not_a_candidate_is_rejected(
     # The §5c guard: the server re-derives the candidate set, so a client can
     # only ever pick a wrong candidate among genuine ones, never any file it
     # likes. If this ever passes silently the protection is gone.
-    assert response.status_code == 400
-    detail = response.json()["detail"]
+    detail = stream.error["detail"]
     assert unrelated.file_name in detail
     assert their_track.file_name in detail
     assert "not one of the files matched" in detail
 
 
 def test_two_resolutions_claiming_the_same_file_are_rejected(
-    client, collections, destination, make_ambiguity
+    collections, destination, make_ambiguity, event_stream
 ):
     mine, theirs = collections
     # Two tracks of theirs sharing one candidate set, so both can name the
@@ -1358,8 +1434,9 @@ def test_two_resolutions_claiming_the_same_file_are_rejected(
     first, second = ambiguity.theirs
     contested = ambiguity.candidates[0]
 
-    response = client.post(
+    stream = event_stream(
         "/api/import/preview",
+        "POST",
         json=_import_body(
             mine,
             theirs,
@@ -1373,8 +1450,7 @@ def test_two_resolutions_claiming_the_same_file_are_rejected(
         ),
     )
 
-    assert response.status_code == 400
-    detail = response.json()["detail"]
+    detail = stream.error["detail"]
     # Both tracks of theirs share artist and title — that is why they matched
     # the same file — so the message has to name them by file to be usable.
     # Pins which check fired: several other conditions also return 400, so a
@@ -1386,7 +1462,7 @@ def test_two_resolutions_claiming_the_same_file_are_rejected(
 
 
 def test_resolution_to_a_better_file_of_mine_is_rejected(
-    client, collections, destination, make_ambiguity
+    collections, destination, make_ambiguity, event_stream
 ):
     mine, theirs = collections
     # Theirs is the lossy one, so either candidate of mine wins on quality.
@@ -1394,8 +1470,9 @@ def test_resolution_to_a_better_file_of_mine_is_rejected(
     their_track = ambiguity.theirs[0]
     chosen = ambiguity.candidates[0]
 
-    response = client.post(
+    stream = event_stream(
         "/api/import/preview",
+        "POST",
         json=_import_body(
             mine,
             theirs,
@@ -1408,8 +1485,7 @@ def test_resolution_to_a_better_file_of_mine_is_rejected(
     # Refusing is right — copying would hand back a worse duplicate — but the
     # generic "not import candidates" message would list three reasons that
     # all happen to be false here, so this path has its own.
-    assert response.status_code == 400
-    detail = response.json()["detail"]
+    detail = stream.error["detail"]
     assert "Nothing to import" in detail
     assert their_track.file_name in detail
 

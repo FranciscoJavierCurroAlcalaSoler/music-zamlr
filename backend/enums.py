@@ -45,3 +45,8 @@ class Bucket(StrEnum):
     UPGRADE_AVAILABLE = "upgrade_available"
     ALREADY_HAVE = "already_have"
     NEEDS_REVIEW = "needs_review"
+
+
+class ImportPhase(StrEnum):
+    COMPARING = "comparing"
+    COPYING = "copying"

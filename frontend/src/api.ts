@@ -1,7 +1,8 @@
 import type {
-  Diff,
+  DiffResult,
   DiffProgress,
   ImportPreview,
+  ImportProgress,
   ImportResult,
   ImportRequestBody,
   Collection,
@@ -40,6 +41,7 @@ const DATA_PREFIX = "data: ";
 
 export type ScanProgressCallback = (progress: ScanProgress) => void;
 export type DiffProgressCallback = (progress: DiffProgress) => void;
+export type ImportProgressCallback = (progress: ImportProgress) => void;
 
 function detailToMessage(detail: string | ValidationErrorDetail[]): string {
   if (!Array.isArray(detail)) {
@@ -211,18 +213,23 @@ export async function fetchDiff(
   mineId: number,
   theirsId: number,
   onProgress?: DiffProgressCallback,
-): Promise<Diff> {
+): Promise<DiffResult> {
   const response = await fetch(
     `${API_BASE}/api/diff?mine=${mineId}&theirs=${theirsId}`,
   );
   if (!response.ok) {
     await throwForResponse(response);
   }
-  return readStream<Diff, DiffProgress>(response, "comparison", onProgress);
+  return readStream<DiffResult, DiffProgress>(
+    response,
+    "comparison",
+    onProgress,
+  );
 }
 
 export async function previewImport(
   request: ImportRequestBody,
+  onProgress?: ImportProgressCallback,
 ): Promise<ImportPreview> {
   const response = await fetch(`${API_BASE}/api/import/preview`, {
     method: "POST",
@@ -234,11 +241,16 @@ export async function previewImport(
   if (!response.ok) {
     await throwForResponse(response);
   }
-  return response.json();
+  return readStream<ImportPreview, ImportProgress>(
+    response,
+    "preview",
+    onProgress,
+  );
 }
 
 export async function executeImport(
   request: ImportRequestBody,
+  onProgress?: ImportProgressCallback,
 ): Promise<ImportResult> {
   const response = await fetch(`${API_BASE}/api/import/execute`, {
     method: "POST",
@@ -250,5 +262,9 @@ export async function executeImport(
   if (!response.ok) {
     await throwForResponse(response);
   }
-  return response.json();
+  return readStream<ImportResult, ImportProgress>(
+    response,
+    "import",
+    onProgress,
+  );
 }

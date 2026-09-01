@@ -165,16 +165,17 @@ def parse_sse(body: str) -> StreamFrames:
 
 
 @pytest.fixture
-def event_stream(client):
+def event_stream(client, session):
     """Call a streaming endpoint, consume the stream, and return its frames.
 
-    The two scan endpoints and /api/diff no longer answer with JSON. They
-    stream Server-Sent Events, and the final frame carries what the response
-    body used to, so a test that read response.json() reads .done instead.
+    The scan endpoints, /api/diff and both import endpoints no longer answer
+    with JSON. They stream Server-Sent Events, and the final frame carries
+    what the response body used to, so a test that read response.json() reads
+    .done instead.
 
-    The method is a parameter because the scans are POSTs and the diff is a
-    GET: the diff's only write is caching hashes onto rows that already exist,
-    which is a cache fill rather than a state change.
+    The method is a parameter because the scans and imports are POSTs while
+    the diff is a GET: the diff's only write is caching hashes onto rows that
+    already exist, which is a cache fill rather than a state change.
 
     Success paths only. A request that fails validation never opens a stream,
     so those tests keep using client.get or client.post and a status code —
@@ -187,6 +188,17 @@ def event_stream(client):
                 f"{url} answered {response.status_code}, so no stream was opened"
             )
             body = "".join(response.iter_text())
+        # Every streaming endpoint does its work on a worker thread holding its
+        # own Session, so rows it deleted are gone from the database while this
+        # session still has the Python objects in its identity map. Without
+        # this, session.get() answers from that map and never looks.
+        #
+        # Here rather than in each test, because the loud half of that is the
+        # smaller half. An "is None" assertion fails and gets fixed; an "is not
+        # None" assertion passes whether or not the row survived, and says
+        # nothing at all. Three of each exist in test_main.py, and only one
+        # kind would ever have told you.
+        session.expire_all()
         return parse_sse(body)
 
     return _event_stream

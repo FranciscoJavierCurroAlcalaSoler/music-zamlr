@@ -25,12 +25,13 @@ import type {
   Track,
   Match,
   Collection,
-  Diff,
+  DiffResult,
   DiffProgress,
   ImportPreview,
   ImportSettingsValues,
   ImportResult,
   AmbiguousMatch,
+  ImportProgress,
 } from "../types";
 import {
   fetchDiff,
@@ -40,6 +41,7 @@ import {
 } from "../api";
 import { ImportSettings } from "./ImportSettings";
 import { ImportPreviewDialog } from "./ImportPreviewDialog";
+import { ImportProgressView } from "./ImportProgressView";
 import { ImportResultView } from "./ImportResultView";
 import { ResolveMatchDialog } from "./ResolveMatchDialog";
 import { DiffProgressView } from "./DiffProgressView";
@@ -155,7 +157,7 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
   const [importError, setImportError] = useState<string | null>(null);
   const [mineId, setMineId] = useState<number | "">("");
   const [theirsId, setTheirsId] = useState<number | "">("");
-  const [diff, setDiff] = useState<Diff | null>(null);
+  const [diff, setDiff] = useState<DiffResult | null>(null);
   const [bucket, setBucket] = useState<BucketKey | "all">("all");
   const [tab, setTab] = useState(0);
   const [selection, setSelection] = useState<GridRowSelectionModel>({
@@ -164,11 +166,17 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
   });
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const [previewProgress, setPreviewProgress] = useState<ImportProgress | null>(
+    null,
+  );
   const [lastSettings, setLastSettings] = useState<ImportSettingsValues | null>(
     null,
   );
   const [result, setResult] = useState<ImportResult | null>(null);
   const [executing, setExecuting] = useState(false);
+  const [executeProgress, setExecuteProgress] = useState<ImportProgress | null>(
+    null,
+  );
   const [diffScannedAt, setDiffScannedAt] = useState<{
     mine: string | null;
     theirs: string | null;
@@ -315,7 +323,7 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
       if (mineId === "" || theirsId === "") {
         throw new Error("Select both collections first.");
       }
-      const result: Diff = await fetchDiff(mineId, theirsId, setProgress);
+      const result: DiffResult = await fetchDiff(mineId, theirsId, setProgress);
       setDiff(result);
       setDiffScannedAt({
         mine: scannedAt(mineId),
@@ -369,12 +377,16 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
     setPreviewing(true);
     setImportError(null);
     try {
-      const result = await previewImport(importRequestBody(settings));
+      const result = await previewImport(
+        importRequestBody(settings),
+        setPreviewProgress,
+      );
       setPreview(result);
     } catch (error: unknown) {
       setImportError(describeFetchError(error));
     } finally {
       setPreviewing(false);
+      setPreviewProgress(null);
     }
   }
 
@@ -384,7 +396,10 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
     setExecuting(true);
     setImportError(null);
     try {
-      const result = await executeImport(importRequestBody(lastSettings));
+      const result = await executeImport(
+        importRequestBody(lastSettings),
+        setExecuteProgress,
+      );
       setPreview(null);
       setResult(result);
       setDiff(null);
@@ -393,6 +408,7 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
       setImportError(describeFetchError(error));
     } finally {
       setExecuting(false);
+      setExecuteProgress(null);
     }
   }
 
@@ -545,6 +561,11 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
               error={importError}
               onPreview={runPreview}
             />
+            {/* The preview's progress only. The import's lives inside
+                ImportPreviewDialog, because that dialog stays open and
+                unclosable for the whole run, so anything here would sit
+                behind its backdrop. */}
+            <ImportProgressView progress={previewProgress} />
           </>
         )}
         <ImportResultView result={result} onDismiss={() => setResult(null)} />
@@ -553,6 +574,7 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
         preview={preview}
         destinationRoot={lastSettings?.destinationRoot ?? ""}
         executing={executing}
+        executeProgress={executeProgress}
         onCancel={() => setPreview(null)}
         onConfirm={runExecute}
       />

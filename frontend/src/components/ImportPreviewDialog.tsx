@@ -14,13 +14,15 @@ import {
   TableCell,
   Chip,
 } from "@mui/material";
-import type { ImportPreview, Match } from "../types";
+import type { ImportPreview, ImportProgress, Match } from "../types";
 import { text, duration, bitrate } from "../format";
+import { ImportProgressView } from "./ImportProgressView";
 
 interface ImportPreviewDialogProps {
   preview: ImportPreview | null;
   destinationRoot: string;
   executing: boolean;
+  executeProgress: ImportProgress | null;
   onCancel: () => void;
   onConfirm: () => void;
 }
@@ -118,6 +120,7 @@ export function ImportPreviewDialog({
   preview,
   destinationRoot,
   executing,
+  executeProgress,
   onCancel,
   onConfirm,
 }: ImportPreviewDialogProps) {
@@ -255,6 +258,16 @@ export function ImportPreviewDialog({
           </Table>
         )}
       </DialogContent>
+      {/* Between the content and the actions, not inside the content, which
+          scrolls: a bar at the foot of a list of every planned operation
+          scrolls out of sight exactly when it starts moving. Here it stays
+          pinned beside the button that now reads "Importing…".
+
+          It belongs in this dialog rather than behind it. The dialog stays
+          open for the whole import — preview is only cleared once
+          executeImport resolves — and onClose is undefined while executing,
+          so nothing rendered in DiffView would be visible past the backdrop. */}
+      <ImportProgressView progress={executeProgress} />
       <DialogActions>
         <Button onClick={onCancel} disabled={executing}>
           Cancel

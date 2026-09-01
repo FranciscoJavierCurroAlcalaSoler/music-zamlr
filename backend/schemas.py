@@ -3,7 +3,14 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
-from enums import ActionType, Bucket, OperationStatus, StructureMode, UpgradeAction
+from enums import (
+    ActionType,
+    Bucket,
+    ImportPhase,
+    OperationStatus,
+    StructureMode,
+    UpgradeAction,
+)
 
 
 class TrackRead(BaseModel):
@@ -199,6 +206,15 @@ class DiffProgressRead(BaseModel):
     theirs_processed_count: int
     theirs_count: int
     hashed_count: int
+    current_path: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ImportProgressRead(BaseModel):
+    phase: ImportPhase
+    processed_count: int
+    total_count: int
     current_path: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
