@@ -2,13 +2,14 @@ import json
 import os
 import shutil
 import time
+import types
 
 from fastapi import HTTPException
 from sqlmodel import select
 
 import main
-from enums import ImportPhase
-from importing import ExecuteProgress
+from enums import ActionType, ImportPhase
+from importing import ExecuteProgress, PlannedOperation
 from matching import DiffProgress, MatchResult
 from models import Collection, Track
 from scanner import ScanProgress, ScanResult
@@ -176,6 +177,128 @@ def test_preview_already_have_track_is_rejected(
     )
 
     assert title in stream.error["detail"]
+
+
+def test_preview_reports_bytes_required_and_free(
+    session, monkeypatch, make_track, collections, destination, event_stream, tmp_path
+):
+    def disk_usage_mock(path):
+        return types.SimpleNamespace(total=9_999_999, used=1_111_111, free=8_888_888)
+
+    monkeypatch.setattr(main.shutil, "disk_usage", disk_usage_mock)
+
+    mine, theirs = collections
+
+    their_track_1 = make_track(
+        collection_id=theirs.id,
+        file_path=str(tmp_path / "theirs" / "song_1.mp3"),
+        file_size=3_333_333,
+    )
+    their_track_2 = make_track(
+        collection_id=theirs.id,
+        file_path=str(tmp_path / "theirs" / "song_2.mp3"),
+        file_size=1_111_111,
+    )
+    session.add(their_track_1)
+    session.add(their_track_2)
+    session.commit()
+
+    their_id_1 = their_track_1.id
+    their_id_2 = their_track_2.id
+
+    stream = event_stream(
+        "/api/import/preview",
+        "POST",
+        json={
+            "track_ids": [their_id_1, their_id_2],
+            "mine_collection_id": mine.id,
+            "theirs_collection_id": theirs.id,
+            "destination_root": str(destination),
+            "structure_mode": "flat",
+            "upgrade_action": "keep_both",
+        },
+    )
+
+    body = stream.done
+    assert body["bytes_required"] == 4_444_444
+    assert body["bytes_free"] == 8_888_888
+
+
+def test_preview_counts_only_copies_toward_bytes_required(
+    session, make_track, collections, destination, event_stream, tmp_path
+):
+    mine, theirs = collections
+
+    my_track = make_track(
+        collection_id=mine.id,
+        format="MP3",
+        file_path=str(tmp_path / "mine" / "song.mp3"),
+        file_size=1_000_000,
+    )
+    their_track = make_track(
+        collection_id=theirs.id,
+        format="FLAC",
+        file_path=str(tmp_path / "theirs" / "song.flac"),
+        file_size=2_000_000,
+    )
+    session.add(my_track)
+    session.add(their_track)
+    session.commit()
+
+    their_id = their_track.id
+
+    stream = event_stream(
+        "/api/import/preview",
+        "POST",
+        json={
+            "track_ids": [their_id],
+            "mine_collection_id": mine.id,
+            "theirs_collection_id": theirs.id,
+            "destination_root": str(destination),
+            "structure_mode": "flat",
+            "upgrade_action": "delete",
+        },
+    )
+
+    body = stream.done
+    assert body["bytes_required"] == 2_000_000
+
+
+def test_bytes_required_normalizes_the_operation_source(make_track):
+    # No session, no collections: the helper reads two attributes off a Track
+    # and never touches the database. plan_copy carries file_path across to
+    # source verbatim, so a row spelled with forward slashes or a dot segment
+    # reaches the lookup unnormalized while the map keys are normalized.
+    their_track = make_track(
+        format="FLAC",
+        file_path="D:/Music/./Song.mp3",
+        file_size=2_222_222,
+    )
+
+    planned_operation = PlannedOperation(
+        source="D:/Music/./Song.mp3",
+        destination=r"D:\Import\Song.mp3",
+        action=ActionType.COPY,
+        group_id=1,
+        overwrites=False,
+    )
+
+    assert main._bytes_required([planned_operation], [their_track]) == 2_222_222
+
+
+def test_bytes_required_is_zero_when_nothing_is_copied():
+    # Two shapes of "no copies". The second is the one that earns its place:
+    # it passes no tracks at all, so the lookup would raise KeyError if the
+    # copy filter ever stopped running before it.
+    delete = PlannedOperation(
+        source=r"C:\music\Radiohead\Creep.mp3",
+        destination=None,
+        action=ActionType.DELETE,
+        group_id=1,
+    )
+
+    assert main._bytes_required([], []) == 0
+    assert main._bytes_required([delete], []) == 0
 
 
 def test_unknown_collection_id_returns_404(client, collections, destination):

@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -313,6 +314,22 @@ def _count_operations(operations: list[PlannedOperation]) -> dict[str, int]:
     }
 
 
+def _bytes_required(operations: list[PlannedOperation], tracks: list[Track]) -> int:
+    bytes_required = 0
+    tracks_by_file_path = {os.path.normpath(t.file_path): t for t in tracks}
+    for operation in operations:
+        if operation.action == ActionType.COPY:
+            # file_size is what the scanner recorded, so the whole sum costs no
+            # disk I/O. It goes stale if a file changed since, and that is the
+            # deliberate trade: a total a few megabytes out beats one that stats
+            # several hundred files on a drive that may be slow, asleep, or
+            # across a network.
+            bytes_required += tracks_by_file_path[
+                os.path.normpath(operation.source)
+            ].file_size
+    return bytes_required
+
+
 def _preview_worker(
     request: ImportRequest, engine, on_progress: ProgressCallback
 ) -> tuple[str, dict]:
@@ -332,10 +349,13 @@ def _preview_worker(
             import_plan = _build_plan(
                 request, session, on_progress=_comparing_reporter(on_progress)
             )
+            bytes_free = shutil.disk_usage(request.destination_root).free
             preview = PreviewResult(
                 operations=import_plan.operations,
                 upgrades=import_plan.upgrades,
                 operation_counts=_count_operations(import_plan.operations),
+                bytes_required=import_plan.bytes_required,
+                bytes_free=bytes_free,
             )
             payload = ImportPreviewRead.model_validate(preview).model_dump(mode="json")
         return "done", payload
@@ -536,6 +556,7 @@ def _describe_track_id(session: Session, track_id: int) -> str:
 class BuiltPlan:
     operations: list[PlannedOperation]
     upgrades: list[Match]
+    bytes_required: int
 
 
 def _build_plan(
@@ -708,7 +729,14 @@ def _build_plan(
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
-    return BuiltPlan(operations=import_plan, upgrades=upgrade_available)
+    bytes_required = _bytes_required(
+        import_plan, [*missing, *(m.theirs for m in upgrade_available)]
+    )
+    return BuiltPlan(
+        operations=import_plan,
+        upgrades=upgrade_available,
+        bytes_required=bytes_required,
+    )
 
 
 @dataclass
@@ -716,6 +744,8 @@ class PreviewResult:
     operations: list[PlannedOperation]
     upgrades: list[Match]
     operation_counts: dict[str, int]
+    bytes_required: int
+    bytes_free: int
 
 
 @app.post("/api/import/preview")

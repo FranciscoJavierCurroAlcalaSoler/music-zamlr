@@ -103,6 +103,8 @@ class ImportPreviewRead(BaseModel):
     operations: list[PlannedOperationRead]
     upgrades: list[MatchRead] = []
     operation_counts: dict[str, int]
+    bytes_required: int
+    bytes_free: int
 
     model_config = ConfigDict(from_attributes=True)
 

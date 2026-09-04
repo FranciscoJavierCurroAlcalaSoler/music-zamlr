@@ -15,7 +15,7 @@ import {
   Chip,
 } from "@mui/material";
 import type { ImportPreview, ImportProgress, Match } from "../types";
-import { text, duration, bitrate } from "../format";
+import { text, duration, bitrate, fileSize } from "../format";
 import { ImportProgressView } from "./ImportProgressView";
 
 interface ImportPreviewDialogProps {
@@ -127,6 +127,10 @@ export function ImportPreviewDialog({
   const counts = preview?.operation_counts;
   const destructive =
     (counts?.delete ?? 0) + (counts?.move ?? 0) + (counts?.overwrites ?? 0);
+  // Named because it is the number worth acting on: two totals leave the
+  // reader subtracting. The two raw values are read straight off preview
+  // below, where the counts guard has already narrowed it.
+  const shortfall = preview ? preview.bytes_required - preview.bytes_free : 0;
 
   return (
     <Dialog
@@ -142,6 +146,20 @@ export function ImportPreviewDialog({
             <Typography variant="body1">
               {counts.copy} file{counts.copy === 1 ? "" : "s"} will be copied.
             </Typography>
+
+            {/* Warns rather than blocks: the free figure was read during the
+                preview, and the user may go and clear space before
+                confirming. No file count here — the line above already gives
+                it, and repeating it invites pairing it with a byte total that
+                counts only the copies. */}
+            {shortfall > 0 && (
+              <Alert severity="warning" sx={{ mt: 2 }}>
+                This import needs {fileSize(preview.bytes_required)} and the
+                destination has {fileSize(preview.bytes_free)} free. It will
+                start and stop partway unless you free up at least{" "}
+                {fileSize(shortfall)}.
+              </Alert>
+            )}
 
             {destructive > 0 ? (
               <Alert severity="warning" sx={{ mt: 2 }}>

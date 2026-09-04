@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { progressPercent, shortenPath } from "./format";
+import { progressPercent, shortenPath, fileSize } from "./format";
 
 // A real backslash, built rather than typed. A literal "\M" in a TS string is
 // not an escape sequence, so the compiler silently drops the backslash and the
@@ -82,5 +82,30 @@ describe("progressPercent", () => {
   it("rounds to whole numbers in both directions", () => {
     expect(progressPercent(1, 3)).toBe(33);
     expect(progressPercent(2, 3)).toBe(67);
+  });
+});
+
+describe("fileSize", () => {
+  it("formats zero as bytes", () => {
+    expect(fileSize(0)).toBe("0 B");
+  });
+
+  it("switches unit at the 1024 boundary", () => {
+    expect(fileSize(1023)).toBe("1023 B");
+    expect(fileSize(1024)).toBe("1 KB");
+  });
+
+  it("keeps one decimal from megabytes up", () => {
+    expect(fileSize(1024 * 1024)).toBe("1 MB");
+    expect(fileSize(1024 * 1024 * 10)).toBe("10 MB");
+    expect(fileSize(1024 * 1024 * 10 + 512 * 1024)).toBe("10.5 MB");
+    expect(fileSize(1024 * 1024 * 1024)).toBe("1 GB");
+  });
+
+  // Free space on a large drive passes a terabyte, so this is the boundary a
+  // real destination reaches, not a hypothetical one.
+  it("still has a unit above a terabyte", () => {
+    expect(fileSize(1024 * 1024 * 1024 * 1024)).toBe("1 TB");
+    expect(fileSize(1024 * 1024 * 1024 * 1024 * 8)).toBe("8 TB");
   });
 });

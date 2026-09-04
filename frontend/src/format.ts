@@ -95,6 +95,25 @@ export function bitrate(bitsPerSecond: number | null): string {
 }
 
 /**
+ * Base 1024, with Explorer's labels rather than KiB/MiB. Deliberate: this
+ * number exists to be compared against what Windows shows in the properties
+ * dialog of the drive being filled, and decimal units read about 7% smaller
+ * for the same drive, which would make the warning look wrong.
+ *
+ * Ends at TB rather than continuing, because free space on a large drive
+ * passes a terabyte and "3835.6 GB" is not a quantity anyone reads.
+ */
+export function fileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  if (bytes < 1024 * 1024 * 1024)
+    return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`;
+  if (bytes < 1024 * 1024 * 1024 * 1024)
+    return `${Math.round((bytes / (1024 * 1024 * 1024)) * 10) / 10} GB`;
+  return `${Math.round((bytes / (1024 * 1024 * 1024 * 1024)) * 10) / 10} TB`;
+}
+
+/**
  * The last two segments of a path: "D:\Music\Radiohead\Creep.mp3" becomes
  * "Radiohead\Creep.mp3".
  *

@@ -112,6 +112,8 @@ export interface ImportPreview {
   operations: PlannedOperation[];
   upgrades: Match[];
   operation_counts: Record<string, number>;
+  bytes_required: number;
+  bytes_free: number;
 }
 
 export interface OperationResult {
