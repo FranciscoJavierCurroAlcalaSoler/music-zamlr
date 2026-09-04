@@ -2,7 +2,7 @@
 
 Reproducible inventory of the dev/runtime setup. Update whenever something is installed, upgraded, or reconfigured. Language-level packages are tracked by their lockfiles, not here — see "Not tracked here" at the bottom.
 
-Last updated: 2026-08-13
+Last updated: 2026-09-04
 
 ## Machine
 | | |
@@ -21,6 +21,7 @@ Last updated: 2026-08-13
 |---|---|---|
 | Git | 2.55.0 | Terminal: MinTTY. Credential helper: Git Credential Manager. |
 | VS Code | 1.127.0 | Display language pinned to English (`locale: en`). |
+| GitHub CLI (`gh`) | 2.100.0 | Added 2026-09-04, `winget install --id GitHub.cli`. Reads Actions run logs without a browser: `gh run view --log-failed`. Authenticated over HTTPS. **Not** set as Git's credential helper — `gh auth login` offers to take that role and was declined, so Git Credential Manager keeps it. |
 
 ## VS Code extensions
 | Extension | Publisher | Purpose |
