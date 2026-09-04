@@ -1,3 +1,11 @@
+[tool.pytest.ini_options]
+# tests/ has no __init__.py, so pytest puts backend/tests on sys.path rather
+# than backend, and conftest.py's `import database` finds nothing. Running it
+# as `python -m pytest` hides this by prepending the working directory, which
+# is why it never showed up until CI ran the bare entry point. This makes both
+# invocations work.
+pythonpath = ["."]
+
 [tool.ruff]
 line-length = 88
 
