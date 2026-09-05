@@ -9,6 +9,10 @@ CLAUDE.md
 __pycache__/
 *.pyc
 .pytest_cache/
+# The real one is backend/requirements.txt. This catches a `pip freeze`
+# run from the repo root, which writes a stray copy here. Leading slash
+# anchors the rule to the root so the backend file is untouched.
+/requirements.txt
 
 # Node
 node_modules/
