@@ -1,0 +1,124 @@
+"""Compare two Chromaprint fingerprints and report how far apart they are.
+
+A fingerprint is a list of 32-bit integers, one per frame, where a frame
+covers about 0.1238 seconds of decoded audio. Two encodings of the same
+recording produce fingerprints that are similar rather than equal: most bits
+of each integer agree, and the two lists can begin at different points in the
+music because one file carries silence or a different track split.
+
+So the comparison cannot be equality. It is a bit error rate — the fraction
+of compared bits that disagree — taken at whichever offset fits the two lists
+together best. Measured against real files, the same recording scores between
+0.00 and 0.055 and two different recordings score about 0.47.
+
+This module only ever compares two fingerprints against each other. It never
+identifies one. Identification is what an AcoustID lookup does, and it would
+mean sending a fingerprint per track to a third party, which is the thing the
+local-first design exists to avoid.
+
+Nothing here reads the disk or the database, and nothing here imports
+matching.py, because matching.py imports this module and the reverse would be
+an import cycle.
+"""
+
+FRAME_SECONDS = 0.1238
+
+# The width of the offset search, and the reason this is tractable at all.
+# Only pairs already within the matcher's duration tolerance of +/-2 seconds
+# ever reach this module, so one recording cannot begin more than
+# 2 / FRAME_SECONDS ~= 16 frames before the other. That bound turns an
+# alignment problem into a fixed 33-offset loop.
+#
+# This comment is where the coupling lives, because code cannot carry it:
+# DURATION_TOLERANCE_SECONDS belongs to matching.py, which imports this
+# module, so importing the tolerance back would be a cycle. Widen the
+# tolerance there without widening this, and the tier quietly stops aligning
+# pairs that the fuzzy tier still accepts.
+MAX_OFFSET_FRAMES = 16
+
+# The fewest frames an offset must line up before its score is allowed to
+# count. A short overlap makes accidental agreement decisive: two unrelated
+# tracks can share a handful of frames by luck, and a stretch that agrees
+# perfectly scores 0.0 and wins the whole search.
+#
+# With MAX_OFFSET_FRAMES at 16, the overlap only drops under 80 for
+# fingerprints shorter than 96 frames, about 12 seconds of audio. So this
+# guards short files specifically.
+MIN_OVERLAP_FRAMES = 80
+
+# At or under this rate, two fingerprints are the same recording. Not a
+# delicate number: the measured gap runs from 0.055 for a re-encode up to
+# 0.47 for an unrelated track, so anything from roughly 0.10 to 0.25 divides
+# them. Phase 6's configurable ranking is the one caller that should ever
+# need to move it.
+SAME_RECORDING_MAX_ERROR_RATE = 0.15
+
+
+def _error_rate_at_offset(a: list[int], b: list[int], offset: int) -> float | None:
+    """Score one alignment of the two fingerprints, or refuse to score it.
+
+    A positive offset means that `a` begins later than `b`, so the front of
+    `a` and the tail of `b` hang over the ends and are discarded. A negative
+    offset is the mirror of that. Returns None when the frames that remain
+    are too few to trust, which the caller must not read as a bad score.
+    """
+    if offset >= 0:
+        a_slice = a[offset:]
+        b_slice = b[: len(b) - offset]
+    else:
+        a_slice = a[: len(a) + offset]
+        b_slice = b[-offset:]
+
+    frame_count = min(len(a_slice), len(b_slice))
+
+    if frame_count < MIN_OVERLAP_FRAMES:
+        return None
+
+    a_slice = a_slice[:frame_count]
+    b_slice = b_slice[:frame_count]
+
+    different_bits = 0
+    for n in range(frame_count):
+        # The mask is a no-op against fpcalc 1.6.1, which prints unsigned
+        # values. It stays because bit_count() on a negative number counts
+        # the bits of its absolute value instead of raising, so a later
+        # fpcalc that printed signed values would not fail here — it would
+        # return a plausible wrong rate for every pair, forever.
+        different_bits += ((a_slice[n] ^ b_slice[n]) & 0xFFFFFFFF).bit_count()
+
+    return different_bits / (32 * frame_count)
+
+
+def compare_fingerprints(a: list[int], b: list[int]) -> float | None:
+    """Return the best error rate across every offset, or None if there is none.
+
+    None means "no answer", never "completely different". A rate of 1.0 is a
+    legal score that means every compared bit disagreed, so collapsing the two
+    into one number would leave the caller unable to tell a rejection from a
+    refusal. The tier above needs them apart: a fingerprint that says no must
+    stop a pairing, while a fingerprint that cannot answer must let the tag
+    matcher try instead.
+
+    None comes back exactly when the shorter fingerprint holds fewer than
+    MIN_OVERLAP_FRAMES frames, because offset 0 always overlaps by the length
+    of the shorter list. It is a length check, not a failed search.
+    """
+    lowest_error_rate: float | None = None
+
+    for i in range(-MAX_OFFSET_FRAMES, MAX_OFFSET_FRAMES + 1):
+        current_error_rate = _error_rate_at_offset(a, b, i)
+        if current_error_rate is None:
+            continue
+        elif lowest_error_rate is None:
+            lowest_error_rate = current_error_rate
+        elif current_error_rate < lowest_error_rate:
+            lowest_error_rate = current_error_rate
+
+    return lowest_error_rate
+
+
+def fingerprints_match(a: list[int], b: list[int]) -> bool:
+    error_rate = compare_fingerprints(a, b)
+    if error_rate is None or error_rate > SAME_RECORDING_MAX_ERROR_RATE:
+        return False
+    return True
