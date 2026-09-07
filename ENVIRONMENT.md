@@ -22,18 +22,38 @@ Last updated: 2026-09-04
 | Git | 2.55.0 | Terminal: MinTTY. Credential helper: Git Credential Manager. |
 | VS Code | 1.127.0 | Display language pinned to English (`locale: en`). |
 | GitHub CLI (`gh`) | 2.100.0 | Added 2026-09-04, `winget install --id GitHub.cli`. Reads Actions run logs without a browser: `gh run view --log-failed`. Authenticated over HTTPS. **Not** set as Git's credential helper — `gh auth login` offers to take that role and was declined, so Git Credential Manager keeps it. |
-| Chromaprint (`fpcalc`) | 1.6.1 (FFmpeg Lavc62.11.100) | Added 2026-09-05, `winget install --id AcoustID.Chromaprint --exact`. The fingerprinting binary for Phase 5. No lockfile covers it, which is why it is here. Installed as a winget *portable* package: the exe lands under `%LOCALAPPDATA%\Microsoft\WinGet\Packages\AcoustID.Chromaprint_.../chromaprint-fpcalc-1.6.1-windows-x86_64\` and is reachable on PATH only in shells started after the install. Locate it in code with `shutil.which("fpcalc")`, the only form that honours `PATHEXT` and so finds `fpcalc.exe`. This is the **x86_64** build; Apple Silicon wants `brew install chromaprint` for a native arm64 binary, and Linux CI wants `apt install libchromaprint-tools`. |
+| Chromaprint (`fpcalc`) | 1.6.1 (FFmpeg Lavc62.11.100) | Added 2026-09-05, `winget install --id AcoustID.Chromaprint --exact`. The fingerprinting binary for Phase 5. No lockfile covers it, which is why it is here. Installed as a winget *portable* package: the exe lands under `%LOCALAPPDATA%\Microsoft\WinGet\Packages\AcoustID.Chromaprint_.../chromaprint-fpcalc-1.6.1-windows-x86_64\` and is reachable on PATH only in shells started after the install. Locate it in code with `shutil.which("fpcalc")`, the only form that honours `PATHEXT` and so finds `fpcalc.exe`. This is the **x86_64** build. **CI pins this same 1.6.1 and installs it from the project's own GitHub release on all three runners** rather than from a package manager, so every leg tests the version this machine has — see `FPCALC_VERSION` in `.github/workflows/ci.yml`, and move the two together or neither. Package managers were rejected for that reason: apt's `libchromaprint-tools` and Homebrew's `chromaprint` each ship whatever their distribution froze, and Chocolatey's `chromaprint` is stuck at **1.1**, over a decade old. |
 | ffmpeg | 8.1.2 (Gyan full build) | Not installed for the app — it generates the manual test collections (the two `make_fixtures*.sh` scripts) and the synthetic fixtures under `backend/tests/fixtures/`. Recorded 2026-09-05 because nothing else names it and a clone cannot rebuild those collections without it. The app itself shells out to `fpcalc`, never to ffmpeg; see the spec's Phase 5 entry for why that choice was made. |
 
 ## VS Code extensions
-| Extension | Publisher | Purpose |
+Verified against `code --list-extensions` on 2026-09-07. Check with that
+command rather than trusting this table — see the sync note below.
+
+| Extension | Identifier | Purpose |
 |---|---|---|
-| Python | Microsoft | Python support; pulls in Pylance + Python Debugger |
-| ESLint | Microsoft | JS/TS linting |
-| Prettier - Code formatter | Prettier | Auto-format on save |
-| Vim | vscodevim | Vim keybindings inside VS Code |
+| Python | `ms-python.python` | Python support; pulls in Pylance, Debugpy and Python Environments |
+| Ruff | `charliermarsh.ruff` | Python formatting and lint diagnostics in the editor |
+| ESLint | `dbaeumer.vscode-eslint` | JS/TS linting |
+| Prettier - Code formatter | `esbenp.prettier-vscode` | Auto-format on save |
+| GitHub Actions | `github.vscode-github-actions` | Workflow syntax and run status |
+| Vim | `vscodevim.vim` | Vim keybindings inside VS Code |
 
 Extension versions float on auto-update; pin one only if it ever matters.
+
+**Three of these went missing once, and nothing said so** (2026-09-07). Ruff,
+ESLint and Prettier were all absent while `.vscode/settings.json` still named
+them as formatters. The suspected cause is Settings Sync: `code tunnel` was
+set up across the notebook and the tablet, and a sync from the device with
+the shorter extension list wins silently. **The failure is quiet by
+construction** — VS Code does not warn that a configured `defaultFormatter`
+is not installed, so format-on-save simply stops happening and every file
+looks fine until CI or a manual `ruff` run disagrees. If formatting ever
+seems not to run, check the extension list first and the settings second.
+
+**Ruff in the editor is not the same tool as `ruff` in CI.** The extension
+formats and shows diagnostics; the pinned `ruff` in `backend/requirements.txt`
+is what the workflow runs. They can drift apart in version, and only the
+second one can fail a build.
 
 Prettier is the exception, and is pinned as an exact devDependency in
 `frontend/package.json`. The extension bundles its own copy but prefers a
@@ -42,9 +62,20 @@ on the same version. Without it the two drifted and disagreed about formatting,
 so files reformatted themselves back and forth between a save and a CLI run.
 
 Format-on-save is configured per language in `.vscode/settings.json`: Prettier
-for TS/TSX/CSS/JSON, Ruff for Python (with organize-imports on save). Markdown
-is deliberately excluded — Prettier realigns every table in these docs, which is
-diff noise rather than a fix.
+for TS/TSX/CSS/JSON, Ruff for Python. Markdown is deliberately excluded —
+Prettier realigns every table in these docs, which is diff noise rather than a
+fix.
+
+**Format-on-save is not lint-on-save, and the difference matters.**
+`ruff format` handles whitespace and line breaks only. `ruff check` is a
+separate tool with separate rules, and `editor.codeActionsOnSave` is what
+brings any of it to a save. Even then it applies only the fixes ruff marks
+*safe*: `if x == None:` is left exactly as written, because rewriting a
+comparison changes behaviour in cases ruff will not decide for you. The
+editor squiggle is what catches that one, not the save. Both actions are
+named `source.fixAll.ruff` and `source.organizeImports.ruff` rather than the
+unsuffixed forms, because Pylance also answers `organizeImports` for Python
+and the plain name leaves the winner unspecified.
 
 **Line endings are pinned to LF in two places, and both are needed** (added
 2026-08-13). Every text file in the repo is stored as LF, but Git's

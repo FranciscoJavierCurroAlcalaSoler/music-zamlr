@@ -4,11 +4,23 @@
   // but the editor writes the line endings. Every file in this repo is LF, so
   // a CRLF newcomer fails `npx prettier --check src/` on its first commit.
   "files.eol": "\n",
+  // formatOnSave runs `ruff format` only, which is whitespace and line
+  // breaks. It does not lint. `if x == None: pass` comes back as two lines
+  // with the `== None` untouched, because E711 belongs to `ruff check`.
+  // source.fixAll is what applies check's fixes on save — and only the ones
+  // ruff marks safe, so E711 still needs a human. The extension's squiggles
+  // are the part that actually catches it.
+  //
+  // Both actions carry the `.ruff` suffix on purpose. Pylance also offers
+  // organizeImports for Python, and the unsuffixed names let whichever
+  // provider answers first do the work, which is not a coin toss worth
+  // leaving in a config file.
   "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.formatOnSave": true,
     "editor.codeActionsOnSave": {
-      "source.organizeImports": "explicit"
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
     }
   },
   "[typescript]": {
