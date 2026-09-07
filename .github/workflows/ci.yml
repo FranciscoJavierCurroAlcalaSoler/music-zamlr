@@ -20,6 +20,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Pinned, and it has to be. fpcalc has no lockfile, and a fingerprint is
+  # stored rather than recomputed — so a runner on a different version would
+  # compare stored values against values another release produced, which is
+  # the one failure this project cannot detect. Keep this equal to the
+  # version in ENVIRONMENT.md, and move both together or neither.
+  FPCALC_VERSION: "1.6.1"
+
 jobs:
   # Two jobs rather than one with six commands. Steps stop at the first
   # failure, so a single job would let a ruff complaint hide every TypeScript
@@ -70,6 +78,53 @@ jobs:
 
       # No venv. The runner's Python is disposable and already isolated.
       - run: pip install -r requirements.txt
+
+      # fpcalc comes from the project's own release rather than from a package
+      # manager, on all three runners, for one reason: version control.
+      # apt's libchromaprint-tools and Homebrew's chromaprint each ship
+      # whatever their distribution froze, so the three legs would test three
+      # different fpcalc versions and none of them the one on the dev machine.
+      # Chocolatey was the obvious Windows answer and is the worst of the
+      # three — its chromaprint package sits at 1.1, more than a decade behind.
+      #
+      # Downloading with curl also sidesteps macOS Gatekeeper, which
+      # quarantines archives fetched by a browser but not by a command-line
+      # tool.
+      #
+      # Each archive holds one folder named after itself, containing the
+      # binary alone, so the extracted path is predictable. GITHUB_PATH takes
+      # effect in later steps, never the current one, which is why the version
+      # check below is its own step.
+      - name: Install fpcalc (Linux)
+        if: runner.os == 'Linux'
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -sSLf -o fpcalc.tar.gz "https://github.com/acoustid/chromaprint/releases/download/v${{ env.FPCALC_VERSION }}/chromaprint-fpcalc-${{ env.FPCALC_VERSION }}-linux-x86_64.tar.gz"
+          tar xzf fpcalc.tar.gz
+          echo "${{ runner.temp }}/chromaprint-fpcalc-${{ env.FPCALC_VERSION }}-linux-x86_64" >> "$GITHUB_PATH"
+
+      # The universal build, not macos-x86_64: GitHub's macos-latest runners
+      # are Apple Silicon, and nothing guarantees Rosetta 2 is present.
+      - name: Install fpcalc (macOS)
+        if: runner.os == 'macOS'
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -sSLf -o fpcalc.tar.gz "https://github.com/acoustid/chromaprint/releases/download/v${{ env.FPCALC_VERSION }}/chromaprint-fpcalc-${{ env.FPCALC_VERSION }}-macos-universal.tar.gz"
+          tar xzf fpcalc.tar.gz
+          echo "${{ runner.temp }}/chromaprint-fpcalc-${{ env.FPCALC_VERSION }}-macos-universal" >> "$GITHUB_PATH"
+
+      - name: Install fpcalc (Windows)
+        if: runner.os == 'Windows'
+        working-directory: ${{ runner.temp }}
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/acoustid/chromaprint/releases/download/v${{ env.FPCALC_VERSION }}/chromaprint-fpcalc-${{ env.FPCALC_VERSION }}-windows-x86_64.zip" -OutFile fpcalc.zip
+          Expand-Archive fpcalc.zip -DestinationPath .
+          Add-Content $env:GITHUB_PATH "${{ runner.temp }}\chromaprint-fpcalc-${{ env.FPCALC_VERSION }}-windows-x86_64"
+
+      # Proves the PATH entry took, on every runner. Without this the
+      # fpcalc-dependent tests would skip themselves and the job would stay
+      # green while testing nothing.
+      - run: fpcalc -version
 
       - run: ruff check .
 

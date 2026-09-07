@@ -21,6 +21,10 @@ matching.py, because matching.py imports this module and the reverse would be
 an import cycle.
 """
 
+import logging
+import shutil
+import subprocess
+
 FRAME_SECONDS = 0.1238
 
 # The width of the offset search, and the reason this is tractable at all.
@@ -52,6 +56,9 @@ MIN_OVERLAP_FRAMES = 80
 # them. Phase 6's configurable ranking is the one caller that should ever
 # need to move it.
 SAME_RECORDING_MAX_ERROR_RATE = 0.15
+
+FPCALC_LENGTH_SECONDS = 120
+FPCALC_TIMEOUT_SECONDS = 60
 
 
 def _error_rate_at_offset(a: list[int], b: list[int], offset: int) -> float | None:
@@ -122,3 +129,51 @@ def fingerprints_match(a: list[int], b: list[int]) -> bool:
     if error_rate is None or error_rate > SAME_RECORDING_MAX_ERROR_RATE:
         return False
     return True
+
+
+def _find_fpcalc() -> str | None:
+    return shutil.which("fpcalc")
+
+
+def compute_fingerprint(file_path: str) -> list[int] | None:
+    fpcalc_path = _find_fpcalc()
+    if fpcalc_path is None:
+        logging.warning("fpcalc binary not found in PATH")
+        return None
+
+    try:
+        result = subprocess.run(
+            [fpcalc_path, "-raw", "-length", str(FPCALC_LENGTH_SECONDS), file_path],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=FPCALC_TIMEOUT_SECONDS,
+        )
+        if result.returncode != 0:
+            logging.warning("fpcalc failed with return code %d", result.returncode)
+            return None
+    # TimeoutExpired and OSError only. CalledProcessError cannot reach here,
+    # because subprocess.run raises it only when called with check=True, and
+    # the return code is examined above instead.
+    except (subprocess.TimeoutExpired, OSError) as e:
+        logging.warning("fpcalc failed: %s", e)
+        return None
+
+    # Read by prefix rather than by line number. fpcalc writes DURATION and
+    # FINGERPRINT on separate lines, and nothing promises an order.
+    for line in result.stdout.splitlines():
+        if line.startswith("FINGERPRINT="):
+            values = line.removeprefix("FINGERPRINT=")
+            try:
+                return [int(value) for value in values.split(",")]
+            except ValueError:
+                # Close to impossible, since fpcalc exiting 0 means it wrote a
+                # fingerprint. It is caught anyway because this is the last
+                # path on which one unreadable file could still end a whole
+                # diff, which is the rule every other branch here obeys.
+                logging.warning("fpcalc wrote a fingerprint that is not numeric")
+                return None
+
+    logging.warning("fpcalc output did not contain a fingerprint")
+    return None

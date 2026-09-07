@@ -13,10 +13,14 @@ fail anything.
 """
 
 import random
+import shutil
+import subprocess
+import types
 
 import pytest
 
-from fingerprinting import compare_fingerprints, fingerprints_match
+import fingerprinting
+from fingerprinting import compare_fingerprints, compute_fingerprint, fingerprints_match
 
 
 def fake_fingerprint(seed: int, frames: int = 200) -> list[int]:
@@ -149,3 +153,165 @@ def test_fingerprints_match_is_false_when_nothing_can_be_compared():
     a = fake_fingerprint(11, 40)
 
     assert fingerprints_match(a, list(a)) is False
+
+
+SAMPLE_VALUES = [
+    113680835,
+    113418561,
+    239248129,
+    333251216,
+    244251612,
+    255551216,
+    394845672,
+    409739567,
+    555556756,
+    908989765,
+]
+SAMPLE_FINGERPRINT_LINE = "FINGERPRINT=" + ",".join(str(v) for v in SAMPLE_VALUES)
+
+
+@pytest.fixture
+def stub_fpcalc(monkeypatch):
+    """Replace both halves of the fpcalc call, and record what it received.
+
+    Patching `subprocess.run` alone is not enough, and the gap is silent.
+    `compute_fingerprint` asks `_find_fpcalc` first, so on a machine with no
+    fpcalc installed it returns None and the stub is never consulted — the
+    test then passes or fails according to what is on PATH, which is the one
+    property a stub exists to remove. Three tests failed exactly that way
+    before this fixture existed.
+
+    Pass `found=False` for the "fpcalc is not installed" path. The returned
+    record still reports `params is None` afterwards, which is how a test
+    shows that the subprocess was never started rather than started and
+    ignored.
+    """
+
+    def _install(stdout="", returncode=0, stderr="", error=None, found=True):
+        record = types.SimpleNamespace(params=None, kwargs=None)
+
+        def fake_run(params, **kwargs):
+            record.params = params
+            record.kwargs = kwargs
+            if error is not None:
+                raise error
+            return subprocess.CompletedProcess(
+                args=params, returncode=returncode, stdout=stdout, stderr=stderr
+            )
+
+        monkeypatch.setattr(
+            fingerprinting,
+            "_find_fpcalc",
+            lambda: "/nowhere/fpcalc" if found else None,
+        )
+        monkeypatch.setattr(fingerprinting.subprocess, "run", fake_run)
+        return record
+
+    return _install
+
+
+def test_a_fingerprint_is_parsed_from_the_output(stub_fpcalc):
+    stub_fpcalc(stdout=f"DURATION=5\n{SAMPLE_FINGERPRINT_LINE}\n")
+
+    assert compute_fingerprint("doesntmatter.wav") == SAMPLE_VALUES
+
+
+def test_the_duration_line_is_ignored(stub_fpcalc):
+    # Before and after, because reading by prefix and reading by line number
+    # agree when DURATION comes first and disagree here.
+    stub_fpcalc(stdout=f"DURATION=5\n{SAMPLE_FINGERPRINT_LINE}\nDURATION=5\n")
+
+    assert compute_fingerprint("doesntmatter.wav") == SAMPLE_VALUES
+
+
+def test_a_missing_fpcalc_gives_none(stub_fpcalc):
+    record = stub_fpcalc(stdout=f"{SAMPLE_FINGERPRINT_LINE}\n", found=False)
+
+    assert compute_fingerprint("doesntmatter.wav") is None
+    # Parseable output was waiting behind the lookup, so a None here could
+    # have come from either guard. This says which one answered.
+    assert record.params is None
+
+
+def test_a_failed_run_gives_none(stub_fpcalc):
+    # Parseable output alongside the failure, deliberately. With empty stdout
+    # this test passes even when the return-code guard is deleted, because the
+    # parse loop then finds no FINGERPRINT line and returns None by another
+    # route. A fingerprint here leaves the guard as the only thing that can
+    # produce None.
+    stub_fpcalc(
+        returncode=1,
+        stdout=f"{SAMPLE_FINGERPRINT_LINE}\n",
+        stderr="fpcalc: error: something went wrong\n",
+    )
+
+    assert compute_fingerprint("doesntmatter.wav") is None
+
+
+def test_a_timeout_gives_none(stub_fpcalc):
+    stub_fpcalc(error=subprocess.TimeoutExpired(cmd="fpcalc", timeout=1))
+
+    assert compute_fingerprint("doesntmatter.wav") is None
+
+
+def test_an_os_error_gives_none(stub_fpcalc):
+    # The binary vanished between the PATH lookup and the call, or the drive
+    # holding it went away. Distinct from a timeout and from a bad exit code.
+    stub_fpcalc(error=OSError("cannot run the program"))
+
+    assert compute_fingerprint("doesntmatter.wav") is None
+
+
+def test_output_with_no_fingerprint_line_gives_none(stub_fpcalc):
+    stub_fpcalc(stdout="DURATION=247\n")
+
+    assert compute_fingerprint("doesntmatter.wav") is None
+
+
+def test_a_fingerprint_that_is_not_numeric_gives_none(stub_fpcalc):
+    # fpcalc exiting 0 with an unparseable fingerprint is close to
+    # impossible. It is covered because int() sits on the one path where a
+    # single unreadable file could otherwise raise and end a whole diff.
+    stub_fpcalc(stdout="DURATION=5\nFINGERPRINT=113680835,not-a-number,239248129\n")
+
+    assert compute_fingerprint("doesntmatter.wav") is None
+
+
+def test_the_length_is_passed_to_fpcalc(stub_fpcalc):
+    record = stub_fpcalc(stdout=f"{SAMPLE_FINGERPRINT_LINE}\n")
+
+    compute_fingerprint("doesntmatter.wav")
+
+    # Nothing else sees these arguments. Drop -length and every other test
+    # still passes, while every stored fingerprint silently changes meaning.
+    assert record.params is not None
+    assert "-raw" in record.params
+    assert "-length" in record.params
+    length_index = record.params.index("-length")
+    assert record.params[length_index + 1] == str(fingerprinting.FPCALC_LENGTH_SECONDS)
+
+
+def test_the_run_is_given_a_timeout(stub_fpcalc):
+    # Nothing else notices a missing timeout, because a stub always returns
+    # at once. fpcalc on a sleeping or disconnected drive waits forever, and
+    # the diff waits with it — the failure FPCALC_TIMEOUT_SECONDS exists to
+    # bound, and one that no other assertion here can reach.
+    record = stub_fpcalc(stdout=f"{SAMPLE_FINGERPRINT_LINE}\n")
+
+    compute_fingerprint("doesntmatter.wav")
+
+    assert record.kwargs["timeout"] == fingerprinting.FPCALC_TIMEOUT_SECONDS
+
+
+@pytest.mark.skipif(shutil.which("fpcalc") is None, reason="fpcalc is not installed")
+def test_fpcalc_reads_a_real_file(fixtures_dir):
+    # The only test that starts the real program. Everything above assumes an
+    # output format; this is what would notice if that assumption were wrong.
+    fp = compute_fingerprint(str(fixtures_dir / "test_track.mp3"))
+
+    assert isinstance(fp, list)
+    # Not merely non-None: `all()` over an empty list is True, so a fingerprint
+    # of [] would satisfy the type assertions below on its own. The 5-second
+    # fixture yields about 35 frames.
+    assert len(fp) > 10
+    assert all(isinstance(value, int) for value in fp)
