@@ -213,6 +213,7 @@ def scan_folder(
                         if field_changed:
                             updated_count += 1
                             existing_by_path[file_key].file_hash = None
+                            existing_by_path[file_key].fingerprint = None
                     else:
                         unreadable_files.append(file_key)
                 else:

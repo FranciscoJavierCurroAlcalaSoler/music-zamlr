@@ -27,6 +27,7 @@ matching.py imports this module, so the reverse would be an import cycle.
 
 import logging
 import shutil
+import struct
 import subprocess
 
 FRAME_SECONDS = 0.1238
@@ -181,3 +182,32 @@ def compute_fingerprint(file_path: str) -> list[int] | None:
 
     logging.warning("fpcalc output did not contain a fingerprint")
     return None
+
+
+def pack_fingerprint(fingerprint: list[int]) -> bytes:
+    """Turn a fingerprint into the bytes stored in Track.fingerprint.
+
+    `<I` is the whole decision, and both halves of it are deliberate. `I` is
+    an unsigned 32-bit value, which is what a frame is. `<` fixes the byte
+    order as little-endian rather than letting the machine pick, and without
+    it `struct` also chooses its own width for `I`, which is not guaranteed
+    to be four bytes.
+
+    Neither is a portability nicety. The bytes outlive the process that
+    wrote them: a row written last month is unpacked by whatever version of
+    this module runs next, so the layout is a promise between two runs and
+    not an internal detail. That is also why one test asserts the literal
+    bytes — pack and unpack agree with each other under any byte order, so a
+    round trip cannot notice the format changing underneath it.
+    """
+    return b"".join(struct.pack("<I", value) for value in fingerprint)
+
+
+def unpack_fingerprint(data: bytes) -> list[int]:
+    """Read back what pack_fingerprint wrote.
+
+    A length that is not a multiple of four raises struct.error rather than
+    returning a short fingerprint, because a truncated blob is a corrupt row
+    and a silently shortened list would compare as a genuine, poor match.
+    """
+    return [struct.unpack("<I", data[i : i + 4])[0] for i in range(0, len(data), 4)]

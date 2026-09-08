@@ -20,7 +20,13 @@ import types
 import pytest
 
 import fingerprinting
-from fingerprinting import compare_fingerprints, compute_fingerprint, fingerprints_match
+from fingerprinting import (
+    compare_fingerprints,
+    compute_fingerprint,
+    fingerprints_match,
+    pack_fingerprint,
+    unpack_fingerprint,
+)
 
 
 def fake_fingerprint(seed: int, frames: int = 200) -> list[int]:
@@ -315,3 +321,51 @@ def test_fpcalc_reads_a_real_file(fixtures_dir):
     # fixture yields about 35 frames.
     assert len(fp) > 10
     assert all(isinstance(value, int) for value in fp)
+
+
+def test_a_fingerprint_survives_a_round_trip():
+    original = fake_fingerprint(12)
+
+    packed = pack_fingerprint(original)
+    unpacked = unpack_fingerprint(packed)
+
+    assert unpacked == original
+
+
+def test_an_empty_fingerprint_survives_a_round_trip():
+    original: list[int] = []
+
+    packed = pack_fingerprint(original)
+    unpacked = unpack_fingerprint(packed)
+
+    assert unpacked == original
+
+
+def test_the_largest_values_survive_a_round_trip():
+    # Both values have the top bit set, which is where a signed format would
+    # differ from an unsigned one: read as signed, 0xFFFFFFFF is -1 and
+    # 0x80000000 is -2147483648. Changing `I` to `i` in both functions still
+    # round-trips those two back to themselves, so this test is about range
+    # rather than about signedness — it fails on a narrower format such as
+    # `H`, which cannot hold either number.
+    original = [0xFFFFFFFF, 0x80000000]
+
+    packed = pack_fingerprint(original)
+    unpacked = unpack_fingerprint(packed)
+
+    assert unpacked == original
+
+
+def test_the_packed_form_is_little_endian_and_four_bytes():
+    # The literal bytes, because no round trip can pin them. Flip `<` to `>`
+    # in both functions and every round-trip test above still passes — pack
+    # and unpack move together and agree with each other under any byte
+    # order. What they cannot agree with is a row already in the database,
+    # written by the previous version. This assertion is the only thing
+    # standing between a format change and a column of silently misread
+    # fingerprints.
+    original = [0x12345678, 0x9ABCDEF0, 1]
+
+    packed = pack_fingerprint(original)
+
+    assert packed == b"\x78\x56\x34\x12\xf0\xde\xbc\x9a\x01\x00\x00\x00"

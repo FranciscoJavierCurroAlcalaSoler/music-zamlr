@@ -6,6 +6,7 @@ import mutagen
 from sqlmodel import select
 
 import scanner
+from fingerprinting import pack_fingerprint
 from importing import SUPERSEDED_DIR_NAME
 from models import Collection, Track
 from scanner import read_track, scan_folder, track_number_from_tag, year_from_date
@@ -528,3 +529,41 @@ def test_scan_skips_apple_double_sidecars(
     # would take Creep.mp3 along with ._Creep.mp3.
     assert result.added == 1
     assert session.exec(select(Track)).one().file_name == "Creep.mp3"
+
+
+def test_a_changed_file_clears_the_fingerprint(
+    tmp_path, test_collection, session, fixtures_dir
+):
+    scanned_file = tmp_path / "test_track.mp3"
+    shutil.copy(fixtures_dir / "test_track.mp3", scanned_file)
+
+    collection_id = test_collection
+    scan_folder(str(tmp_path), collection_id=collection_id, session=session)
+    track = session.exec(
+        select(Track).where(
+            Track.file_name == "test_track.mp3",
+            Track.collection_id == collection_id,
+        )
+    ).one()
+    track.fingerprint = pack_fingerprint([1, 2, 3])
+    session.add(track)
+    session.commit()
+
+    # Retag in place rather than swapping in a different file: file_path is
+    # the row's identity, so a swap would have to keep the same path anyway,
+    # and retagging keeps the format honest (the old version copied a FLAC
+    # onto a .mp3 path, leaving format="MP3" describing FLAC audio).
+    audio = mutagen.File(str(scanned_file), easy=True)
+    audio["title"] = "Retagged Title"
+    audio.save()
+
+    result = scan_folder(str(tmp_path), collection_id=collection_id, session=session)
+
+    assert result.updated == 1
+    assert result.added == 0
+    assert result.deleted == 0
+    # one(), not first(): a re-scan that inserted instead of matching would
+    # otherwise leave the original row around for these assertions to find.
+    track = session.exec(select(Track)).one()
+    assert track.title == "Retagged Title"
+    assert track.fingerprint is None

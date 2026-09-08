@@ -29,5 +29,6 @@ class Track(SQLModel, table=True):
     duration: int
     file_size: int
     file_hash: str | None = None
+    fingerprint: bytes | None = None
     collection_id: int = Field(foreign_key="collection.id")
     collection: Collection = Relationship(back_populates="tracks")
