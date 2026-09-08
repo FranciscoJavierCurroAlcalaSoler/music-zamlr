@@ -1,4 +1,4 @@
-"""Compare two Chromaprint fingerprints and report how far apart they are.
+"""Read a Chromaprint fingerprint from an audio file, and compare two of them.
 
 A fingerprint is a list of 32-bit integers, one per frame, where a frame
 covers about 0.1238 seconds of decoded audio. Two encodings of the same
@@ -16,9 +16,13 @@ identifies one. Identification is what an AcoustID lookup does, and it would
 mean sending a fingerprint per track to a third party, which is the thing the
 local-first design exists to avoid.
 
-Nothing here reads the disk or the database, and nothing here imports
-matching.py, because matching.py imports this module and the reverse would be
-an import cycle.
+Only compute_fingerprint touches the disk, and it does so by starting fpcalc
+rather than by reading the file itself. Everything below it is arithmetic
+over lists of integers, which is what keeps the comparison testable against
+values typed into a test rather than against audio.
+
+Nothing here reaches the database, and nothing here imports matching.py:
+matching.py imports this module, so the reverse would be an import cycle.
 """
 
 import logging
