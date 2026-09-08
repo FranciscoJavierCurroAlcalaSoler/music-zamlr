@@ -1,4 +1,5 @@
 import json
+import random
 from itertools import count
 from pathlib import Path
 from typing import NamedTuple
@@ -89,6 +90,7 @@ def make_track():
             duration=200,
             file_size=5_000_000,
             file_hash=None,
+            fingerprint=None,
             collection_id=1,
         )
         unknown = set(overrides) - set(defaults)
@@ -98,6 +100,26 @@ def make_track():
         return Track(**defaults)
 
     return _make_track
+
+
+@pytest.fixture
+def fake_fingerprint():
+    """Build a repeatable list of 32-bit values that stands in for a real one.
+
+    Seeded rather than random, so a failure reproduces exactly. Two different
+    seeds stand in for two unrelated recordings, and the same seed twice
+    stands in for two encodings of one recording.
+
+    The default of 200 frames is above MIN_OVERLAP_FRAMES on purpose. A
+    shorter list makes compare_fingerprints answer None for every pair, so a
+    test built on one would pass without comparing anything.
+    """
+
+    def _fake_fingerprint(seed: int, frames: int = 200) -> list[int]:
+        rng = random.Random(seed)
+        return [rng.getrandbits(32) for _ in range(frames)]
+
+    return _fake_fingerprint
 
 
 @pytest.fixture

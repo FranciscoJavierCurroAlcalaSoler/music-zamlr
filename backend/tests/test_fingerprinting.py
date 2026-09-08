@@ -12,7 +12,6 @@ data whenever either constant moved, so a mutation of either one could not
 fail anything.
 """
 
-import random
 import shutil
 import subprocess
 import types
@@ -29,23 +28,13 @@ from fingerprinting import (
 )
 
 
-def fake_fingerprint(seed: int, frames: int = 200) -> list[int]:
-    """Build a repeatable list of 32-bit values that stands in for a real one.
-
-    Seeded rather than random, so a failure reproduces. Two different seeds
-    stand in for two unrelated recordings.
-    """
-    rng = random.Random(seed)
-    return [rng.getrandbits(32) for _ in range(frames)]
-
-
-def test_identical_fingerprints_have_no_error():
+def test_identical_fingerprints_have_no_error(fake_fingerprint):
     a = fake_fingerprint(1)
 
     assert compare_fingerprints(a, list(a)) == 0.0
 
 
-def test_one_flipped_bit_is_one_bit_of_error():
+def test_one_flipped_bit_is_one_bit_of_error(fake_fingerprint):
     a = fake_fingerprint(2)
     b = list(a)
     b[0] ^= 1
@@ -65,14 +54,14 @@ def test_negative_values_are_read_as_unsigned_32_bit():
     assert compare_fingerprints(signed, unsigned) == 0.0
 
 
-def test_a_shifted_copy_is_found_by_the_offset_search():
+def test_a_shifted_copy_is_found_by_the_offset_search(fake_fingerprint):
     # b starts 6 frames into a, so only a positive offset lines them up.
     base = fake_fingerprint(3, 220)
 
     assert compare_fingerprints(base, base[6:]) == 0.0
 
 
-def test_the_offset_search_looks_both_ways():
+def test_the_offset_search_looks_both_ways(fake_fingerprint):
     # The mirror of the test above: a starts 6 frames into b, so the answer
     # is at a negative offset. A loop that runs 0..MAX_OFFSET_FRAMES finds
     # the previous case and misses this one, which is the whole point of
@@ -85,7 +74,7 @@ def test_the_offset_search_looks_both_ways():
     assert compare_fingerprints(a, b) == compare_fingerprints(b, a)
 
 
-def test_the_error_rate_divides_by_the_overlap_not_the_whole_list():
+def test_the_error_rate_divides_by_the_overlap_not_the_whole_list(fake_fingerprint):
     # One flipped bit, but the two lists only overlap by 180 frames, not the
     # 200 and 190 they are long. Dividing by either length gives a different
     # number from the right one.
@@ -96,7 +85,7 @@ def test_the_error_rate_divides_by_the_overlap_not_the_whole_list():
     assert compare_fingerprints(base, b) == pytest.approx(1 / (32 * 180))
 
 
-def test_a_short_overlap_cannot_win():
+def test_a_short_overlap_cannot_win(fake_fingerprint):
     # 90-frame lists whose tail and head agree perfectly at offset 16. That
     # offset leaves an overlap of 74, below the minimum, so it must be
     # refused. Without the minimum it scores 0.0 and wins outright, and two
@@ -108,14 +97,14 @@ def test_a_short_overlap_cannot_win():
     assert compare_fingerprints(a, b) > 0.3
 
 
-def test_unrelated_fingerprints_are_far_apart():
+def test_unrelated_fingerprints_are_far_apart(fake_fingerprint):
     a = fake_fingerprint(7)
     b = fake_fingerprint(8)
 
     assert 0.4 < compare_fingerprints(a, b) < 0.6
 
 
-def test_a_fingerprint_too_short_to_compare_returns_none():
+def test_a_fingerprint_too_short_to_compare_returns_none(fake_fingerprint):
     # 40 frames cannot reach the minimum overlap at any offset. None means
     # "no answer", which the caller must be able to tell apart from a real
     # rate of 1.0 meaning "every bit differs".
@@ -151,7 +140,7 @@ def test_a_rate_exactly_on_the_threshold_counts_as_a_match():
     assert fingerprints_match(quiet, exactly_fifteen_percent) is True
 
 
-def test_fingerprints_match_is_false_when_nothing_can_be_compared():
+def test_fingerprints_match_is_false_when_nothing_can_be_compared(fake_fingerprint):
     # The two lists are identical, so the only thing that can produce False
     # is the refusal to compare them at all. Two unrelated short lists would
     # pass this assertion even with the minimum-overlap guard removed, since
@@ -323,7 +312,7 @@ def test_fpcalc_reads_a_real_file(fixtures_dir):
     assert all(isinstance(value, int) for value in fp)
 
 
-def test_a_fingerprint_survives_a_round_trip():
+def test_a_fingerprint_survives_a_round_trip(fake_fingerprint):
     original = fake_fingerprint(12)
 
     packed = pack_fingerprint(original)

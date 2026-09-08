@@ -1,6 +1,7 @@
 import pytest
 
-from matching import match_collections
+from fingerprinting import pack_fingerprint
+from matching import DURATION_TOLERANCE_SECONDS, match_collections
 
 
 @pytest.fixture
@@ -157,6 +158,305 @@ def test_two_far_candidates_is_missing_not_review(make_track):
     assert len(result.missing) == 1
     assert result.needs_review == []
     assert len(result.only_in_mine) == 2
+
+
+def test_a_fingerprint_match_finds_an_upgrade_with_no_tags(
+    make_track, fake_fingerprint
+):
+    fingerprint = pack_fingerprint(fake_fingerprint(1, 200))
+    mine = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=1_000_000,
+            title=None,
+            artist=None,
+            fingerprint=fingerprint,
+        ),
+    ]
+    theirs = [
+        make_track(
+            format="FLAC",
+            duration=200,
+            file_size=4_000_000,
+            title=None,
+            artist=None,
+            fingerprint=fingerprint,
+        ),
+    ]
+    result = match_collections(mine, theirs)
+
+    assert len(result.upgrade_available) == 1
+    assert result.missing == []
+
+
+def test_a_fingerprint_match_beats_a_wrong_tag(make_track, fake_fingerprint):
+    fingerprint = pack_fingerprint(fake_fingerprint(2, 200))
+    mine = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=1_000_000,
+            title="A Title",
+            artist="An Artist",
+            fingerprint=fingerprint,
+        ),
+    ]
+    theirs = [
+        make_track(
+            format="FLAC",
+            duration=200,
+            file_size=4_000_000,
+            title="Some Other Title",
+            artist="Some Other Artist",
+            fingerprint=fingerprint,
+        ),
+    ]
+    result = match_collections(mine, theirs)
+
+    assert len(result.upgrade_available) == 1
+    assert result.missing == []
+
+
+def test_a_different_recording_of_the_same_length_is_not_matched(
+    make_track, fake_fingerprint
+):
+    fingerprint1 = pack_fingerprint(fake_fingerprint(3, 200))
+    fingerprint2 = pack_fingerprint(fake_fingerprint(4, 200))
+    mine = [
+        make_track(
+            format="MP3",
+            duration=201,
+            file_size=1_000_000,
+            title="A Title",
+            artist="An Artist",
+            fingerprint=fingerprint1,
+        ),
+    ]
+    theirs = [
+        make_track(
+            format="FLAC",
+            duration=200,
+            file_size=4_000_000,
+            title="Some Other Title",
+            artist="Some Other Artist",
+            fingerprint=fingerprint2,
+        ),
+    ]
+    result = match_collections(mine, theirs)
+
+    assert result.upgrade_available == []
+    assert len(result.missing) == 1
+
+
+def test_a_fingerprint_match_at_the_duration_boundary(make_track, fake_fingerprint):
+    # Exactly DURATION_TOLERANCE_SECONDS apart, which is inside the window
+    # because the tolerance is inclusive on both sides.
+    #
+    # This is the only fingerprint test whose durations differ at all on a
+    # pair that matches. Every other one uses equal durations, so narrowing
+    # the five buckets to the exact second leaves them all green — the
+    # window would be dead code that no test defends.
+    fingerprint = pack_fingerprint(fake_fingerprint(9, 200))
+    mine = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=1_000_000,
+            title=None,
+            artist=None,
+            fingerprint=fingerprint,
+        ),
+    ]
+    theirs = [
+        make_track(
+            format="FLAC",
+            duration=200 + DURATION_TOLERANCE_SECONDS,
+            file_size=4_000_000,
+            title=None,
+            artist=None,
+            fingerprint=fingerprint,
+        ),
+    ]
+    result = match_collections(mine, theirs)
+
+    assert len(result.upgrade_available) == 1
+    assert result.missing == []
+
+
+def test_a_duration_outside_the_tolerance_is_not_a_candidate(
+    make_track, fake_fingerprint
+):
+    duration1 = 200
+    duration2 = duration1 + DURATION_TOLERANCE_SECONDS + 1
+    fingerprint = pack_fingerprint(fake_fingerprint(5, 200))
+    mine = [
+        make_track(duration=duration1, file_size=1_000_000, fingerprint=fingerprint),
+    ]
+    theirs = [
+        make_track(duration=duration2, file_size=4_000_000, fingerprint=fingerprint),
+    ]
+    result = match_collections(mine, theirs)
+
+    assert result.upgrade_available == []
+    assert len(result.missing) == 1
+
+
+def test_two_fingerprint_candidates_go_to_review(make_track, fake_fingerprint):
+    fingerprint = pack_fingerprint(fake_fingerprint(6, 200))
+    mine = [
+        make_track(duration=200, file_size=1_000_000, fingerprint=fingerprint),
+        make_track(duration=200, file_size=3_000_000, fingerprint=fingerprint),
+    ]
+    theirs = [
+        make_track(duration=200, file_size=2_000_000, fingerprint=fingerprint),
+    ]
+    result = match_collections(mine, theirs)
+
+    assert result.upgrade_available == []
+    assert len(result.needs_review) == 1
+    assert len(result.needs_review[0].candidates) == 2
+
+
+def test_the_fuzzy_tier_still_runs_when_no_fingerprint_answers(make_track):
+    mine = [
+        make_track(duration=200, file_size=1_000_000),
+    ]
+    theirs = [
+        make_track(duration=200, file_size=4_000_000),
+    ]
+    result = match_collections(mine, theirs)
+
+    assert len(result.missing) == 0
+    assert len(result.already_have) + len(result.upgrade_available) == 1
+
+
+def test_a_consumed_track_is_not_a_fingerprint_candidate(make_track, fake_fingerprint):
+    fingerprint = pack_fingerprint(fake_fingerprint(7, 200))
+    mine = [
+        make_track(
+            duration=200,
+            file_size=1_000_000,
+            file_hash="hash1",
+            fingerprint=fingerprint,
+            format="MP3",
+        ),
+        make_track(duration=200, file_size=3_000_000, fingerprint=fingerprint),
+    ]
+    theirs = [
+        make_track(
+            duration=200,
+            file_size=1_000_000,
+            file_hash="hash1",
+            format="FLAC",
+        ),
+        make_track(
+            duration=200,
+            file_size=4_000_000,
+            fingerprint=fingerprint,
+        ),
+    ]
+    result = match_collections(mine, theirs)
+
+    assert len(result.needs_review) == 0
+
+
+def test_the_hash_tier_still_wins_first(make_track, fake_fingerprint):
+    fingerprint = pack_fingerprint(fake_fingerprint(8, 200))
+    mine = [
+        make_track(
+            duration=200,
+            file_size=1_000_000,
+            file_hash="hash1",
+            fingerprint=fingerprint,
+        ),
+    ]
+    theirs = [
+        make_track(
+            duration=200,
+            file_size=1_000_000,
+            file_hash="hash1",
+            fingerprint=fingerprint,
+        ),
+    ]
+    result = match_collections(mine, theirs)
+
+    assert len(result.already_have) == 1
+    assert result.needs_review == []
+
+
+def test_a_computed_fingerprint_is_stored_on_the_track(
+    make_track, fake_fingerprint, monkeypatch
+):
+    # Both sides start with an empty column, so both have to be computed. The
+    # matcher caches onto the objects and the calling endpoint commits them,
+    # exactly as it does for file_hash — so a value left unset here is a file
+    # that fpcalc decodes again on every future diff, forever.
+    #
+    # Patch matching.compute_fingerprint, not fingerprinting's. matching.py
+    # imported the name into its own module and holds its own reference, so a
+    # patch on the original leaves that reference alone and the real fpcalc
+    # runs.
+    values = fake_fingerprint(20, 200)
+    monkeypatch.setattr("matching.compute_fingerprint", lambda path: values)
+
+    mine = [make_track(duration=200, file_size=1_000_000, format="MP3")]
+    theirs = [make_track(duration=200, file_size=4_000_000, format="FLAC")]
+    result = match_collections(mine, theirs)
+
+    assert len(result.upgrade_available) == 1
+    assert mine[0].fingerprint == pack_fingerprint(values)
+    assert theirs[0].fingerprint == pack_fingerprint(values)
+
+
+def test_an_unreadable_file_is_not_fingerprinted_twice(
+    make_track, fake_fingerprint, monkeypatch
+):
+    # One track of mine that fpcalc cannot read, and two tracks of theirs that
+    # both reach it as a duration candidate. The negative answer has to be
+    # remembered: without it the matcher starts a subprocess for that file
+    # once per track of theirs, and a real collection has thousands.
+    #
+    # Their tags are blank on purpose. With the default tags, the fuzzy tier
+    # pairs the first track of theirs with the broken file and consumes it, so
+    # the second track never reaches it as a candidate and the second lookup
+    # this test is about never happens. Blank tags send both to missing
+    # without consuming anything, which keeps the candidate available twice.
+    calls = []
+
+    def unreadable_mine(path):
+        calls.append(path)
+        return None if path == "/mine/broken.mp3" else fake_fingerprint(21, 200)
+
+    monkeypatch.setattr("matching.compute_fingerprint", unreadable_mine)
+
+    mine = [
+        make_track(
+            duration=200,
+            file_size=1_000_000,
+            file_path="/mine/broken.mp3",
+            file_name="broken.mp3",
+        )
+    ]
+    theirs = [
+        make_track(
+            duration=200,
+            file_size=4_000_000,
+            file_path="/theirs/a.mp3",
+            title=None,
+            artist=None,
+        ),
+        make_track(
+            duration=200,
+            file_size=5_000_000,
+            file_path="/theirs/b.mp3",
+            title=None,
+            artist=None,
+        ),
+    ]
+    match_collections(mine, theirs)
+
+    assert calls.count("/mine/broken.mp3") == 1
 
 
 def test_their_duration_none_is_missing(make_track):

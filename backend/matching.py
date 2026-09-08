@@ -1,29 +1,39 @@
 """Compare two collections and sort the second one's tracks into buckets.
 
-Matching is tiered, fastest-and-most-certain first.
+Matching is tiered, fastest-and-most-certain first: three tiers, each with
+its own pre-filter, and each catching what the others structurally cannot.
 
-We index "mine" by exact file_size and use that as a free pre-filter,
-before looking at any tags. Two files with different byte counts can never
-be byte-identical, so this cheaply narrows the field to real duplicate
-candidates without touching the disk. Only same-size candidates get hashed
-(SHA-256), and hashing is the only tier that works when tags are missing
-entirely.
+**Hash.** We index "mine" by exact file_size and use that as a free
+pre-filter, before looking at any tags. Two files with different byte counts
+can never be byte-identical, so this cheaply narrows the field to real
+duplicate candidates without touching the disk. Only same-size candidates get
+hashed (SHA-256). It cannot find a quality upgrade at all: a different
+encoding of one recording almost always has a different size.
 
-Tag+duration fuzzy matching runs only as a fallback, and it's the only tier
-that can catch a genuine quality upgrade: the same song in a different
-encoding almost always has a different file size, so size/hash structurally
-cannot find that pairing. The two tiers are complementary, not competing;
-each catches what the other can't.
+**Fingerprint.** Chromaprint values, pre-filtered by duration within the same
++/-2 seconds the fuzzy tier uses. This is the tier that reads the audio
+itself, so it is the only one that finds the same recording across two
+encodings when the tags are missing or wrong — the case the other two are
+both blind to. It declines rather than guessing: no fingerprint, no
+candidate, or no fpcalc on the machine all send the track down to the tier
+below, so the matcher still works exactly as it did before this tier existed.
 
-Fuzzy matches use normalized artist+title and a +/-2 second duration
-tolerance. Ambiguous matches (2+ candidates in tolerance) are never
-auto-resolved; they go to needs_review for the user to eyeball.
+**Tag + duration fuzzy.** Normalized artist and title within the same
+tolerance. It runs last because it is the one that infers identity from
+metadata rather than measuring it, but it still resolves pairs the
+fingerprint tier cannot — a file too short to fingerprint, or one fpcalc
+cannot read.
+
+Ambiguity means the same thing in the last two tiers and is never
+auto-resolved: two or more candidates go to needs_review for the user to
+eyeball. It is not doubt about the recording. It is doubt about which of my
+files a track of theirs corresponds to.
 
 This module is deliberately free of any database access. It reads track
-objects and the files they point at, and returns a result. Hashes computed
-along the way are cached onto the track objects in place, but persisting
-them is the caller's job, which is what keeps this logic unit-testable
-against plain in-memory objects.
+objects and the files they point at, and returns a result. Hashes and
+fingerprints computed along the way are cached onto the track objects in
+place, but persisting them is the caller's job, which is what keeps this
+logic unit-testable against plain in-memory objects.
 """
 
 from collections import defaultdict
@@ -31,6 +41,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from enums import Bucket
+from fingerprinting import (
+    compute_fingerprint,
+    fingerprints_match,
+    pack_fingerprint,
+    unpack_fingerprint,
+)
 from hashing import compute_file_hash
 from models import Track
 
@@ -251,6 +267,152 @@ def attempt_fuzzy_match(
         )
 
 
+def _fingerprint_values(
+    track: Track, fingerprint_cache: dict[int, list[int] | None]
+) -> list[int] | None:
+    """Return one track's fingerprint as integers, computing it if needed.
+
+    Three sources, cheapest first: the local cache, the stored bytes, then
+    fpcalc. A computed fingerprint is packed back onto the track the way the
+    hash tier assigns file_hash, and the calling endpoint commits it — so a
+    file is decoded once ever, not once per diff.
+
+    None means fpcalc could not read the file, and it is cached like any
+    other answer. Without that entry the column stays empty, the next
+    candidate finds nothing stored, and one damaged file costs a subprocess
+    for every track of theirs that reaches it.
+
+    Keyed by id() rather than track.id, for the reason the consumed set
+    above gives: an unsaved track has no database id, so several would share
+    the key None.
+    """
+    if id(track) in fingerprint_cache:
+        return fingerprint_cache[id(track)]
+    if track.fingerprint is not None:
+        fingerprint = unpack_fingerprint(track.fingerprint)
+    else:
+        fingerprint = compute_fingerprint(track.file_path)
+        if fingerprint is not None:
+            track.fingerprint = pack_fingerprint(fingerprint)
+    fingerprint_cache[id(track)] = fingerprint
+    return fingerprint
+
+
+def attempt_fingerprint_match(
+    theirs_track: Track,
+    consumed: set[int],
+    mine_by_duration: dict[int, list[Track]],
+    fingerprint_cache: dict[int, list[int] | None],
+) -> tuple[Bucket, Match | AmbiguousMatch] | None:
+    """Classify one track of theirs by the sound of it, or decline to.
+
+    The tier the whole phase exists for: it reads the audio, so it finds the
+    same recording across two encodings even when the tags are missing or
+    wrong, which is exactly where the fuzzy tier below is blind.
+
+    Returns None for "no answer", never a bucket, and the distinction is
+    load-bearing. None sends the track down to the fuzzy tier, which still
+    resolves pairs this one cannot — a file too short to fingerprint, one
+    fpcalc cannot read, or a run on a machine with no fpcalc at all.
+    Returning MISSING here would look like an answer and would silently
+    switch the tier below off.
+    """
+    if theirs_track.duration is None:
+        return None
+
+    # Duration is the pre-filter, and it must not be tags. Tags are the
+    # evidence this tier exists to replace, so filtering on them would give
+    # it the fuzzy tier's blind spot and it would find nothing new. Duration
+    # survives re-encoding, costs no disk read, and the window is the
+    # matcher's own tolerance so both tiers accept the same pairs.
+    fingerprint_candidates = [
+        m
+        for d in range(
+            theirs_track.duration - DURATION_TOLERANCE_SECONDS,
+            theirs_track.duration + DURATION_TOLERANCE_SECONDS + 1,
+        )
+        for m in mine_by_duration.get(d, [])
+        if id(m) not in consumed
+    ]
+    # Before any fingerprint is computed, deliberately. fpcalc decodes two
+    # minutes of audio per call, so a track of theirs with no candidate of a
+    # plausible length must cost nothing at all. The hash tier keeps the same
+    # discipline: it reads no bytes until a same-size candidate exists.
+    if len(fingerprint_candidates) == 0:
+        return None
+
+    theirs_fingerprint = _fingerprint_values(theirs_track, fingerprint_cache)
+    if theirs_fingerprint is None:
+        return None
+
+    # A candidate with no readable fingerprint is skipped, not compared.
+    # fingerprints_match is right to expect two real lists, so the guard
+    # belongs here: passing None reaches len() inside compare_fingerprints
+    # and raises, which would end a diff that has already run for minutes
+    # over one damaged file.
+    fingerprint_candidates = [
+        m
+        for m in fingerprint_candidates
+        if (mine_fingerprint := _fingerprint_values(m, fingerprint_cache)) is not None
+        and fingerprints_match(theirs_fingerprint, mine_fingerprint)
+    ]
+    if len(fingerprint_candidates) == 0:
+        return None
+    elif len(fingerprint_candidates) == 1:
+        mine_track = fingerprint_candidates[0]
+        return (
+            classify_pairing(mine_track, theirs_track),
+            Match(mine=mine_track, theirs=theirs_track),
+        )
+    else:
+        # Two matches is not doubt about the recording — the fingerprints
+        # agree, so it is the same one. It means two of my files hold it, and
+        # nothing here can say which to replace. That is the question
+        # needs_review already answers for the fuzzy tier, so it reuses the
+        # same shape and the same dialog.
+        return (
+            Bucket.NEEDS_REVIEW,
+            AmbiguousMatch(
+                theirs=theirs_track,
+                candidates=[
+                    ReviewCandidate(
+                        mine=m,
+                        would_be=classify_pairing(m, theirs_track),
+                    )
+                    for m in fingerprint_candidates
+                ],
+            ),
+        )
+
+
+def _place_track(
+    theirs_track: Track,
+    tracks_mine: list[Track],
+    mine_by_duration: dict[int, list[Track]],
+    consumed: set[int],
+    fingerprint_cache: dict[int, list[int] | None],
+) -> tuple[Bucket, Match | AmbiguousMatch | Track]:
+    """Run the tiers below the hash tier, best first.
+
+    One function because match_collections reaches this point down two
+    different paths — a track of theirs with no same-size candidate, and one
+    whose hash did not match. Two copies of the fallthrough would be two
+    places to add a tier, and adding it to only one is a silent bug: the
+    second path is exactly where a mistagged upgrade lands.
+
+    The return is never None. attempt_fuzzy_match always answers, worst case
+    (MISSING, theirs_track), so callers unpack the pair with no further
+    check. That is also why the payload here is wider than the fingerprint
+    tier's — only the fuzzy tier can hand back a bare Track.
+    """
+    outcome = attempt_fingerprint_match(
+        theirs_track, consumed, mine_by_duration, fingerprint_cache
+    )
+    if outcome is None:
+        outcome = attempt_fuzzy_match(theirs_track, tracks_mine, consumed)
+    return outcome
+
+
 def match_collections(
     tracks_mine: list[Track],
     tracks_theirs: list[Track],
@@ -264,6 +426,14 @@ def match_collections(
     # all. Object identity is the only key that's always available and
     # always unique here.
     consumed: set[int] = set()
+    # Unpacked fingerprints, for the length of this diff only. The database
+    # column already stops fpcalc running twice across runs, but it holds
+    # bytes and the comparison needs integers, so without this the same 3792
+    # bytes are decoded again for every candidate a track is measured
+    # against. It also holds None, which the column cannot: an empty column
+    # means both "no fingerprint" and "not tried yet", and only this tells
+    # the two apart within a run.
+    fingerprint_cache: dict[int, list[int] | None] = {}
     hashed_count = 0
     theirs_processed_count = 0
 
@@ -281,9 +451,19 @@ def match_collections(
                 )
             )
 
+    # Two indexes over the same pass. Size feeds the hash tier, duration
+    # feeds the fingerprint tier, and neither can do the other's job: two
+    # encodings of one recording differ in size, and two unrelated tracks
+    # share a duration constantly.
     mine_by_size: dict[int, list[Track]] = defaultdict(list)
+    mine_by_duration: dict[int, list[Track]] = defaultdict(list)
     for track in tracks_mine:
         mine_by_size[track.file_size].append(track)
+        # A track with no readable duration is left out rather than filed
+        # under None, which would make one bucket that every unreadable file
+        # shares and that no track of theirs can ever look up.
+        if track.duration is not None:
+            mine_by_duration[track.duration].append(track)
 
     for theirs_track in tracks_theirs:
         # Reported before the work, not after it. The expensive part of an
@@ -321,15 +501,23 @@ def match_collections(
                     # same-size candidates can't be a better answer.
                     break
             # Same size but different content, so this pairing is still
-            # open. Fall through to the fuzzy tier rather than calling it
-            # missing outright.
+            # open. Fall through to the tiers below rather than calling it
+            # missing outright. This is the path a mistagged upgrade takes
+            # when it happens to share a size with something of mine, so it
+            # needs the fingerprint tier as much as the branch below does.
             if not hash_match:
-                bucket, payload = attempt_fuzzy_match(
-                    theirs_track, tracks_mine, consumed
+                bucket, payload = _place_track(
+                    theirs_track,
+                    tracks_mine,
+                    mine_by_duration,
+                    consumed,
+                    fingerprint_cache,
                 )
                 route(result, consumed, bucket, payload)
         else:
-            bucket, payload = attempt_fuzzy_match(theirs_track, tracks_mine, consumed)
+            bucket, payload = _place_track(
+                theirs_track, tracks_mine, mine_by_duration, consumed, fingerprint_cache
+            )
             route(result, consumed, bucket, payload)
         theirs_processed_count += 1
 
