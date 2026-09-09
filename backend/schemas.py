@@ -208,6 +208,7 @@ class DiffProgressRead(BaseModel):
     theirs_processed_count: int
     theirs_count: int
     hashed_count: int
+    fingerprinted_count: int
     current_path: str | None = None
 
     model_config = ConfigDict(from_attributes=True)

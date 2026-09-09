@@ -409,6 +409,58 @@ def test_a_computed_fingerprint_is_stored_on_the_track(
     assert theirs[0].fingerprint == pack_fingerprint(values)
 
 
+def test_the_fingerprint_count_counts_only_the_files_fpcalc_read(
+    make_track, fake_fingerprint, monkeypatch
+):
+    # The counter is a cost signal, so it must track subprocess calls and
+    # nothing else. Three distinct files reach fpcalc here, and the shared
+    # candidate of mine is looked up twice — once per track of theirs — so a
+    # counter that rose for a cache hit would report four.
+    #
+    # The broken file is counted even though it answers None. fpcalc ran and
+    # spent the time, which is the whole thing the number exists to explain.
+    #
+    # Their tags are blank so the fuzzy tier consumes nothing, which is what
+    # keeps the candidate of mine reachable for the second track of theirs.
+    def stub(path):
+        return None if path == "/mine/broken.mp3" else fake_fingerprint(30, 200)
+
+    monkeypatch.setattr("matching.compute_fingerprint", stub)
+
+    mine = [
+        make_track(
+            duration=200,
+            file_size=1_000_000,
+            file_path="/mine/broken.mp3",
+            file_name="broken.mp3",
+        )
+    ]
+    theirs = [
+        make_track(
+            duration=200,
+            file_size=4_000_000,
+            file_path="/theirs/a.mp3",
+            title=None,
+            artist=None,
+        ),
+        make_track(
+            duration=200,
+            file_size=5_000_000,
+            file_path="/theirs/b.mp3",
+            title=None,
+            artist=None,
+        ),
+    ]
+    events = []
+    match_collections(mine, theirs, on_progress=events.append)
+
+    # Read from the last frame rather than from the run object, because the
+    # number the user sees is the one that travelled through DiffProgress.
+    # A counter that rose correctly but was reported as a constant would
+    # satisfy any assertion made against the matcher's internals.
+    assert events[-1].fingerprinted_count == 3
+
+
 def test_an_unreadable_file_is_not_fingerprinted_twice(
     make_track, fake_fingerprint, monkeypatch
 ):

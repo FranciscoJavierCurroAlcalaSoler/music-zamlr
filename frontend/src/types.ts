@@ -77,6 +77,7 @@ export interface DiffProgress {
   theirs_processed_count: number;
   theirs_count: number;
   hashed_count: number;
+  fingerprinted_count: number;
   current_path: string | null;
 }
 

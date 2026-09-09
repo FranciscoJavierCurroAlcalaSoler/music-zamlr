@@ -84,14 +84,29 @@ class DiffProgress:
 
     theirs_count is fixed before any work starts, so unlike a scan this can
     drive a real percentage. Be aware it measures tracks and not time: an
-    iteration with no same-size candidate is a dictionary lookup, and one with
-    a candidate hashes whole files. hashed_count is the honest cost signal.
+    iteration with no candidate is a dictionary lookup, one with a same-size
+    candidate hashes whole files, and one with a same-duration candidate hands
+    a file to fpcalc to decode.
+
+    So two counts ride alongside, and they explain different stalls.
+    hashed_count is bytes read, which a large FLAC accounts for.
+    fingerprinted_count is subprocess calls, which is the slower of the two
+    and has no file size on screen to make sense of the wait. Both count work
+    actually done rather than candidates examined — a number that climbed for
+    a cached value would say the diff is busy while it touches nothing.
     """
 
     theirs_processed_count: int
     theirs_count: int
     hashed_count: int
+    fingerprinted_count: int
     current_path: str | None = None
+
+
+@dataclass
+class FingerprintRun:
+    cache: dict[int, list[int] | None] = field(default_factory=dict)
+    computed_count: int = 0
 
 
 DURATION_TOLERANCE_SECONDS = 2
@@ -268,7 +283,8 @@ def attempt_fuzzy_match(
 
 
 def _fingerprint_values(
-    track: Track, fingerprint_cache: dict[int, list[int] | None]
+    track: Track,
+    fingerprint_run: FingerprintRun,
 ) -> list[int] | None:
     """Return one track's fingerprint as integers, computing it if needed.
 
@@ -286,15 +302,16 @@ def _fingerprint_values(
     above gives: an unsaved track has no database id, so several would share
     the key None.
     """
-    if id(track) in fingerprint_cache:
-        return fingerprint_cache[id(track)]
+    if id(track) in fingerprint_run.cache:
+        return fingerprint_run.cache[id(track)]
     if track.fingerprint is not None:
         fingerprint = unpack_fingerprint(track.fingerprint)
     else:
         fingerprint = compute_fingerprint(track.file_path)
+        fingerprint_run.computed_count += 1
         if fingerprint is not None:
             track.fingerprint = pack_fingerprint(fingerprint)
-    fingerprint_cache[id(track)] = fingerprint
+    fingerprint_run.cache[id(track)] = fingerprint
     return fingerprint
 
 
@@ -302,7 +319,7 @@ def attempt_fingerprint_match(
     theirs_track: Track,
     consumed: set[int],
     mine_by_duration: dict[int, list[Track]],
-    fingerprint_cache: dict[int, list[int] | None],
+    fingerprint_run: FingerprintRun,
 ) -> tuple[Bucket, Match | AmbiguousMatch] | None:
     """Classify one track of theirs by the sound of it, or decline to.
 
@@ -341,7 +358,7 @@ def attempt_fingerprint_match(
     if len(fingerprint_candidates) == 0:
         return None
 
-    theirs_fingerprint = _fingerprint_values(theirs_track, fingerprint_cache)
+    theirs_fingerprint = _fingerprint_values(theirs_track, fingerprint_run)
     if theirs_fingerprint is None:
         return None
 
@@ -353,7 +370,7 @@ def attempt_fingerprint_match(
     fingerprint_candidates = [
         m
         for m in fingerprint_candidates
-        if (mine_fingerprint := _fingerprint_values(m, fingerprint_cache)) is not None
+        if (mine_fingerprint := _fingerprint_values(m, fingerprint_run)) is not None
         and fingerprints_match(theirs_fingerprint, mine_fingerprint)
     ]
     if len(fingerprint_candidates) == 0:
@@ -390,7 +407,7 @@ def _place_track(
     tracks_mine: list[Track],
     mine_by_duration: dict[int, list[Track]],
     consumed: set[int],
-    fingerprint_cache: dict[int, list[int] | None],
+    fingerprint_run: FingerprintRun,
 ) -> tuple[Bucket, Match | AmbiguousMatch | Track]:
     """Run the tiers below the hash tier, best first.
 
@@ -406,7 +423,7 @@ def _place_track(
     tier's — only the fuzzy tier can hand back a bare Track.
     """
     outcome = attempt_fingerprint_match(
-        theirs_track, consumed, mine_by_duration, fingerprint_cache
+        theirs_track, consumed, mine_by_duration, fingerprint_run
     )
     if outcome is None:
         outcome = attempt_fuzzy_match(theirs_track, tracks_mine, consumed)
@@ -433,7 +450,7 @@ def match_collections(
     # against. It also holds None, which the column cannot: an empty column
     # means both "no fingerprint" and "not tried yet", and only this tells
     # the two apart within a run.
-    fingerprint_cache: dict[int, list[int] | None] = {}
+    fingerprint_run = FingerprintRun()
     hashed_count = 0
     theirs_processed_count = 0
 
@@ -447,6 +464,7 @@ def match_collections(
                     theirs_processed_count=theirs_processed_count,
                     theirs_count=len(tracks_theirs),
                     hashed_count=hashed_count,
+                    fingerprinted_count=fingerprint_run.computed_count,
                     current_path=current_path,
                 )
             )
@@ -511,12 +529,12 @@ def match_collections(
                     tracks_mine,
                     mine_by_duration,
                     consumed,
-                    fingerprint_cache,
+                    fingerprint_run,
                 )
                 route(result, consumed, bucket, payload)
         else:
             bucket, payload = _place_track(
-                theirs_track, tracks_mine, mine_by_duration, consumed, fingerprint_cache
+                theirs_track, tracks_mine, mine_by_duration, consumed, fingerprint_run
             )
             route(result, consumed, bucket, payload)
         theirs_processed_count += 1

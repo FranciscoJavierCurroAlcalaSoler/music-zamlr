@@ -1063,6 +1063,69 @@ def test_diff_same_collection_returns_400(client, collections):
     assert response.status_code == 400
 
 
+def test_the_diff_endpoint_stores_the_fingerprints_it_computed(
+    event_stream,
+    make_track,
+    monkeypatch,
+    collections,
+    session,
+    fake_fingerprint,
+    tmp_path,
+):
+    # The parameter is a file path, not a track: compute_fingerprint is called
+    # as compute_fingerprint(track.file_path). Every path gets the same answer,
+    # so the lambda ignores it and exists only to absorb the argument.
+    #
+    # matching.compute_fingerprint, not fingerprinting's. matching.py imported
+    # the name into its own namespace, so patching the original would leave
+    # that reference alone and the real fpcalc would run.
+    monkeypatch.setattr(
+        "matching.compute_fingerprint", lambda path: fake_fingerprint(7, 200)
+    )
+    mine, theirs = collections
+
+    mine_track_1 = make_track(
+        duration=200,
+        file_size=1_000_000,
+        file_path=str(tmp_path / "mine" / "song_1.mp3"),
+        collection_id=mine.id,
+        file_hash="hash1",
+    )
+    mine_track_2 = make_track(
+        duration=200,
+        file_size=3_000_000,
+        file_path=str(tmp_path / "mine" / "song_2.mp3"),
+        collection_id=mine.id,
+        file_hash="hash2",
+    )
+    theirs_track_1 = make_track(
+        duration=200,
+        file_size=1_000_000,
+        file_path=str(tmp_path / "theirs" / "song_1.mp3"),
+        collection_id=theirs.id,
+        file_hash="hash3",
+    )
+    theirs_track_2 = make_track(
+        duration=200,
+        file_size=4_000_000,
+        file_path=str(tmp_path / "theirs" / "song_2.mp3"),
+        collection_id=theirs.id,
+        file_hash="hash4",
+    )
+    session.add(mine_track_1)
+    session.add(mine_track_2)
+    session.add(theirs_track_1)
+    session.add(theirs_track_2)
+    session.commit()
+
+    stream = event_stream(f"/api/diff?mine={mine.id}&theirs={theirs.id}", "GET")
+
+    assert stream.events[-1] == "done"
+    rows = session.exec(select(Track)).all()
+    for row in rows:
+        assert row.fingerprint is not None
+
+
 def test_scan_returns_collection_and_stats(event_stream, tmp_path, fixtures_dir):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 
@@ -1299,6 +1362,7 @@ def test_comparing_reporter_labels_the_phase_and_maps_the_counts():
             theirs_processed_count=111,
             theirs_count=3500,
             hashed_count=7,
+            fingerprinted_count=3,
             current_path=r"C:\music\Radiohead\Creep.mp3",
         )
     )
@@ -1647,6 +1711,7 @@ def test_diff_stream_reports_progress_frames(event_stream, monkeypatch, collecti
                 theirs_processed_count=1,
                 theirs_count=3,
                 hashed_count=0,
+                fingerprinted_count=0,
                 current_path=r"C:\music\Radiohead\Creep.mp3",
             )
         )
@@ -1662,6 +1727,7 @@ def test_diff_stream_reports_progress_frames(event_stream, monkeypatch, collecti
         "theirs_processed_count": 1,
         "theirs_count": 3,
         "hashed_count": 0,
+        "fingerprinted_count": 0,
         "current_path": r"C:\music\Radiohead\Creep.mp3",
     }
 
