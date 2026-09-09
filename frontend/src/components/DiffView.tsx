@@ -54,6 +54,10 @@ interface DiffRow {
   id: number;
   bucket: BucketKey;
   resolvedTo: number | null | undefined;
+  // Set only on missing rows the fingerprint tier refused. A plain missing
+  // row and a rejected one are otherwise identical on screen, and the user
+  // then imports the duplicate the tier exists to prevent.
+  rejected: boolean;
   title: string | null;
   artist: string | null;
   album: string | null;
@@ -80,7 +84,7 @@ const diffColumns: GridColDef[] = [
     headerName: "Status",
     width: 200,
     valueGetter: (_value, row: DiffRow) =>
-      describeStatus(row.bucket, row.resolvedTo),
+      describeStatus(row.bucket, row.resolvedTo, row.rejected),
   },
   { field: "title", headerName: "Title", flex: 1 },
   { field: "artist", headerName: "Artist", flex: 1 },
@@ -137,8 +141,17 @@ interface DiffViewProps {
 function describeStatus(
   bucket: BucketKey,
   resolvedTo: number | null | undefined,
+  rejected: boolean,
 ): string {
-  if (bucket === "missing") return "Missing";
+  // The rejection wording is short because the evidence is already on the
+  // row: "Your format" and "Your bitrate" carry the file it was compared
+  // against, so the label only has to say why the pairing was refused.
+  //
+  // No error rate. 0.27 means nothing to a reader, and a number invites the
+  // belief that a smaller one would have been accepted.
+  if (bucket === "missing") {
+    return rejected ? "Missing · audio differs" : "Missing";
+  }
   if (bucket === "upgrade_available") return "Upgrade";
   if (bucket === "already_have") return "Already have";
   // Checked, not asserted in a comment: a fifth bucket would break the build
@@ -190,6 +203,13 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
     if (!diff) return [];
     const r = diff.match_results;
 
+    // Keyed by the track of theirs, because that is the row being built. The
+    // value is my file, not the rate: the columns show what I have, and the
+    // number stays off screen.
+    const rejectedAgainst = new Map(
+      r.rejected.map((x) => [x.theirs.id, x.mine]),
+    );
+
     const fromTrack = (
       t: Track,
       bucketKey: BucketKey,
@@ -198,6 +218,7 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
       id: t.id,
       bucket: bucketKey,
       resolvedTo,
+      rejected: false,
       title: t.title,
       artist: t.artist,
       album: t.album,
@@ -214,8 +235,22 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
       mine_bit_rate: m.mine.bit_rate,
     });
 
+    // A rejected track is a missing track that also knows what it was
+    // compared against, so it fills the two "yours" columns the same way a
+    // Match does. No new column, and the evidence sits beside the label.
+    const fromMissing = (t: Track): DiffRow => {
+      const mine = rejectedAgainst.get(t.id);
+      if (mine === undefined) return fromTrack(t, "missing");
+      return {
+        ...fromTrack(t, "missing"),
+        rejected: true,
+        mine_format: mine.format,
+        mine_bit_rate: mine.bit_rate,
+      };
+    };
+
     return [
-      ...r.missing.map((t) => fromTrack(t, "missing")),
+      ...r.missing.map(fromMissing),
       ...r.needs_review.map((a) =>
         fromTrack(a.theirs, "needs_review", resolutions.get(a.theirs.id)),
       ),

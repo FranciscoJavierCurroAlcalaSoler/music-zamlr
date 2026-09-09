@@ -59,6 +59,13 @@ class Match:
 
 
 @dataclass
+class RejectedMatch:
+    mine: Track
+    theirs: Track
+    error_rate: float
+
+
+@dataclass
 class ReviewCandidate:
     mine: Track
     would_be: Bucket
@@ -77,6 +84,7 @@ class MatchResult:
     already_have: list[Match] = field(default_factory=list)
     needs_review: list[AmbiguousMatch] = field(default_factory=list)
     only_in_mine: list[Track] = field(default_factory=list)
+    rejected: list[RejectedMatch] = field(default_factory=list)
 
 
 @dataclass
@@ -108,6 +116,7 @@ class DiffProgress:
 class FingerprintRun:
     cache: dict[int, list[int] | None] = field(default_factory=dict)
     computed_count: int = 0
+    rejections: list[RejectedMatch] = field(default_factory=list)
 
 
 DURATION_TOLERANCE_SECONDS = 2
@@ -406,6 +415,18 @@ def attempt_fingerprint_match(
     # file is the correct outcome, and it errs the safe way: a wrong rejection
     # adds a file, where a wrong acceptance deletes one.
     if len(matching_candidates) == 0:
+        # The closest candidate only, never all of them. This list is evidence
+        # for one line of UI — "you have a similar file, the audio differs" —
+        # and the strongest reason to look is the one worth showing.
+        #
+        # min with a key rather than min() then a search for it: one pass, and
+        # no equality test between two floats to decide which entry won.
+        closest_mine, closest_rate = min(comparable_candidates, key=lambda c: c[1])
+        fingerprint_run.rejections.append(
+            RejectedMatch(
+                mine=closest_mine, theirs=theirs_track, error_rate=closest_rate
+            )
+        )
         return (Bucket.MISSING, theirs_track)
     elif len(matching_candidates) == 1:
         mine_track = matching_candidates[0]
@@ -581,5 +602,11 @@ def match_collections(
     for mine_track in tracks_mine:
         if id(mine_track) not in consumed:
             result.only_in_mine.append(mine_track)
+
+    # Copied rather than aliased. fingerprint_run dies with this call today, so
+    # sharing the list is harmless — but a result that can be mutated through
+    # an object the caller never saw is a surprise waiting for whoever gives
+    # the run a longer life.
+    result.rejected = list(fingerprint_run.rejections)
 
     return result

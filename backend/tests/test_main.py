@@ -4,11 +4,13 @@ import shutil
 import time
 import types
 
+import pytest
 from fastapi import HTTPException
 from sqlmodel import select
 
 import main
 from enums import ActionType, ImportPhase
+from fingerprinting import pack_fingerprint
 from importing import ExecuteProgress, PlannedOperation
 from matching import DiffProgress, MatchResult
 from models import Collection, Track
@@ -1061,6 +1063,55 @@ def test_diff_same_collection_returns_400(client, collections):
     mine, theirs = collections
     response = client.get(f"/api/diff?mine={mine.id}&theirs={mine.id}")
     assert response.status_code == 400
+
+
+def test_the_diff_endpoint_reports_a_rejection(
+    event_stream, make_track, collections, session, tmp_path
+):
+    # The rejection has to reach the browser or it may as well not exist: on
+    # screen a rejected track is otherwise identical to one you never owned.
+    # This is the only test that the new list survives the schema layer.
+    #
+    # Uniform frames give an error rate that is arithmetic — 5 bits per frame
+    # is 5/32 = 0.15625, just over the 0.15 threshold — so the rejection is a
+    # certainty rather than a property of two random seeds.
+    mine, theirs = collections
+    session.add(
+        make_track(
+            collection_id=mine.id,
+            format="MP3",
+            duration=200,
+            file_size=1_000_000,
+            file_path=str(tmp_path / "mine" / "near.mp3"),
+            file_name="near.mp3",
+            fingerprint=pack_fingerprint([0b11111] * 200),
+        )
+    )
+    session.add(
+        make_track(
+            collection_id=theirs.id,
+            format="FLAC",
+            duration=201,
+            file_size=4_000_000,
+            file_path=str(tmp_path / "theirs" / "quiet.flac"),
+            file_name="quiet.flac",
+            fingerprint=pack_fingerprint([0] * 200),
+        )
+    )
+    session.commit()
+
+    stream = event_stream(f"/api/diff?mine={mine.id}&theirs={theirs.id}", "GET")
+
+    # The done frame, never the status code: every stream answers 200,
+    # including one whose whole body is an error frame.
+    results = stream.done["match_results"]
+    (rejection,) = results["rejected"]
+    assert rejection["theirs"]["file_name"] == "quiet.flac"
+    assert rejection["mine"]["file_name"] == "near.mp3"
+    assert rejection["error_rate"] == pytest.approx(5 / 32)
+    # And it is still a missing track, so every existing consumer of that
+    # bucket keeps working unchanged.
+    assert [t["file_name"] for t in results["missing"]] == ["quiet.flac"]
 
 
 def test_the_diff_endpoint_stores_the_fingerprints_it_computed(

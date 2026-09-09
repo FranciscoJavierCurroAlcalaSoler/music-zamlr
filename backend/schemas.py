@@ -50,6 +50,14 @@ class MatchRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class RejectedMatchRead(BaseModel):
+    mine: TrackRead
+    theirs: TrackRead
+    error_rate: float
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ReviewCandidateRead(BaseModel):
     mine: TrackRead
     would_be: Bucket
@@ -70,6 +78,7 @@ class MatchResultRead(BaseModel):
     already_have: list[MatchRead] = []
     needs_review: list[AmbiguousMatchRead] = []
     only_in_mine: list[TrackRead] = []
+    rejected: list[RejectedMatchRead] = []
 
     model_config = ConfigDict(from_attributes=True)
 

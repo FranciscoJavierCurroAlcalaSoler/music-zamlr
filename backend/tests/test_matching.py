@@ -550,6 +550,147 @@ def test_a_fingerprint_mismatch_beats_a_matching_tag(make_track, fake_fingerprin
     assert len(result.only_in_mine) == 1
 
 
+def test_a_rejection_records_the_file_it_was_compared_against(
+    make_track, fake_fingerprint
+):
+    fingerprint1 = pack_fingerprint(fake_fingerprint(12, 200))
+    fingerprint2 = pack_fingerprint(fake_fingerprint(13, 200))
+    mine = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=1_000_000,
+            title="A Title",
+            artist="An Artist",
+            fingerprint=fingerprint1,
+        ),
+    ]
+    theirs = [
+        make_track(
+            format="FLAC",
+            duration=201,
+            file_size=4_000_000,
+            title="A Title",
+            artist="An Artist",
+            fingerprint=fingerprint2,
+        ),
+    ]
+    result = match_collections(mine, theirs)
+
+    (rejection,) = result.rejected
+    assert rejection.mine is mine[0]
+    assert rejection.theirs is theirs[0]
+
+
+# Uniform frames, so the error rate is arithmetic rather than a measurement:
+# it is differing_bits / (32 * frames), and with every frame carrying the same
+# pattern that reduces to bits/32 at every offset in the search.
+#
+# fake_fingerprint cannot serve these two. Two random lists land near 0.5 and
+# within a few thousandths of each other, so neither the exact value nor which
+# of two candidates is closer can be written down in advance.
+#
+# Five bits is the smallest whole number that clears the 0.15 threshold. Four
+# would score 0.125 and be a *match*, which turns the test into one about
+# pairing rather than about rejection.
+QUIET_FINGERPRINT = [0] * 200
+NEAR_MISS_FINGERPRINT = [0b11111] * 200  # 5/32 = 0.15625, just over
+FAR_MISS_FINGERPRINT = [0b1111111] * 200  # 7/32 = 0.21875
+
+
+def test_a_rejection_records_its_error_rate(make_track):
+    # The exact rate, not merely a positive number. "> 0.0" passes against a
+    # placeholder, against the wrong candidate's rate, and against a rate read
+    # from the wrong end of the comparison.
+    mine = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=1_000_000,
+            fingerprint=pack_fingerprint(NEAR_MISS_FINGERPRINT),
+        ),
+    ]
+    theirs = [
+        make_track(
+            format="FLAC",
+            duration=201,
+            file_size=4_000_000,
+            fingerprint=pack_fingerprint(QUIET_FINGERPRINT),
+        ),
+    ]
+    result = match_collections(mine, theirs)
+
+    (rejection,) = result.rejected
+    assert rejection.error_rate == pytest.approx(5 / 32)
+
+
+def test_the_closest_candidate_is_the_one_recorded(make_track):
+    # Two candidates at 0.15625 and 0.21875. Both are rejected, so the choice
+    # between them is the only thing this test can be about — which is why it
+    # asserts on rejection.mine. An assertion naming only theirs would pass
+    # whichever candidate the code kept.
+    near = make_track(
+        format="MP3",
+        duration=200,
+        file_size=1_000_000,
+        file_name="near.mp3",
+        fingerprint=pack_fingerprint(NEAR_MISS_FINGERPRINT),
+    )
+    far = make_track(
+        format="MP3",
+        duration=200,
+        file_size=2_000_000,
+        file_name="far.mp3",
+        fingerprint=pack_fingerprint(FAR_MISS_FINGERPRINT),
+    )
+    theirs = [
+        make_track(
+            format="FLAC",
+            duration=202,
+            file_size=4_000_000,
+            fingerprint=pack_fingerprint(QUIET_FINGERPRINT),
+        ),
+    ]
+    # far first, and that order is load-bearing. Candidates arrive in the order
+    # tracks_mine gives them, so with near first the code could take the head
+    # of the list and still look right — a mutation replacing min() with
+    # candidates[0] survives that arrangement and fails this one.
+    result = match_collections([far, near], theirs)
+
+    (rejection,) = result.rejected
+    assert rejection.mine is near
+    assert rejection.error_rate == pytest.approx(5 / 32)
+
+
+def test_a_track_missing_for_any_other_reason_is_not_recorded(
+    make_track, fake_fingerprint
+):
+    fingerprint = pack_fingerprint(fake_fingerprint(19, 200))
+    mine = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=1_000_000,
+            title="A Title",
+            artist="An Artist",
+            fingerprint=fingerprint,
+        ),
+    ]
+    theirs = [
+        make_track(
+            format="FLAC",
+            duration=203,
+            file_size=4_000_000,
+            title="A Title",
+            artist="An Artist",
+            fingerprint=fingerprint,
+        ),
+    ]
+    result = match_collections(mine, theirs)
+
+    assert result.rejected == []
+
+
 def test_a_candidate_that_cannot_be_fingerprinted_still_reaches_the_tag_tier(
     make_track, fake_fingerprint, monkeypatch
 ):
@@ -598,6 +739,12 @@ def test_a_candidate_that_cannot_be_fingerprinted_still_reaches_the_tag_tier(
 
     assert len(result.upgrade_available) == 1
     assert result.missing == []
+    # And nothing may be recorded as rejected. There are two empty-list guards
+    # in the tier and they mean different things: no candidate of a plausible
+    # length, which the duration test above covers, and a candidate that could
+    # not be compared, which is this one. A track nothing was measured against
+    # must never claim the audio disagreed.
+    assert result.rejected == []
 
 
 def test_their_duration_none_is_missing(make_track):

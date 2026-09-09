@@ -26,6 +26,12 @@ export interface Match {
   theirs: Track;
 }
 
+export interface RejectedMatch {
+  mine: Track;
+  theirs: Track;
+  error_rate: number;
+}
+
 export interface ScanProgress {
   scanned: number;
   added: number;
@@ -71,6 +77,7 @@ export interface MatchResult {
   already_have: Match[];
   needs_review: AmbiguousMatch[];
   only_in_mine: Track[];
+  rejected: RejectedMatch[];
 }
 
 export interface DiffProgress {
