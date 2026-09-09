@@ -42,8 +42,9 @@ from dataclasses import dataclass, field
 
 from enums import Bucket
 from fingerprinting import (
+    SAME_RECORDING_MAX_ERROR_RATE,
+    compare_fingerprints,
     compute_fingerprint,
-    fingerprints_match,
     pack_fingerprint,
     unpack_fingerprint,
 )
@@ -320,7 +321,7 @@ def attempt_fingerprint_match(
     consumed: set[int],
     mine_by_duration: dict[int, list[Track]],
     fingerprint_run: FingerprintRun,
-) -> tuple[Bucket, Match | AmbiguousMatch] | None:
+) -> tuple[Bucket, Match | AmbiguousMatch | Track] | None:
     """Classify one track of theirs by the sound of it, or decline to.
 
     The tier the whole phase exists for: it reads the audio, so it finds the
@@ -362,21 +363,52 @@ def attempt_fingerprint_match(
     if theirs_fingerprint is None:
         return None
 
-    # A candidate with no readable fingerprint is skipped, not compared.
-    # fingerprints_match is right to expect two real lists, so the guard
-    # belongs here: passing None reaches len() inside compare_fingerprints
-    # and raises, which would end a diff that has already run for minutes
-    # over one damaged file.
-    fingerprint_candidates = [
-        m
+    # Comparable means the comparison produced a number, not merely that a
+    # fingerprint was readable. Two conditions, and both are needed.
+    #
+    # compare_fingerprints expects two real lists, so a candidate fpcalc could
+    # not read is dropped first: passing None reaches len() inside it and
+    # raises, ending a diff that has already run for minutes over one damaged
+    # file.
+    #
+    # And it declines with None when the shorter fingerprint is under
+    # MIN_OVERLAP_FRAMES — about 12 seconds of audio. That is "I cannot tell",
+    # not "these differ", and the difference now decides whether the tag tier
+    # gets its turn. fingerprints_match returns a bool and so collapses the
+    # two, which is why this reads the rate itself and applies
+    # SAME_RECORDING_MAX_ERROR_RATE below rather than calling that predicate.
+    # The rate is kept because computing it is a 33-offset search over every
+    # frame, not a lookup worth repeating.
+    comparable_candidates = [
+        (m, error_rate)
         for m in fingerprint_candidates
         if (mine_fingerprint := _fingerprint_values(m, fingerprint_run)) is not None
-        and fingerprints_match(theirs_fingerprint, mine_fingerprint)
+        and (error_rate := compare_fingerprints(theirs_fingerprint, mine_fingerprint))
+        is not None
     ]
-    if len(fingerprint_candidates) == 0:
+    if len(comparable_candidates) == 0:
         return None
-    elif len(fingerprint_candidates) == 1:
-        mine_track = fingerprint_candidates[0]
+
+    matching_candidates = [
+        m
+        for m, error_rate in comparable_candidates
+        if error_rate <= SAME_RECORDING_MAX_ERROR_RATE
+    ]
+    # Compared, and every one of them said no. That is an answer, so the tag
+    # tier below must not get a second opinion: its evidence is the metadata,
+    # and the audio has already contradicted it. A remaster carrying the
+    # original's tags and a length inside the tolerance is exactly this case,
+    # and it is the one §7's Phase 3.5 item 4 said only Phase 5 could settle.
+    #
+    # MISSING rather than NEEDS_REVIEW because there is nothing to ask. The
+    # review dialog's only question is which of my files this supersedes, and
+    # the answer is none of them. Importing a different recording as a new
+    # file is the correct outcome, and it errs the safe way: a wrong rejection
+    # adds a file, where a wrong acceptance deletes one.
+    if len(matching_candidates) == 0:
+        return (Bucket.MISSING, theirs_track)
+    elif len(matching_candidates) == 1:
+        mine_track = matching_candidates[0]
         return (
             classify_pairing(mine_track, theirs_track),
             Match(mine=mine_track, theirs=theirs_track),
@@ -396,7 +428,7 @@ def attempt_fingerprint_match(
                         mine=m,
                         would_be=classify_pairing(m, theirs_track),
                     )
-                    for m in fingerprint_candidates
+                    for m in matching_candidates
                 ],
             ),
         )

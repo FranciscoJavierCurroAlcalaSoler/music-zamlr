@@ -511,6 +511,95 @@ def test_an_unreadable_file_is_not_fingerprinted_twice(
     assert calls.count("/mine/broken.mp3") == 1
 
 
+def test_a_fingerprint_mismatch_beats_a_matching_tag(make_track, fake_fingerprint):
+    # The remaster case, and the one Phase 5 exists to stop. Same artist, same
+    # title, a length inside the tolerance: the tag tier would pair these
+    # confidently. The audio says they are different recordings.
+    #
+    # Theirs is FLAC against my MP3 on purpose. That makes the un-fixed
+    # outcome upgrade_available, which with the delete action destroys my
+    # file. With two MP3s the tag tier would land on already_have instead —
+    # harmless, and the assertions below would pass either way.
+    fingerprint1 = pack_fingerprint(fake_fingerprint(10, 200))
+    fingerprint2 = pack_fingerprint(fake_fingerprint(11, 200))
+    mine = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=1_000_000,
+            title="A Title",
+            artist="An Artist",
+            fingerprint=fingerprint1,
+        ),
+    ]
+    theirs = [
+        make_track(
+            format="FLAC",
+            duration=201,
+            file_size=4_000_000,
+            title="A Title",
+            artist="An Artist",
+            fingerprint=fingerprint2,
+        ),
+    ]
+    result = match_collections(mine, theirs)
+
+    assert result.upgrade_available == []
+    assert len(result.missing) == 1
+    # A rejection pairs nothing, so my file stays available and unconsumed.
+    assert len(result.only_in_mine) == 1
+
+
+def test_a_candidate_that_cannot_be_fingerprinted_still_reaches_the_tag_tier(
+    make_track, fake_fingerprint, monkeypatch
+):
+    # The other half of "not comparable". The short-file case is covered by
+    # test_same_size_different_content_no_hash_match, where both fingerprints
+    # exist and compare_fingerprints declines on length. Here the candidate of
+    # mine has no fingerprint at all, so the first condition in the comparable
+    # filter is what has to catch it.
+    #
+    # Without a test for this the two conditions in that comprehension are not
+    # separately defended: every mutation against either one was killed by the
+    # short-file test alone, which would have gone on passing if the readable
+    # check were deleted outright.
+    #
+    # Tags match and the durations are inside the tolerance, so a tier that
+    # declines correctly hands these to the tag tier and gets an upgrade. A
+    # tier that mistook "unreadable" for "different" would report missing.
+    def unreadable_mine(path):
+        return None if path == "/mine/broken.mp3" else fake_fingerprint(12, 200)
+
+    monkeypatch.setattr("matching.compute_fingerprint", unreadable_mine)
+
+    mine = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=1_000_000,
+            file_path="/mine/broken.mp3",
+            file_name="broken.mp3",
+            title="A Title",
+            artist="An Artist",
+        ),
+    ]
+    theirs = [
+        make_track(
+            format="FLAC",
+            duration=201,
+            file_size=4_000_000,
+            file_path="/theirs/good.flac",
+            file_name="good.flac",
+            title="A Title",
+            artist="An Artist",
+        ),
+    ]
+    result = match_collections(mine, theirs)
+
+    assert len(result.upgrade_available) == 1
+    assert result.missing == []
+
+
 def test_their_duration_none_is_missing(make_track):
     mine = [
         make_track(duration=200, file_size=1_000_000),
