@@ -815,6 +815,194 @@ def test_a_candidate_that_cannot_be_fingerprinted_still_reaches_the_tag_tier(
     assert result.rejected == []
 
 
+def test_a_refused_candidate_does_not_hide_an_uncomparable_one(
+    make_track, fake_fingerprint, monkeypatch
+):
+    # broken.mp3 is the real match, but fpcalc cannot read it. other.mp3 is
+    # readable, the same length, and different audio. A tier that refuses
+    # other.mp3 and stops never lets the tag tier see broken.mp3, and
+    # good.flac is imported as a duplicate of a file already owned.
+    #
+    # FLAC against MP3 so the correct outcome is an upgrade the assertion can
+    # name. "is broken" and not only the count: which file of mine it paired
+    # with is the whole question.
+    monkeypatch.setattr("matching.compute_fingerprint", lambda path: None)
+
+    mine = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=1_000_000,
+            file_path="/mine/broken.mp3",
+            file_name="broken.mp3",
+            title="A Title",
+            artist="An Artist",
+        ),
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=2_000_000,
+            file_path="/mine/other.mp3",
+            file_name="other.mp3",
+            title="Some Other Title",
+            artist="Some Other Artist",
+            fingerprint=pack_fingerprint(fake_fingerprint(1, 200)),
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
+    ]
+    theirs = [
+        make_track(
+            format="FLAC",
+            duration=201,
+            file_size=4_000_000,
+            file_path="/theirs/good.flac",
+            file_name="good.flac",
+            title="A Title",
+            artist="An Artist",
+            fingerprint=pack_fingerprint(fake_fingerprint(2, 200)),
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
+    ]
+    broken = mine[0]
+    result = match_collections(mine, theirs)
+
+    assert len(result.upgrade_available) == 1
+    assert result.upgrade_available[0].mine is broken
+    assert result.missing == []
+
+
+def test_the_tag_tier_never_pairs_a_refused_candidate(
+    make_track, fake_fingerprint, monkeypatch
+):
+    # The trap in the obvious fix. other.mp3 carries good.flac's tags, so a
+    # tier that simply declined would hand it to the tag tier, which would
+    # pair them — the pairing the audio refused, and with FLAC against MP3 an
+    # upgrade the delete action turns into a deletion. broken.mp3 has other
+    # tags, so with other.mp3 kept out there is nothing left to pair.
+    #
+    # rejected must stay empty. The audio judged only one of the two
+    # candidates, so "audio differs" would claim more than was measured.
+    def unreadable_mine(path):
+        return None if path == "/mine/broken.mp3" else fake_fingerprint(1, 200)
+
+    monkeypatch.setattr("matching.compute_fingerprint", unreadable_mine)
+
+    mine = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=1_000_000,
+            file_path="/mine/broken.mp3",
+            file_name="broken.mp3",
+            title="Some Other Title",
+            artist="Some Other Artist",
+        ),
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=2_000_000,
+            file_path="/mine/other.mp3",
+            file_name="other.mp3",
+            title="A Title",
+            artist="An Artist",
+            fingerprint=pack_fingerprint(FAR_MISS_FINGERPRINT),
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
+    ]
+    theirs = [
+        make_track(
+            format="FLAC",
+            duration=201,
+            file_size=4_000_000,
+            file_path="/theirs/good.flac",
+            file_name="good.flac",
+            title="A Title",
+            artist="An Artist",
+            fingerprint=pack_fingerprint(QUIET_FINGERPRINT),
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
+    ]
+
+    result = match_collections(mine, theirs)
+
+    assert result.upgrade_available == []
+    assert result.rejected == []
+    assert len(result.missing) == 1
+
+
+def test_a_refusal_does_not_reserve_the_candidate_for_the_diff(
+    make_track, fake_fingerprint, monkeypatch
+):
+    # refused belongs to one track of theirs, not to the diff. good.flac
+    # refuses other.mp3, and broken.mp3 cannot be compared, so the tier
+    # declines. nice.flac is then an exact fingerprint match for other.mp3 and
+    # must still get it. Add the refusal to consumed instead and nice.flac
+    # finds other.mp3 already taken, with nothing anywhere to say why.
+    #
+    # The order of theirs is load-bearing: good.flac has to refuse other.mp3
+    # before nice.flac reaches it.
+    fingerprint = fake_fingerprint(1, 200)
+
+    def unreadable_mine(path):
+        return None if path == "/mine/broken.mp3" else fingerprint
+
+    monkeypatch.setattr("matching.compute_fingerprint", unreadable_mine)
+
+    mine = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=1_000_000,
+            file_path="/mine/broken.mp3",
+            file_name="broken.mp3",
+            title="A Title",
+            artist="An Artist",
+        ),
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=2_000_000,
+            file_path="/mine/other.mp3",
+            file_name="other.mp3",
+            title="B Title",
+            artist="B Artist",
+        ),
+    ]
+    theirs = [
+        make_track(
+            format="FLAC",
+            duration=201,
+            file_size=3_000_000,
+            file_path="/theirs/good.flac",
+            file_name="good.flac",
+            title="Some Other Title",
+            artist="Some Other Artist",
+            fingerprint=pack_fingerprint(QUIET_FINGERPRINT),
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
+        make_track(
+            format="FLAC",
+            duration=201,
+            file_size=4_000_000,
+            file_path="/theirs/nice.flac",
+            file_name="nice.flac",
+            title="Title",
+            artist="Artist",
+        ),
+    ]
+
+    result = match_collections(mine, theirs)
+
+    assert len(result.upgrade_available) == 1
+    assert result.upgrade_available[0].mine is mine[1]
+    assert result.upgrade_available[0].theirs is theirs[1]
+
+
 def test_a_fingerprint_from_another_algorithm_is_recomputed(
     make_track, fake_fingerprint, monkeypatch
 ):

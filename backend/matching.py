@@ -259,6 +259,13 @@ def attempt_fuzzy_match(
     # different encoding, which by definition has a different file size.
     # Reusing the size index here would make the tier unable to find the
     # only thing it's for.
+    #
+    # consumed means "not available to this track", which is wider than its
+    # name. _place_track can pass consumed | refused, so a candidate the
+    # fingerprint tier compared and refused for this track is skipped too:
+    # the tag tier must not re-pair what the audio has already ruled out. The
+    # set is only ever read here, never written, which is what makes handing
+    # this function a one-off union safe.
     fuzzy_candidates = [
         m
         for m in tracks_mine
@@ -348,6 +355,7 @@ def _fingerprint_values(
 def attempt_fingerprint_match(
     theirs_track: Track,
     consumed: set[int],
+    refused: set[int],
     mine_by_duration: dict[int, list[Track]],
     fingerprint_run: FingerprintRun,
 ) -> tuple[Bucket, Match | AmbiguousMatch | Track] | None:
@@ -362,7 +370,13 @@ def attempt_fingerprint_match(
     resolves pairs this one cannot — a file too short to fingerprint, one
     fpcalc cannot read, or a run on a machine with no fpcalc at all.
     Returning MISSING here would look like an answer and would silently
-    switch the tier below off.
+    switch the tier below off. A rejection is different: every candidate
+    compared and every one refused is an answer, and that does return
+    MISSING.
+
+    refused is an out-parameter. When the tier declines with some candidates
+    refused and some never compared, it holds the refused ones, so the caller
+    can keep them from the tier below.
     """
     if theirs_track.duration is None:
         return None
@@ -423,11 +437,12 @@ def attempt_fingerprint_match(
         for m, error_rate in comparable_candidates
         if error_rate <= SAME_RECORDING_MAX_ERROR_RATE
     ]
-    # Compared, and every one of them said no. That is an answer, so the tag
-    # tier below must not get a second opinion: its evidence is the metadata,
-    # and the audio has already contradicted it. A remaster carrying the
-    # original's tags and a length inside the tolerance is exactly this case,
-    # and it is the one §7's Phase 3.5 item 4 said only Phase 5 could settle.
+    # Every candidate compared, and every one said no. That is an answer, so
+    # the tag tier below must not get a second opinion: its evidence is the
+    # metadata, and the audio has already contradicted it. A remaster carrying
+    # the original's tags and a length inside the tolerance is exactly this
+    # case, and it is the one §7's Phase 3.5 item 4 said only Phase 5 could
+    # settle.
     #
     # MISSING rather than NEEDS_REVIEW because there is nothing to ask. The
     # review dialog's only question is which of my files this supersedes, and
@@ -435,6 +450,19 @@ def attempt_fingerprint_match(
     # file is the correct outcome, and it errs the safe way: a wrong rejection
     # adds a file, where a wrong acceptance deletes one.
     if len(matching_candidates) == 0:
+        # A rejection is only a rejection when something was compared. If any
+        # candidate could not be — fpcalc could not read it, or it is too
+        # short — the refusals rule out only the candidates the audio judged,
+        # and the unjudged one may be the real match. So decline, and leave
+        # the refused candidates in refused for the tag tier to skip.
+        #
+        # update() is right on this set and would be wrong on consumed:
+        # refused belongs to this one track of theirs, consumed to the whole
+        # diff. And no rejection is recorded when declining, because the audio
+        # did not judge every candidate and "audio differs" would say it had.
+        refused.update(id(m) for m, _ in comparable_candidates)
+        if len(comparable_candidates) < len(fingerprint_candidates):
+            return None
         # The closest candidate only, never all of them. This list is evidence
         # for one line of UI — "you have a similar file, the audio differs" —
         # and the strongest reason to look is the one worth showing.
@@ -495,11 +523,20 @@ def _place_track(
     check. That is also why the payload here is wider than the fingerprint
     tier's — only the fuzzy tier can hand back a bare Track.
     """
+    # Fresh for every track of theirs. On FingerprintRun it would live for the
+    # whole diff and carry one track's refusals into the next.
+    refused: set[int] = set()
     outcome = attempt_fingerprint_match(
-        theirs_track, consumed, mine_by_duration, fingerprint_run
+        theirs_track, consumed, refused, mine_by_duration, fingerprint_run
     )
     if outcome is None:
-        outcome = attempt_fuzzy_match(theirs_track, tracks_mine, consumed)
+        # A union, never consumed.update(refused). Without refused, a decline
+        # hands the tag tier a candidate the audio already ruled out, and one
+        # whose tags match gets paired — for FLAC over MP3, an upgrade the
+        # delete action turns into a deletion. Put into consumed instead, a
+        # candidate this track refused is lost to every later track, where it
+        # may be the right pairing.
+        outcome = attempt_fuzzy_match(theirs_track, tracks_mine, consumed | refused)
     return outcome
 
 
