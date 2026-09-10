@@ -1,6 +1,6 @@
 import pytest
 
-from fingerprinting import pack_fingerprint
+from fingerprinting import FPCALC_ALGORITHM, FPCALC_LENGTH_SECONDS, pack_fingerprint
 from matching import DURATION_TOLERANCE_SECONDS, match_collections
 
 
@@ -172,6 +172,8 @@ def test_a_fingerprint_match_finds_an_upgrade_with_no_tags(
             title=None,
             artist=None,
             fingerprint=fingerprint,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         ),
     ]
     theirs = [
@@ -182,6 +184,8 @@ def test_a_fingerprint_match_finds_an_upgrade_with_no_tags(
             title=None,
             artist=None,
             fingerprint=fingerprint,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         ),
     ]
     result = match_collections(mine, theirs)
@@ -200,6 +204,8 @@ def test_a_fingerprint_match_beats_a_wrong_tag(make_track, fake_fingerprint):
             title="A Title",
             artist="An Artist",
             fingerprint=fingerprint,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         ),
     ]
     theirs = [
@@ -210,6 +216,8 @@ def test_a_fingerprint_match_beats_a_wrong_tag(make_track, fake_fingerprint):
             title="Some Other Title",
             artist="Some Other Artist",
             fingerprint=fingerprint,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         ),
     ]
     result = match_collections(mine, theirs)
@@ -231,6 +239,8 @@ def test_a_different_recording_of_the_same_length_is_not_matched(
             title="A Title",
             artist="An Artist",
             fingerprint=fingerprint1,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         ),
     ]
     theirs = [
@@ -241,6 +251,8 @@ def test_a_different_recording_of_the_same_length_is_not_matched(
             title="Some Other Title",
             artist="Some Other Artist",
             fingerprint=fingerprint2,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         ),
     ]
     result = match_collections(mine, theirs)
@@ -266,6 +278,8 @@ def test_a_fingerprint_match_at_the_duration_boundary(make_track, fake_fingerpri
             title=None,
             artist=None,
             fingerprint=fingerprint,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         ),
     ]
     theirs = [
@@ -276,6 +290,8 @@ def test_a_fingerprint_match_at_the_duration_boundary(make_track, fake_fingerpri
             title=None,
             artist=None,
             fingerprint=fingerprint,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         ),
     ]
     result = match_collections(mine, theirs)
@@ -291,10 +307,22 @@ def test_a_duration_outside_the_tolerance_is_not_a_candidate(
     duration2 = duration1 + DURATION_TOLERANCE_SECONDS + 1
     fingerprint = pack_fingerprint(fake_fingerprint(5, 200))
     mine = [
-        make_track(duration=duration1, file_size=1_000_000, fingerprint=fingerprint),
+        make_track(
+            duration=duration1,
+            file_size=1_000_000,
+            fingerprint=fingerprint,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
     ]
     theirs = [
-        make_track(duration=duration2, file_size=4_000_000, fingerprint=fingerprint),
+        make_track(
+            duration=duration2,
+            file_size=4_000_000,
+            fingerprint=fingerprint,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
     ]
     result = match_collections(mine, theirs)
 
@@ -305,11 +333,29 @@ def test_a_duration_outside_the_tolerance_is_not_a_candidate(
 def test_two_fingerprint_candidates_go_to_review(make_track, fake_fingerprint):
     fingerprint = pack_fingerprint(fake_fingerprint(6, 200))
     mine = [
-        make_track(duration=200, file_size=1_000_000, fingerprint=fingerprint),
-        make_track(duration=200, file_size=3_000_000, fingerprint=fingerprint),
+        make_track(
+            duration=200,
+            file_size=1_000_000,
+            fingerprint=fingerprint,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
+        make_track(
+            duration=200,
+            file_size=3_000_000,
+            fingerprint=fingerprint,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
     ]
     theirs = [
-        make_track(duration=200, file_size=2_000_000, fingerprint=fingerprint),
+        make_track(
+            duration=200,
+            file_size=2_000_000,
+            fingerprint=fingerprint,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
     ]
     result = match_collections(mine, theirs)
 
@@ -530,6 +576,8 @@ def test_a_fingerprint_mismatch_beats_a_matching_tag(make_track, fake_fingerprin
             title="A Title",
             artist="An Artist",
             fingerprint=fingerprint1,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         ),
     ]
     theirs = [
@@ -540,6 +588,8 @@ def test_a_fingerprint_mismatch_beats_a_matching_tag(make_track, fake_fingerprin
             title="A Title",
             artist="An Artist",
             fingerprint=fingerprint2,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         ),
     ]
     result = match_collections(mine, theirs)
@@ -563,6 +613,8 @@ def test_a_rejection_records_the_file_it_was_compared_against(
             title="A Title",
             artist="An Artist",
             fingerprint=fingerprint1,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         ),
     ]
     theirs = [
@@ -573,6 +625,8 @@ def test_a_rejection_records_the_file_it_was_compared_against(
             title="A Title",
             artist="An Artist",
             fingerprint=fingerprint2,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         ),
     ]
     result = match_collections(mine, theirs)
@@ -608,6 +662,8 @@ def test_a_rejection_records_its_error_rate(make_track):
             duration=200,
             file_size=1_000_000,
             fingerprint=pack_fingerprint(NEAR_MISS_FINGERPRINT),
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         ),
     ]
     theirs = [
@@ -616,6 +672,8 @@ def test_a_rejection_records_its_error_rate(make_track):
             duration=201,
             file_size=4_000_000,
             fingerprint=pack_fingerprint(QUIET_FINGERPRINT),
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         ),
     ]
     result = match_collections(mine, theirs)
@@ -635,6 +693,8 @@ def test_the_closest_candidate_is_the_one_recorded(make_track):
         file_size=1_000_000,
         file_name="near.mp3",
         fingerprint=pack_fingerprint(NEAR_MISS_FINGERPRINT),
+        fingerprint_length=FPCALC_LENGTH_SECONDS,
+        fingerprint_algorithm=FPCALC_ALGORITHM,
     )
     far = make_track(
         format="MP3",
@@ -642,6 +702,8 @@ def test_the_closest_candidate_is_the_one_recorded(make_track):
         file_size=2_000_000,
         file_name="far.mp3",
         fingerprint=pack_fingerprint(FAR_MISS_FINGERPRINT),
+        fingerprint_length=FPCALC_LENGTH_SECONDS,
+        fingerprint_algorithm=FPCALC_ALGORITHM,
     )
     theirs = [
         make_track(
@@ -649,6 +711,8 @@ def test_the_closest_candidate_is_the_one_recorded(make_track):
             duration=202,
             file_size=4_000_000,
             fingerprint=pack_fingerprint(QUIET_FINGERPRINT),
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         ),
     ]
     # far first, and that order is load-bearing. Candidates arrive in the order
@@ -674,6 +738,8 @@ def test_a_track_missing_for_any_other_reason_is_not_recorded(
             title="A Title",
             artist="An Artist",
             fingerprint=fingerprint,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         ),
     ]
     theirs = [
@@ -684,6 +750,8 @@ def test_a_track_missing_for_any_other_reason_is_not_recorded(
             title="A Title",
             artist="An Artist",
             fingerprint=fingerprint,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         ),
     ]
     result = match_collections(mine, theirs)
@@ -745,6 +813,147 @@ def test_a_candidate_that_cannot_be_fingerprinted_still_reaches_the_tag_tier(
     # not be compared, which is this one. A track nothing was measured against
     # must never claim the audio disagreed.
     assert result.rejected == []
+
+
+def test_a_fingerprint_from_another_algorithm_is_recomputed(
+    make_track, fake_fingerprint, monkeypatch
+):
+    values = fake_fingerprint(22, 200)
+    monkeypatch.setattr("matching.compute_fingerprint", lambda path: values)
+
+    mine = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=1_000_000,
+            fingerprint=pack_fingerprint(fake_fingerprint(23, 200)),
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=17,
+        ),
+    ]
+    theirs = [
+        make_track(
+            format="FLAC",
+            duration=200,
+            file_size=4_000_000,
+            fingerprint=pack_fingerprint(values),
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
+    ]
+    result = match_collections(mine, theirs)
+
+    assert len(result.upgrade_available) == 1
+    assert mine[0].fingerprint == pack_fingerprint(values)
+
+
+def test_a_fingerprint_from_another_length_is_recomputed(
+    make_track, fake_fingerprint, monkeypatch
+):
+    values = fake_fingerprint(24, 200)
+    monkeypatch.setattr("matching.compute_fingerprint", lambda path: values)
+
+    mine = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=1_000_000,
+            fingerprint=pack_fingerprint(fake_fingerprint(25, 200)),
+            fingerprint_length=FPCALC_LENGTH_SECONDS + 1,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
+    ]
+    theirs = [
+        make_track(
+            format="FLAC",
+            duration=200,
+            file_size=4_000_000,
+            fingerprint=pack_fingerprint(values),
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
+    ]
+    result = match_collections(mine, theirs)
+
+    assert len(result.upgrade_available) == 1
+    assert mine[0].fingerprint == pack_fingerprint(values)
+
+
+def test_a_fingerprint_from_the_current_producer_is_reused(
+    make_track, fake_fingerprint, monkeypatch
+):
+    values = fake_fingerprint(26, 200)
+    monkeypatch.setattr("matching.compute_fingerprint", lambda path: values)
+
+    mine = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=1_000_000,
+            fingerprint=pack_fingerprint(values),
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
+    ]
+    theirs = [
+        make_track(
+            format="FLAC",
+            duration=200,
+            file_size=4_000_000,
+            fingerprint=pack_fingerprint(values),
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
+    ]
+    events = []
+    match_collections(mine, theirs, on_progress=events.append)
+
+    assert events[-1].fingerprinted_count == 0
+
+
+def test_a_recomputed_fingerprint_overwrites_the_stale_one(
+    make_track, fake_fingerprint, monkeypatch
+):
+    # The producer is the point of this test, not the bytes. New bytes stored
+    # without their producer are judged stale by the next diff, which
+    # recomputes and stores them producer-less again — every fingerprint
+    # decoded on every diff, for good, while the bytes look perfect.
+    #
+    # It starts from bytes with no producer at all, which is what every row
+    # written before these columns existed looks like. That is also the only
+    # starting point that tests both assignments: a stale row already
+    # carrying the current algorithm passes an algorithm assertion whether or
+    # not the recompute wrote it, because a value that was already right
+    # cannot prove it was set.
+    values = fake_fingerprint(27, 200)
+    monkeypatch.setattr("matching.compute_fingerprint", lambda path: values)
+
+    mine = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=1_000_000,
+            fingerprint=pack_fingerprint(fake_fingerprint(28, 200)),
+            fingerprint_length=None,
+            fingerprint_algorithm=None,
+        ),
+    ]
+    theirs = [
+        make_track(
+            format="FLAC",
+            duration=200,
+            file_size=4_000_000,
+            fingerprint=pack_fingerprint(values),
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
+    ]
+    result = match_collections(mine, theirs)
+
+    assert len(result.upgrade_available) == 1
+    assert mine[0].fingerprint == pack_fingerprint(values)
+    assert mine[0].fingerprint_length == FPCALC_LENGTH_SECONDS
+    assert mine[0].fingerprint_algorithm == FPCALC_ALGORITHM
 
 
 def test_their_duration_none_is_missing(make_track):

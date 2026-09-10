@@ -6,7 +6,7 @@ import mutagen
 from sqlmodel import select
 
 import scanner
-from fingerprinting import pack_fingerprint
+from fingerprinting import FPCALC_ALGORITHM, FPCALC_LENGTH_SECONDS, pack_fingerprint
 from importing import SUPERSEDED_DIR_NAME
 from models import Collection, Track
 from scanner import read_track, scan_folder, track_number_from_tag, year_from_date
@@ -546,6 +546,8 @@ def test_a_changed_file_clears_the_fingerprint(
         )
     ).one()
     track.fingerprint = pack_fingerprint([1, 2, 3])
+    track.fingerprint_length = FPCALC_LENGTH_SECONDS
+    track.fingerprint_algorithm = FPCALC_ALGORITHM
     session.add(track)
     session.commit()
 
@@ -567,3 +569,5 @@ def test_a_changed_file_clears_the_fingerprint(
     track = session.exec(select(Track)).one()
     assert track.title == "Retagged Title"
     assert track.fingerprint is None
+    assert track.fingerprint_length is None
+    assert track.fingerprint_algorithm is None

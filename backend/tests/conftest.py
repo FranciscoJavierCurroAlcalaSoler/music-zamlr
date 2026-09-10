@@ -91,6 +91,8 @@ def make_track():
             file_size=5_000_000,
             file_hash=None,
             fingerprint=None,
+            fingerprint_length=None,
+            fingerprint_algorithm=None,
             collection_id=1,
         )
         unknown = set(overrides) - set(defaults)

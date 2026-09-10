@@ -286,6 +286,23 @@ def test_the_length_is_passed_to_fpcalc(stub_fpcalc):
     assert record.params[length_index + 1] == str(fingerprinting.FPCALC_LENGTH_SECONDS)
 
 
+def test_the_algorithm_is_passed_to_fpcalc(stub_fpcalc):
+    record = stub_fpcalc(stdout=f"{SAMPLE_FINGERPRINT_LINE}\n")
+
+    compute_fingerprint("doesntmatter.wav")
+
+    # Dropping -algorithm changes nothing today, because 2 is fpcalc 1.6.1's
+    # own default — which is exactly why it needs a test of its own. The row
+    # records FPCALC_ALGORITHM beside the bytes, so if fpcalc was never told
+    # to use it, a future default would write values the stored producer
+    # describes wrongly. A producer fpcalc never obeyed is worse than no
+    # record, because the matcher trusts it.
+    assert record.params is not None
+    assert "-algorithm" in record.params
+    algorithm_index = record.params.index("-algorithm")
+    assert record.params[algorithm_index + 1] == str(fingerprinting.FPCALC_ALGORITHM)
+
+
 def test_the_run_is_given_a_timeout(stub_fpcalc):
     # Nothing else notices a missing timeout, because a stub always returns
     # at once. fpcalc on a sleeping or disconnected drive waits forever, and

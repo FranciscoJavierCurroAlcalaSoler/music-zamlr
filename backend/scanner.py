@@ -214,6 +214,8 @@ def scan_folder(
                             updated_count += 1
                             existing_by_path[file_key].file_hash = None
                             existing_by_path[file_key].fingerprint = None
+                            existing_by_path[file_key].fingerprint_length = None
+                            existing_by_path[file_key].fingerprint_algorithm = None
                     else:
                         unreadable_files.append(file_key)
                 else:

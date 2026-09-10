@@ -10,7 +10,7 @@ from sqlmodel import select
 
 import main
 from enums import ActionType, ImportPhase
-from fingerprinting import pack_fingerprint
+from fingerprinting import FPCALC_ALGORITHM, FPCALC_LENGTH_SECONDS, pack_fingerprint
 from importing import ExecuteProgress, PlannedOperation
 from matching import DiffProgress, MatchResult
 from models import Collection, Track
@@ -1085,6 +1085,8 @@ def test_the_diff_endpoint_reports_a_rejection(
             file_path=str(tmp_path / "mine" / "near.mp3"),
             file_name="near.mp3",
             fingerprint=pack_fingerprint([0b11111] * 200),
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         )
     )
     session.add(
@@ -1096,6 +1098,8 @@ def test_the_diff_endpoint_reports_a_rejection(
             file_path=str(tmp_path / "theirs" / "quiet.flac"),
             file_name="quiet.flac",
             fingerprint=pack_fingerprint([0] * 200),
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
         )
     )
     session.commit()

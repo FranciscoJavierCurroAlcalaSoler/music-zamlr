@@ -42,6 +42,8 @@ from dataclasses import dataclass, field
 
 from enums import Bucket
 from fingerprinting import (
+    FPCALC_ALGORITHM,
+    FPCALC_LENGTH_SECONDS,
     SAME_RECORDING_MAX_ERROR_RATE,
     compare_fingerprints,
     compute_fingerprint,
@@ -299,9 +301,11 @@ def _fingerprint_values(
     """Return one track's fingerprint as integers, computing it if needed.
 
     Three sources, cheapest first: the local cache, the stored bytes, then
-    fpcalc. A computed fingerprint is packed back onto the track the way the
-    hash tier assigns file_hash, and the calling endpoint commits it — so a
-    file is decoded once ever, not once per diff.
+    fpcalc. Stored bytes are trusted only when the producer recorded beside
+    them — fpcalc's -length and -algorithm — equals the one in use now. A
+    computed fingerprint is packed back onto the track the way the hash tier
+    assigns file_hash, and the calling endpoint commits it, so a file is
+    decoded once ever, not once per diff.
 
     None means fpcalc could not read the file, and it is cached like any
     other answer. Without that entry the column stays empty, the next
@@ -314,13 +318,29 @@ def _fingerprint_values(
     """
     if id(track) in fingerprint_run.cache:
         return fingerprint_run.cache[id(track)]
-    if track.fingerprint is not None:
+    # A fingerprint from another producer is a cache miss with a reason, not
+    # an error. Its bytes are well-formed; they answer a different question,
+    # and comparing them against a fresh fingerprint would give a rate that
+    # means nothing. So it falls to the branch below exactly as an empty
+    # column does — and so does a row with bytes but no producer at all.
+    if (
+        track.fingerprint is not None
+        and track.fingerprint_length == FPCALC_LENGTH_SECONDS
+        and track.fingerprint_algorithm == FPCALC_ALGORITHM
+    ):
         fingerprint = unpack_fingerprint(track.fingerprint)
     else:
         fingerprint = compute_fingerprint(track.file_path)
         fingerprint_run.computed_count += 1
         if fingerprint is not None:
             track.fingerprint = pack_fingerprint(fingerprint)
+            # Both, every time, together with the bytes. New bytes stored
+            # without their producer fail the check above on the next diff,
+            # which recomputes and stores them producer-less again: every
+            # fingerprint decoded on every diff, for good, while any test that
+            # reads only the bytes stays green.
+            track.fingerprint_length = FPCALC_LENGTH_SECONDS
+            track.fingerprint_algorithm = FPCALC_ALGORITHM
     fingerprint_run.cache[id(track)] = fingerprint
     return fingerprint
 

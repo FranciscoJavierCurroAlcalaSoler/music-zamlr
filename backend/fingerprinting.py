@@ -65,6 +65,19 @@ SAME_RECORDING_MAX_ERROR_RATE = 0.15
 FPCALC_LENGTH_SECONDS = 120
 FPCALC_TIMEOUT_SECONDS = 60
 
+# Passed to fpcalc explicitly, never inherited, for the reason -length is: a
+# fingerprint is stored and compared later against one another run produced,
+# and two algorithms give values that cannot be compared at all. 2 is fpcalc
+# 1.6.1's own default — omitting the flag and passing it give byte-identical
+# output — so this changes nothing today. It stops a future default from
+# moving under the values already in the database.
+#
+# Recorded on the row beside the length, and those two are the whole
+# producer. The fpcalc version is deliberately not recorded: a patch release
+# does not change what a fingerprint means, and recording it would invalidate
+# the entire column every time the binary was updated, for nothing.
+FPCALC_ALGORITHM = 2
+
 
 def _error_rate_at_offset(a: list[int], b: list[int], offset: int) -> float | None:
     """Score one alignment of the two fingerprints, or refuse to score it.
@@ -148,7 +161,15 @@ def compute_fingerprint(file_path: str) -> list[int] | None:
 
     try:
         result = subprocess.run(
-            [fpcalc_path, "-raw", "-length", str(FPCALC_LENGTH_SECONDS), file_path],
+            [
+                fpcalc_path,
+                "-raw",
+                "-length",
+                str(FPCALC_LENGTH_SECONDS),
+                "-algorithm",
+                str(FPCALC_ALGORITHM),
+                file_path,
+            ],
             capture_output=True,
             text=True,
             encoding="utf-8",

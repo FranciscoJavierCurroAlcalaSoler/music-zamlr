@@ -29,6 +29,14 @@ class Track(SQLModel, table=True):
     duration: int
     file_size: int
     file_hash: str | None = None
+    # Three columns that move together or not at all. The two producer
+    # columns record which fpcalc settings made the bytes, and the matcher
+    # trusts stored bytes only when both equal the settings in use now. Bytes
+    # with no producer — every row written before these columns existed —
+    # therefore read as stale and refill on the next diff, which is the
+    # intended migration rather than an oversight.
     fingerprint: bytes | None = None
+    fingerprint_algorithm: int | None = None
+    fingerprint_length: int | None = None
     collection_id: int = Field(foreign_key="collection.id")
     collection: Collection = Relationship(back_populates="tracks")
