@@ -523,8 +523,8 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
                 <Alert severity="warning" sx={{ mt: 1 }}>
                   fpcalc was not found, so this comparison did not check the
                   audio. Tracks were matched by their tags only, and an upgrade
-                  can be a different recording of the song. Install fpcalc 1.6.1
-                  and compare again.
+                  can be a different recording of the song. The README says how
+                  to install fpcalc.
                 </Alert>
               )}
               <Tabs value={tab} onChange={(_, next) => setTab(next)}>

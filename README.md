@@ -17,11 +17,15 @@ drives directly with normal file operations. The React interface talks to it at
 
 - Backend: FastAPI, SQLModel, SQLite
 - Frontend: React, TypeScript, MUI, Vite
+- Acoustic fingerprints: `fpcalc` from Chromaprint
 
 ## Requirements
 
 - Python 3.14
 - Node.js 24
+- `fpcalc`, the command-line program of Chromaprint. The tool uses it to
+  compare the sound of two files. Without it, the tool compares tags only and
+  shows a warning.
 - Both collections must be folders on the computer that runs the backend. An
   external USB drive is enough.
 
@@ -43,6 +47,27 @@ pip install -r requirements.txt
 cd frontend
 npm install
 ```
+
+4. Install `fpcalc` with the package manager of your system:
+
+```
+winget install --id AcoustID.Chromaprint --exact    # Windows
+brew install chromaprint                            # macOS
+sudo apt install libchromaprint-tools               # Debian and Ubuntu
+```
+
+On Windows, do not use the Chocolatey package. It installs version 1.1, which
+is more than ten years old. The automated tests use the version that
+`FPCALC_VERSION` names in `.github/workflows/ci.yml`.
+
+5. Open a new terminal. Then make sure that this command shows a version:
+
+```
+fpcalc -version
+```
+
+A terminal that was open before the installation does not find `fpcalc`. For
+the same reason, start the backend in a new terminal.
 
 ## Run
 
@@ -69,7 +94,8 @@ Then open `http://localhost:5173` in a browser. The backend answers on port
    scanner reads every audio file and stores the tags and the technical data.
 2. Add the second collection in the same way.
 3. Select both collections and start a comparison. The first comparison is the
-   slow one, because it reads whole files to compare them.
+   slow one, because it reads files to compare them. The tool stores hashes and
+   fingerprints in its database, so later comparisons are faster.
 4. Examine the result table. Each track belongs to one group: missing, upgrade
    available, already have, needs review, or only in yours.
 5. Select the tracks to import. Select a destination folder, a folder
@@ -83,21 +109,45 @@ collection takes minutes.
 
 ## How the tool decides that two tracks are the same
 
-Two rules do the work.
+Three rules do the work. They run in this order, and each rule gets only the
+tracks that the rules before it did not resolve.
 
 **Identical file size, then identical hash.** This finds exact duplicates. It
 works even when a file has no tags at all. It cannot find a better copy,
 because a different encoding almost always has a different file size.
 
-**Artist, title, and duration.** This is the only rule that finds a better
-copy, so it runs on the tracks the first rule did not resolve. Artist and
-title are compared without case or extra spaces. The durations must be within
-2 seconds of each other.
+**The sound of the first two minutes.** The tool reads the first two minutes of
+each file with `fpcalc` and makes an acoustic fingerprint. It compares two
+fingerprints only when the durations of the two tracks are within 2 seconds of
+each other. This rule finds a better copy even when the tags are wrong or
+blank.
 
-The second rule has two consequences that appear in the result table:
+- If the sound differs, the tags cannot overrule it. The track goes to
+  **missing**, and the table shows `Missing · audio differs`. The columns
+  `Your format` and `Your bitrate` then show the format and bitrate of the file
+  that the tool compared.
+- If `fpcalc` cannot read a file, or if a file is shorter than about 12
+  seconds, this rule gives no answer. The next rule then decides.
+- If two of your files have the same sound, the track goes to **needs review**,
+  and you decide.
+- A remaster can count as a different recording. A remaster can change the
+  speed or the balance of the sound, and the fingerprint then changes too. The
+  tool then offers the remaster as missing. That is the safe direction: the
+  result is an extra copy, not a deleted file.
 
-- A track with a blank artist or a blank title is never matched by the second
-  rule.
+The tool stores each fingerprint, so `fpcalc` reads a file only one time. If
+`fpcalc` is not installed, the tool skips this rule, and a warning appears
+above the result table. Without the sound, an upgrade can then be a different
+recording of the song.
+
+**Artist, title, and duration.** This rule finds a better copy when the second
+rule cannot decide. Artist and title are compared without case or extra
+spaces. The durations must be within 2 seconds of each other.
+
+The third rule has two consequences that appear in the result table:
+
+- A track with a blank artist or a blank title is never matched by the third
+  rule. The second rule can still match it.
 - If two or more of your tracks fall within the 2-second window, the tool does
   not choose one. The track goes to **needs review**, and you decide. An
   obvious duplicate therefore waits for you. The tool never makes an uncertain
@@ -108,6 +158,11 @@ The second rule has two consequences that appear in the result table:
 **File size comes before tags.** A human compares artist and title first. The
 tool does not, because size grouping costs one lookup in memory and works on
 untagged files. Hashes are computed only for files that already share a size.
+
+**The sound is compared on your computer.** The tool does not send
+fingerprints to an online service such as AcoustID. It works without a network
+connection and needs no account. Your files and their fingerprints stay on your
+computer.
 
 **The server computes the comparison again at import time.** The request names
 the tracks to import, not what they are. A bug in the table can therefore
@@ -130,9 +185,16 @@ warns and lets you continue, because you can clear space before you confirm.
 ## Status
 
 The scan, the comparison, and the import all work, and the browser shows live
-progress for each. Acoustic fingerprints are the next piece of work. They will
-identify the same recording across different encodings, which the current
-rules can miss.
+progress for each. The comparison uses file hashes, acoustic fingerprints, and
+tags.
+
+**Known limit.** Between two lossless files, the file with the higher bitrate
+counts as the better copy. A louder master compresses less, so it can appear
+as an upgrade. With the delete action, it then replaces your file.
+
+Two changes come next: a setting for the quality order, and saved catalogs of
+offline drives. After that, a desktop package will include `fpcalc`, and you
+will not install it yourself.
 
 ## License
 
