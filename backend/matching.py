@@ -8,7 +8,9 @@ pre-filter, before looking at any tags. Two files with different byte counts
 can never be byte-identical, so this cheaply narrows the field to real
 duplicate candidates without touching the disk. Only same-size candidates get
 hashed (SHA-256). It cannot find a quality upgrade at all: a different
-encoding of one recording almost always has a different size.
+encoding of one recording almost always has a different size. A file that
+the filesystem refuses has no hash. Its track goes to the tiers below, so one
+unreadable file cannot end a diff.
 
 **Fingerprint.** Chromaprint values, pre-filtered by duration within the same
 +/-2 seconds the fuzzy tier uses. This is the tier that reads the audio
@@ -576,6 +578,12 @@ def match_collections(
     # all. Object identity is the only key that's always available and
     # always unique here.
     consumed: set[int] = set()
+    # Tracks whose file the hash tier could not read in this diff, by id()
+    # for the reason above. file_hash = None means both "not tried" and
+    # "could not read", and this set keeps the two apart. Without it, one
+    # unreadable file of mine is opened again for every track of theirs with
+    # its size.
+    hash_failures: set[int] = set()
     # Unpacked fingerprints, for the length of this diff only. The database
     # column already stops fpcalc running twice across runs, but it holds
     # bytes and the comparison needs integers, so without this the same 3792
@@ -601,6 +609,30 @@ def match_collections(
                     current_path=current_path,
                 )
             )
+
+    def hash_or_none(track: Track) -> str | None:
+        """Return a track's hash, and read its file at most once per diff.
+
+        One helper for both sides, because the track of theirs and each
+        candidate of mine need the same rules, and two copies can become
+        different.
+
+        hashed_count increases only when a file was read. A stored hash costs
+        nothing, and a failed read reads nothing. A count that increased for
+        either would show a busy diff that reads no bytes.
+        """
+        nonlocal hashed_count
+        if track.file_hash is not None:
+            return track.file_hash
+        if id(track) in hash_failures:
+            return None
+        result = compute_file_hash(track.file_path)
+        if result is None:
+            hash_failures.add(id(track))
+            return None
+        track.file_hash = result
+        hashed_count += 1
+        return result
 
     # Two indexes over the same pass. Size feeds the hash tier, duration
     # feeds the fingerprint tier, and neither can do the other's job: two
@@ -629,28 +661,27 @@ def match_collections(
             # Hash lazily, and only now that a same-size candidate exists.
             # Hashing every track at scan time would read every byte of
             # both collections for nothing.
-            if theirs_track.file_hash is None:
-                theirs_track.file_hash = compute_file_hash(theirs_track.file_path)
-                hashed_count += 1
-            for mine_track in candidates:
-                if id(mine_track) in consumed:
-                    continue
-                if mine_track.file_hash is None:
-                    mine_track.file_hash = compute_file_hash(mine_track.file_path)
-                    # Inside the guard, so this counts files actually read and
-                    # not candidates examined. A cached hash costs nothing, and
-                    # a counter that climbed for it would say the diff is busy
-                    # while it reads no bytes at all.
-                    hashed_count += 1
-                if theirs_track.file_hash == mine_track.file_hash:
-                    hash_match = True
-                    result.already_have.append(
-                        Match(mine=mine_track, theirs=theirs_track)
-                    )
-                    consumed.add(id(mine_track))
-                    # First byte-identical copy wins; the rest of the
-                    # same-size candidates can't be a better answer.
-                    break
+            hash_result = hash_or_none(theirs_track)
+            # The only guard against None == None. Without it, two unreadable
+            # files of one size compare equal, and the diff calls them
+            # byte-identical. The candidates need no guard of their own: here
+            # theirs has a hash, so a candidate without one compares unequal.
+            # The skip also saves the reads of candidates for a comparison
+            # that cannot succeed.
+            if hash_result is not None:
+                for mine_track in candidates:
+                    if id(mine_track) in consumed:
+                        continue
+                    hash_or_none(mine_track)
+                    if theirs_track.file_hash == mine_track.file_hash:
+                        hash_match = True
+                        result.already_have.append(
+                            Match(mine=mine_track, theirs=theirs_track)
+                        )
+                        consumed.add(id(mine_track))
+                        # First byte-identical copy wins; the rest of the
+                        # same-size candidates can't be a better answer.
+                        break
             # Same size but different content, so this pairing is still
             # open. Fall through to the tiers below rather than calling it
             # missing outright. This is the path a mistagged upgrade takes

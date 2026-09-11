@@ -1347,6 +1347,190 @@ def test_same_size_different_content_no_hash_match(make_track, fixtures_dir):
     )
 
 
+# Answers by path, with None for a file the filesystem refuses. Square
+# brackets, not .get: a read of a path that a test did not list raises
+# KeyError, so an unexpected read fails the test.
+#
+# The tests below pass fingerprints_available=False. They concern the hash
+# tier only, and fpcalc on these fake paths adds time and a warning per call.
+def fake_compute_file_hash(path: str) -> str | None:
+    answers = {
+        "/fake/path.mp3": "hash_123456789",
+        "/fake/another_path.mp3": "hash_987654321",
+        "/fake/none.mp3": None,
+        "/fake/none.flac": None,
+        "/fake/ninguno.mp3": None,
+    }
+    return answers[path]
+
+
+def test_an_unreadable_file_of_theirs_reaches_the_tag_tier(monkeypatch, make_track):
+    monkeypatch.setattr("matching.compute_file_hash", fake_compute_file_hash)
+    mine = [
+        make_track(
+            format="MP3",
+            file_path="/fake/path.mp3",
+            file_name="one.mp3",
+            file_size=1_000_000,
+        )
+    ]
+    theirs = [
+        make_track(
+            format="FLAC",
+            file_path="/fake/none.flac",
+            file_name="none.flac",
+            file_size=1_000_000,
+        )
+    ]
+    result = match_collections(mine, theirs, fingerprints_available=False)
+
+    # An upgrade, not only "no exception". Only the tag tier can pair these
+    # two, so a matcher that sends the track to missing fails here.
+    assert len(result.upgrade_available) == 1
+    assert result.upgrade_available[0].theirs is theirs[0]
+
+
+def test_two_unreadable_files_of_one_size_are_not_identical(monkeypatch, make_track):
+    monkeypatch.setattr("matching.compute_file_hash", fake_compute_file_hash)
+
+    # Different titles, so the tag tier cannot pair the two. With equal tags
+    # it puts them in already_have too, and the test cannot see the bug.
+    mine = [
+        make_track(
+            file_path="/fake/none.mp3",
+            file_size=1_000_000,
+            title="A Title",
+            artist="An Artist",
+        )
+    ]
+    theirs = [
+        make_track(
+            file_path="/fake/ninguno.mp3",
+            file_size=1_000_000,
+            title="Another Title",
+            artist="Another Artist",
+        )
+    ]
+    result = match_collections(mine, theirs, fingerprints_available=False)
+
+    assert len(result.already_have) == 0
+    assert len(result.missing) == 1
+    assert len(result.only_in_mine) == 1
+    assert result.missing[0] is theirs[0]
+    assert result.only_in_mine[0] is mine[0]
+
+
+def test_an_unreadable_file_of_mine_is_opened_once_per_diff(monkeypatch, make_track):
+    calls = []
+
+    def fake_compute_file_hash_with_append(path: str) -> str | None:
+        answers = {
+            "/fake/path.mp3": "hash_123456789",
+            "/fake/another_path.mp3": "hash_987654321",
+            "/fake/none.mp3": None,
+            "/fake/none.flac": None,
+        }
+        calls.append(path)
+        return answers[path]
+
+    monkeypatch.setattr(
+        "matching.compute_file_hash", fake_compute_file_hash_with_append
+    )
+    # Titles different from mine. With equal tags, the tag tier pairs the
+    # first track of theirs with mine and consumes it. The loop then skips
+    # mine for the second track, and the test passes without hash_failures.
+    mine = [
+        make_track(
+            file_path="/fake/none.mp3",
+            file_size=1_000_000,
+            title="A Title",
+            artist="An Artist",
+        )
+    ]
+    theirs = [
+        make_track(
+            file_path="/fake/path.mp3",
+            file_size=1_000_000,
+            title="Another Title",
+            artist="Another Artist",
+        ),
+        make_track(
+            file_path="/fake/another_path.mp3",
+            file_size=1_000_000,
+            title="Yet Another Title",
+            artist="Yet Another Artist",
+        ),
+    ]
+
+    match_collections(mine, theirs, fingerprints_available=False)
+
+    # == 1, never <= 1. A stub patched on the wrong name gets no paths, and
+    # <= 1 passes with zero calls.
+    assert calls.count(mine[0].file_path) == 1
+
+
+def test_a_failed_hash_is_not_counted_as_read(monkeypatch, make_track):
+    monkeypatch.setattr("matching.compute_file_hash", fake_compute_file_hash)
+    mine = [
+        make_track(
+            file_path="/fake/none.mp3",
+            file_size=1_000_000,
+            title="A Title",
+            artist="An Artist",
+        )
+    ]
+    theirs = [
+        make_track(
+            file_path="/fake/path.mp3",
+            file_size=1_000_000,
+            title="Another Title",
+            artist="Another Artist",
+        )
+    ]
+
+    events = []
+    match_collections(
+        mine, theirs, on_progress=events.append, fingerprints_available=False
+    )
+
+    # One file was read, the file of theirs. A count that increased before
+    # the None result was known gives 2.
+    assert events[-1].hashed_count == 1
+
+
+def test_a_stored_hash_of_theirs_still_pairs_by_hash(monkeypatch, make_track):
+    monkeypatch.setattr("matching.compute_file_hash", fake_compute_file_hash)
+    # Paths that the stub does not list, so any read raises KeyError: a stored
+    # hash must cause no read. Different titles, so only the hash tier can
+    # pair the two. With equal tags, the tag tier also puts them in
+    # already_have, and the test passes when the hash tier skips them.
+    mine = [
+        make_track(
+            file_path="/fake/stored_mine.mp3",
+            file_size=1_000_000,
+            file_hash="hash_stored",
+            title="A Title",
+            artist="An Artist",
+        )
+    ]
+    theirs = [
+        make_track(
+            file_path="/fake/stored_theirs.mp3",
+            file_size=1_000_000,
+            file_hash="hash_stored",
+            title="Another Title",
+            artist="Another Artist",
+        )
+    ]
+    result = match_collections(mine, theirs, fingerprints_available=False)
+
+    # Every diff after the first sees stored hashes, because the endpoint
+    # commits them. So this is the ordinary case, not an edge case.
+    assert len(result.already_have) == 1
+    assert result.already_have[0].mine is mine[0]
+    assert result.already_have[0].theirs is theirs[0]
+
+
 def test_match_progress_names_each_track_before_counting_it(progress_tracks):
     mine, theirs = progress_tracks
 
