@@ -1531,6 +1531,114 @@ def test_a_stored_hash_of_theirs_still_pairs_by_hash(monkeypatch, make_track):
     assert result.already_have[0].theirs is theirs[0]
 
 
+def test_a_file_that_cannot_be_hashed_is_listed(make_track, monkeypatch):
+    monkeypatch.setattr("matching.compute_file_hash", fake_compute_file_hash)
+    mine = [
+        make_track(
+            file_path="/fake/path.mp3",
+            file_size=1_000_000,
+            title="A Title",
+            artist="An Artist",
+        )
+    ]
+    theirs = [
+        make_track(
+            file_path="/fake/none.mp3",
+            file_size=1_000_000,
+            title="Another Title",
+            artist="Another Artist",
+        )
+    ]
+    result = match_collections(mine, theirs, fingerprints_available=False)
+
+    assert result.unreadable_files == [theirs[0].file_path]
+
+
+def test_a_file_that_cannot_be_fingerprinted_is_listed(
+    make_track, monkeypatch, fake_fingerprint
+):
+    def fake_compute_fingerprint(path):
+        return fake_fingerprint(1) if path == "/fake/theirs.mp3" else None
+
+    monkeypatch.setattr("matching.compute_fingerprint", fake_compute_fingerprint)
+    mine = [
+        make_track(
+            file_path="/fake/mine.mp3",
+            file_size=1_000_000,
+            duration=200,
+            title="A Title",
+            artist="An Artist",
+        )
+    ]
+    theirs = [
+        make_track(
+            file_path="/fake/theirs.mp3",
+            file_size=2_000_000,
+            duration=200,
+            title="Another Title",
+            artist="Another Artist",
+        )
+    ]
+    result = match_collections(mine, theirs)
+
+    assert result.unreadable_files == [mine[0].file_path]
+
+
+def test_a_file_that_fails_both_tiers_is_listed_once(
+    make_track, monkeypatch, fake_fingerprint
+):
+    def fake_compute_fingerprint(path):
+        return fake_fingerprint(1) if path == "/fake/path.mp3" else None
+
+    monkeypatch.setattr("matching.compute_fingerprint", fake_compute_fingerprint)
+    monkeypatch.setattr("matching.compute_file_hash", fake_compute_file_hash)
+    mine = [
+        make_track(
+            file_path="/fake/path.mp3",
+            file_size=1_000_000,
+            duration=200,
+            title="A Title",
+            artist="An Artist",
+        )
+    ]
+    theirs = [
+        make_track(
+            file_path="/fake/none.mp3",
+            file_size=1_000_000,
+            duration=200,
+            title="Another Title",
+            artist="Another Artist",
+        )
+    ]
+    result = match_collections(mine, theirs)
+
+    assert result.unreadable_files == [theirs[0].file_path]
+
+
+def test_a_file_that_was_never_read_is_not_listed(make_track):
+    mine = [
+        make_track(
+            file_path="/fake/path.mp3",
+            file_size=1_000_000,
+            duration=100,
+            title="A Title",
+            artist="An Artist",
+        )
+    ]
+    theirs = [
+        make_track(
+            file_path="/fake/none.mp3",
+            file_size=2_000_000,
+            duration=200,
+            title="Another Title",
+            artist="Another Artist",
+        )
+    ]
+    result = match_collections(mine, theirs)
+
+    assert result.unreadable_files == []
+
+
 def test_match_progress_names_each_track_before_counting_it(progress_tracks):
     mine, theirs = progress_tracks
 

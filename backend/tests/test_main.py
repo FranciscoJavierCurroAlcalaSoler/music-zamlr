@@ -1206,6 +1206,30 @@ def test_a_diff_without_fpcalc_says_so(
     assert stream.done["match_results"]["fingerprints_available"] is False
 
 
+def test_the_diff_lists_the_files_it_could_not_read(
+    collections, make_track, tmp_path, event_stream, session
+):
+    mine, theirs = collections
+
+    my_track = make_track(
+        file_path=str(tmp_path / "mine" / "song.mp3"),
+        collection_id=mine.id,
+        file_size=1_000_000,
+    )
+    their_track = make_track(
+        file_path=str(tmp_path / "theirs" / "song.mp3"),
+        collection_id=theirs.id,
+        file_size=1_000_000,
+    )
+    session.add(my_track)
+    session.add(their_track)
+    session.commit()
+
+    stream = event_stream(f"/api/diff?mine={mine.id}&theirs={theirs.id}", "GET")
+
+    assert stream.done["match_results"]["unreadable_files"] == [their_track.file_path]
+
+
 def test_scan_returns_collection_and_stats(event_stream, tmp_path, fixtures_dir):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 

@@ -83,6 +83,9 @@ class MatchResultRead(BaseModel):
     # audio as checked whenever the value failed to arrive, which is the
     # dangerous direction; without one, a missing value fails validation.
     fingerprints_available: bool
+    # No default either, for the same reason: [] would report every file as
+    # read whenever the value failed to arrive.
+    unreadable_files: list[str]
 
     model_config = ConfigDict(from_attributes=True)
 

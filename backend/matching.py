@@ -89,6 +89,11 @@ class MatchResult:
     needs_review: list[AmbiguousMatch] = field(default_factory=list)
     only_in_mine: list[Track] = field(default_factory=list)
     rejected: list[RejectedMatch] = field(default_factory=list)
+    # Paths of the files that a tier tried to read and could not. A track
+    # that no tier needed is not on it. Paths, not tracks, because a person
+    # needs the path to find the file. The same name as
+    # ScanResult.unreadable_files, because the meaning is the same.
+    unreadable_files: list[str] = field(default_factory=list)
     # How this result was made, not what it found. False means the audio was
     # never checked and every pairing here rests on tags alone, which the UI
     # warns about. The default exists only because a field without one cannot
@@ -713,6 +718,19 @@ def match_collections(
     for mine_track in tracks_mine:
         if id(mine_track) not in consumed:
             result.only_in_mine.append(mine_track)
+
+    # One pass at the end, because a fingerprint failure occurs in
+    # _fingerprint_values, which does not know the result. Theirs come first,
+    # so the list has the same order on every run, and a track that failed in
+    # both tiers appears once. Examine the cache key with "in" before the
+    # value: .get() also returns None for a track that no tier tried, and
+    # every track without a candidate then goes on the list.
+    for track in [*tracks_theirs, *tracks_mine]:
+        if id(track) in hash_failures or (
+            id(track) in fingerprint_run.cache
+            and fingerprint_run.cache[id(track)] is None
+        ):
+            result.unreadable_files.append(track.file_path)
 
     # Copied rather than aliased. fingerprint_run dies with this call today, so
     # sharing the list is harmless — but a result that can be mutated through
