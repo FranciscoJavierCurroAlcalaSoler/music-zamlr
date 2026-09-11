@@ -153,6 +153,21 @@ def _find_fpcalc() -> str | None:
     return shutil.which("fpcalc")
 
 
+def fpcalc_available() -> bool:
+    """Say whether fpcalc is on PATH, without running it.
+
+    Through _find_fpcalc rather than a second shutil.which, so the stub that
+    replaces the lookup in the tests governs this answer too. A second lookup
+    would ignore the stub, and a test would pass or fail by what the machine
+    has installed.
+
+    It finds the file and nothing more. An fpcalc that is present but broken
+    still answers True here, and compute_fingerprint then fails file by file,
+    as it always has.
+    """
+    return _find_fpcalc() is not None
+
+
 def compute_fingerprint(file_path: str) -> list[int] | None:
     fpcalc_path = _find_fpcalc()
     if fpcalc_path is None:

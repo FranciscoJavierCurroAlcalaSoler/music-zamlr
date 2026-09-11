@@ -79,6 +79,10 @@ class MatchResultRead(BaseModel):
     needs_review: list[AmbiguousMatchRead] = []
     only_in_mine: list[TrackRead] = []
     rejected: list[RejectedMatchRead] = []
+    # No default, unlike the lists above. A default of True would report the
+    # audio as checked whenever the value failed to arrive, which is the
+    # dangerous direction; without one, a missing value fails validation.
+    fingerprints_available: bool
 
     model_config = ConfigDict(from_attributes=True)
 

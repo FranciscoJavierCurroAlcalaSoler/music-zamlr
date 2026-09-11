@@ -17,6 +17,7 @@ from sqlmodel import Session, select
 
 from database import create_collection, create_db_and_tables, get_session
 from enums import ActionType, Bucket, ImportPhase, OperationStatus
+from fingerprinting import fpcalc_available
 from importing import (
     ExecuteProgress,
     OperationResult,
@@ -122,8 +123,15 @@ def _run_diff(
     tracks_theirs = session.exec(
         select(Track).where(Track.collection_id == theirs_collection.id)
     ).all()
+    # Asked here, once per diff, because this is the one place both callers
+    # share: the diff stream, and the import, which recomputes the diff on the
+    # server before it plans. Asked in the stream alone, the import would
+    # still try fpcalc for every track and log a warning for each.
     match_result = match_collections(
-        tracks_mine, tracks_theirs, on_progress=on_progress
+        tracks_mine,
+        tracks_theirs,
+        on_progress=on_progress,
+        fingerprints_available=fpcalc_available(),
     )
     session.commit()  # persist the hashes the matcher computed
     return match_result

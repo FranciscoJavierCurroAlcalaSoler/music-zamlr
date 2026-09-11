@@ -515,6 +515,18 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
                   Compare again for current results.
                 </Alert>
               )}
+              {/* The text names the risk, not only the fault. Without the
+                  audio, the upgrade bucket is the dangerous one: with the
+                  delete action, a different recording of the song replaces
+                  the user's file. */}
+              {diff.match_results.fingerprints_available === false && (
+                <Alert severity="warning" sx={{ mt: 1 }}>
+                  fpcalc was not found, so this comparison did not check the
+                  audio. Tracks were matched by their tags only, and an upgrade
+                  can be a different recording of the song. Install fpcalc 1.6.1
+                  and compare again.
+                </Alert>
+              )}
               <Tabs value={tab} onChange={(_, next) => setTab(next)}>
                 <Tab
                   label={`Import candidates (${formatCount(rows.length)})`}

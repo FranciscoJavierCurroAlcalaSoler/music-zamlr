@@ -600,6 +600,52 @@ def test_a_fingerprint_mismatch_beats_a_matching_tag(make_track, fake_fingerprin
     assert len(result.only_in_mine) == 1
 
 
+def test_without_fpcalc_the_tag_tier_decides(fake_fingerprint, make_track):
+    # The same two tracks as the test above, which the audio rejects. Only the
+    # flag differs, so the bucket says which tier answered: with the tier
+    # skipped, the tag tier pairs them. Equal fingerprints would make both
+    # tiers pair them, and the test would pass with the guard deleted.
+    #
+    # Stored bytes rather than a stub for compute_fingerprint. They let the
+    # tier decide without fpcalc at all, so a pairing here proves the tier was
+    # skipped, not that fpcalc failed.
+    #
+    # This pins a known weakness on purpose: without the audio, a remaster
+    # with the same tags is an upgrade. The warning in the UI is what makes
+    # that acceptable.
+    fingerprint1 = pack_fingerprint(fake_fingerprint(10, 200))
+    fingerprint2 = pack_fingerprint(fake_fingerprint(11, 200))
+    mine = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=1_000_000,
+            title="A Title",
+            artist="An Artist",
+            fingerprint=fingerprint1,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
+    ]
+    theirs = [
+        make_track(
+            format="FLAC",
+            duration=201,
+            file_size=4_000_000,
+            title="A Title",
+            artist="An Artist",
+            fingerprint=fingerprint2,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
+    ]
+    result = match_collections(mine, theirs, fingerprints_available=False)
+
+    assert len(result.upgrade_available) == 1
+    assert result.rejected == []
+    assert result.fingerprints_available is False
+
+
 def test_a_rejection_records_the_file_it_was_compared_against(
     make_track, fake_fingerprint
 ):

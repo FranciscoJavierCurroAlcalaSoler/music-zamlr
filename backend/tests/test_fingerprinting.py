@@ -23,6 +23,7 @@ from fingerprinting import (
     compare_fingerprints,
     compute_fingerprint,
     fingerprints_match,
+    fpcalc_available,
     pack_fingerprint,
     unpack_fingerprint,
 )
@@ -226,6 +227,20 @@ def test_a_missing_fpcalc_gives_none(stub_fpcalc):
     # Parseable output was waiting behind the lookup, so a None here could
     # have come from either guard. This says which one answered.
     assert record.params is None
+
+
+def test_fpcalc_is_available_when_the_lookup_finds_it(stub_fpcalc):
+    stub_fpcalc()
+
+    # "is True", not a bare assert: a function that handed back the path
+    # itself would pass a truthiness check.
+    assert fpcalc_available() is True
+
+
+def test_fpcalc_is_unavailable_when_the_lookup_finds_nothing(stub_fpcalc):
+    stub_fpcalc(found=False)
+
+    assert fpcalc_available() is False
 
 
 def test_a_failed_run_gives_none(stub_fpcalc):

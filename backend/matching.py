@@ -87,6 +87,11 @@ class MatchResult:
     needs_review: list[AmbiguousMatch] = field(default_factory=list)
     only_in_mine: list[Track] = field(default_factory=list)
     rejected: list[RejectedMatch] = field(default_factory=list)
+    # How this result was made, not what it found. False means the audio was
+    # never checked and every pairing here rests on tags alone, which the UI
+    # warns about. The default exists only because a field without one cannot
+    # follow these; match_collections always sets it.
+    fingerprints_available: bool = True
 
 
 @dataclass
@@ -119,6 +124,10 @@ class FingerprintRun:
     cache: dict[int, list[int] | None] = field(default_factory=dict)
     computed_count: int = 0
     rejections: list[RejectedMatch] = field(default_factory=list)
+    # False when the caller found no fpcalc. The tier then declines every
+    # track before doing any work, rather than asking fpcalc once per track
+    # and being told no each time.
+    available: bool = True
 
 
 DURATION_TOLERANCE_SECONDS = 2
@@ -378,6 +387,15 @@ def attempt_fingerprint_match(
     refused and some never compared, it holds the refused ones, so the caller
     can keep them from the tier below.
     """
+    # None, never MISSING. Without fpcalc the tag tier is the only evidence
+    # left, and MISSING would switch it off for every track with a candidate
+    # of the right length. And first, before the candidates are built, so
+    # nothing reaches _fingerprint_values and computed_count stays at 0.
+    # Without that, the progress line counts every failed attempt as a file
+    # read, and claims audio was checked while the result warns it was not.
+    if fingerprint_run.available is False:
+        return None
+
     if theirs_track.duration is None:
         return None
 
@@ -544,8 +562,13 @@ def match_collections(
     tracks_mine: list[Track],
     tracks_theirs: list[Track],
     on_progress: Callable[[DiffProgress], None] | None = None,
+    fingerprints_available: bool = True,
 ) -> MatchResult:
-    result = MatchResult()
+    # Told, never looked up here: the caller asks PATH once per diff. A matcher
+    # that looked for itself would pass or fail its tests according to what
+    # the machine has installed. The planner receives path_exists for the same
+    # reason.
+    result = MatchResult(fingerprints_available=fingerprints_available)
     # Tracks of mine already paired with something, held by id() rather
     # than by their database id. Two reasons: an unsaved track has an id of
     # None, so several would collide on the same key, and this module is
@@ -560,7 +583,7 @@ def match_collections(
     # against. It also holds None, which the column cannot: an empty column
     # means both "no fingerprint" and "not tried yet", and only this tells
     # the two apart within a run.
-    fingerprint_run = FingerprintRun()
+    fingerprint_run = FingerprintRun(available=fingerprints_available)
     hashed_count = 0
     theirs_processed_count = 0
 

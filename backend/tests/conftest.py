@@ -37,6 +37,19 @@ def no_production_engine(monkeypatch):
         monkeypatch.setattr(module, "engine", poisoned, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def fpcalc_is_installed(monkeypatch):
+    # Every diff through the endpoint asks PATH for fpcalc. Without this, the
+    # tests that need the fingerprint tier fail on any machine that lacks it,
+    # while CI, which installs fpcalc, stays green. Autouse, so a new diff test
+    # cannot forget it. A test about the missing case patches it to False; its
+    # own patch runs later and wins.
+    #
+    # main's name, not fingerprinting's. main.py imported fpcalc_available into
+    # its own namespace, so patching the original leaves that reference alone.
+    monkeypatch.setattr("main.fpcalc_available", lambda: True)
+
+
 @pytest.fixture
 def engine():
     # TestClient dispatches sync endpoints to a worker thread, so the

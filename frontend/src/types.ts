@@ -78,6 +78,7 @@ export interface MatchResult {
   needs_review: AmbiguousMatch[];
   only_in_mine: Track[];
   rejected: RejectedMatch[];
+  fingerprints_available: boolean;
 }
 
 export interface DiffProgress {

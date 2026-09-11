@@ -1116,6 +1116,10 @@ def test_the_diff_endpoint_reports_a_rejection(
     # And it is still a missing track, so every existing consumer of that
     # bucket keeps working unchanged.
     assert [t["file_name"] for t in results["missing"]] == ["quiet.flac"]
+    # The other half of test_a_diff_without_fpcalc_says_so. That test catches
+    # a flag stuck at True; this one catches a flag stuck at False, which
+    # would show the warning on every diff.
+    assert results["fingerprints_available"] is True
 
 
 def test_the_diff_endpoint_stores_the_fingerprints_it_computed(
@@ -1179,6 +1183,27 @@ def test_the_diff_endpoint_stores_the_fingerprints_it_computed(
     rows = session.exec(select(Track)).all()
     for row in rows:
         assert row.fingerprint is not None
+
+
+def test_a_diff_without_fpcalc_says_so(
+    event_stream, session, tmp_path, make_track, collections, monkeypatch
+):
+    # Overrides the autouse fpcalc_is_installed, because this patch runs later.
+    monkeypatch.setattr("main.fpcalc_available", lambda: False)
+    mine, theirs = collections
+
+    their_track = make_track(
+        file_path=str(tmp_path / "theirs" / "song.mp3"),
+        collection_id=theirs.id,
+        file_size=1_000_000,
+        title="Only Theirs",
+    )
+    session.add(their_track)
+    session.commit()
+
+    stream = event_stream(f"/api/diff?mine={mine.id}&theirs={theirs.id}", "GET")
+
+    assert stream.done["match_results"]["fingerprints_available"] is False
 
 
 def test_scan_returns_collection_and_stats(event_stream, tmp_path, fixtures_dir):
@@ -1757,7 +1782,9 @@ def test_diff_stream_reports_progress_frames(event_stream, monkeypatch, collecti
     monkeypatch.setattr(main, "PROGRESS_INTERVAL_SECONDS", 0.001)
     mine, theirs = collections
 
-    def slow_match(tracks_mine, tracks_theirs, on_progress=None):
+    def slow_match(
+        tracks_mine, tracks_theirs, on_progress=None, fingerprints_available=True
+    ):
         on_progress(
             # One of three, not three of three: a fake that claims to be
             # finished while it is still running is a small lie for the next
@@ -1792,7 +1819,9 @@ def test_diff_stream_reports_a_failure_as_an_error_frame(
 ):
     mine, theirs = collections
 
-    def exploding_match(tracks_mine, tracks_theirs, on_progress=None):
+    def exploding_match(
+        tracks_mine, tracks_theirs, on_progress=None, fingerprints_available=True
+    ):
         raise OSError("the drive went away")
 
     monkeypatch.setattr(main, "match_collections", exploding_match)
