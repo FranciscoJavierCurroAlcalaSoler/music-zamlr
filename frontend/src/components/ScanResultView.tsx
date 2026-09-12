@@ -2,28 +2,11 @@ import { Alert, Box, Button, Typography } from "@mui/material";
 import type { ScanResult } from "../types";
 import { pluralize } from "../format";
 import { CountChips } from "./CountChips";
+import { PathList } from "./PathList";
 
 interface ScanResultViewProps {
   result: ScanResult | null;
   onDismiss: () => void;
-}
-
-/** Long Windows paths, one per line, allowed to break anywhere. */
-function PathList({ paths }: { paths: string[] }) {
-  return (
-    <Box component="ul" sx={{ mt: 1, mb: 0, pl: 3 }}>
-      {paths.map((path) => (
-        <Typography
-          component="li"
-          variant="body2"
-          key={path}
-          sx={{ wordBreak: "break-all" }}
-        >
-          {path}
-        </Typography>
-      ))}
-    </Box>
-  );
 }
 
 export function ScanResultView({ result, onDismiss }: ScanResultViewProps) {

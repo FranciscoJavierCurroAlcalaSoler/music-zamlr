@@ -43,6 +43,23 @@ export function pluralize(
   return `${formatCount(count)} ${count === 1 ? singular : plural}`;
 }
 
+/**
+ * The first sentence of the diff's warning about files it could not read.
+ *
+ * It lives here, away from the component, because Vitest runs with no DOM.
+ * A sentence built inside the Alert has no automated cover at all.
+ *
+ * The words name no tier. The list mixes files that the hash tier could not
+ * open with files that fpcalc could not read, and with no fpcalc on the
+ * machine it holds the first kind only.
+ *
+ * The verb follows count === 1, the same rule pluralize uses. Two different
+ * rules in one sentence disagree at 0: "0 files ... its track was".
+ */
+export function unreadableFilesSummary(count: number): string {
+  return `${pluralize(count, "file")} could not be read, so ${count === 1 ? "its track was" : "their tracks were"} compared by tags only.`;
+}
+
 // sv-SE is chosen for its format, not its language: it is the locale that
 // renders ISO 8601 order (YYYY-MM-DD) with a 24-hour clock.
 //

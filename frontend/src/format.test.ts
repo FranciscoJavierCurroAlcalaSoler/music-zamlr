@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { progressPercent, shortenPath, fileSize } from "./format";
+import {
+  progressPercent,
+  shortenPath,
+  fileSize,
+  unreadableFilesSummary,
+} from "./format";
 
 // A real backslash, built rather than typed. A literal "\M" in a TS string is
 // not an escape sequence, so the compiler silently drops the backslash and the
@@ -107,5 +112,19 @@ describe("fileSize", () => {
   it("still has a unit above a terabyte", () => {
     expect(fileSize(1024 * 1024 * 1024 * 1024)).toBe("1 TB");
     expect(fileSize(1024 * 1024 * 1024 * 1024 * 8)).toBe("8 TB");
+  });
+});
+
+describe("unreadableFilesSummary", () => {
+  it("uses the singular for one file", () => {
+    expect(unreadableFilesSummary(1)).toBe(
+      "1 file could not be read, so its track was compared by tags only.",
+    );
+  });
+
+  it("uses the plural for more than one file", () => {
+    expect(unreadableFilesSummary(2)).toBe(
+      "2 files could not be read, so their tracks were compared by tags only.",
+    );
   });
 });

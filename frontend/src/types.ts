@@ -79,6 +79,7 @@ export interface MatchResult {
   only_in_mine: Track[];
   rejected: RejectedMatch[];
   fingerprints_available: boolean;
+  unreadable_files: string[];
 }
 
 export interface DiffProgress {

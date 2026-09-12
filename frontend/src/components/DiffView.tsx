@@ -45,7 +45,13 @@ import { ImportProgressView } from "./ImportProgressView";
 import { ImportResultView } from "./ImportResultView";
 import { ResolveMatchDialog } from "./ResolveMatchDialog";
 import { DiffProgressView } from "./DiffProgressView";
-import { bitrate, duration, formatCount } from "../format";
+import { PathList } from "./PathList";
+import {
+  bitrate,
+  duration,
+  formatCount,
+  unreadableFilesSummary,
+} from "../format";
 
 type BucketKey =
   "missing" | "upgrade_available" | "already_have" | "needs_review";
@@ -525,6 +531,28 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
                   audio. Tracks were matched by their tags only, and an upgrade
                   can be a different recording of the song. The README says how
                   to install fpcalc.
+                </Alert>
+              )}
+              {/* The paths sit in <details> because this warning stays above
+                  the table the user works in, and a long list pushes that
+                  table off the screen. The scan panel lists its paths in
+                  full, because the user closes that panel.
+
+                  The {" "} after the summary is load-bearing: JSX drops the
+                  whitespace at the end of an expression line, so without it
+                  the two sentences run together. */}
+              {diff.match_results.unreadable_files.length > 0 && (
+                <Alert severity="warning" sx={{ mt: 1 }}>
+                  {unreadableFilesSummary(
+                    diff.match_results.unreadable_files.length,
+                  )}{" "}
+                  An upgrade among them can be a different recording of the
+                  song. If a file was moved or deleted, scan its collection
+                  again.
+                  <Box component="details" sx={{ mt: 1 }}>
+                    <summary>Show the files</summary>
+                    <PathList paths={diff.match_results.unreadable_files} />
+                  </Box>
                 </Alert>
               )}
               <Tabs value={tab} onChange={(_, next) => setTab(next)}>
