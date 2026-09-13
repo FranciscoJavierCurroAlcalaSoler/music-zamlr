@@ -60,8 +60,15 @@ def read_track(file_path: str, collection_id: int) -> Track | None:
             file_size=os.path.getsize(file_path),
             collection_id=collection_id,
         )
-    except Exception as e:
-        logging.error(f"Failed to read track information from {file_path}: {e}")
+    # Exception, not MutagenError, and wider than the project's rule on
+    # purpose. scan_folder commits once at the end, so one exception that
+    # leaves this function loses every row the scan has read. mutagen names
+    # MutagenError as the base of its own exceptions, not as the only thing its
+    # parsers can raise on a malformed file. The cost is that a bug here does
+    # not raise. It is not silent either: every file becomes unreadable, and
+    # logging.exception writes the traceback for each one.
+    except Exception:
+        logging.exception(f"Failed to read track information from {file_path}")
         return None
 
 
