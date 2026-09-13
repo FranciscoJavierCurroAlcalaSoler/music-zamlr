@@ -12,6 +12,7 @@ data whenever either constant moved, so a mutation of either one could not
 fail anything.
 """
 
+import logging
 import shutil
 import subprocess
 import types
@@ -285,6 +286,45 @@ def test_a_fingerprint_that_is_not_numeric_gives_none(stub_fpcalc):
     stub_fpcalc(stdout="DURATION=5\nFINGERPRINT=113680835,not-a-number,239248129\n")
 
     assert compute_fingerprint("doesntmatter.wav") is None
+
+
+# One parametrized test, because the cases differ only in what the stub
+# returns, and separate copies are separate places to forget a new failure.
+#
+# The expected column pins the branch that each case reached. Every failure
+# path writes the path and returns None, so without that column a setup
+# mistake that sends every case down one branch passes all five. The return
+# value is pinned as well: a warning that names the file is still wrong if a
+# fingerprint comes back with it.
+@pytest.mark.parametrize(
+    "params, expected",
+    [
+        (
+            {"returncode": 2, "stderr": "ERROR: unable to open file"},
+            "fpcalc failed with return code",
+        ),
+        (
+            {"error": subprocess.TimeoutExpired(cmd="fpcalc", timeout=1)},
+            "fpcalc failed on",
+        ),
+        ({"error": OSError("cannot run the program")}, "fpcalc failed on"),
+        ({"stdout": "DURATION=247\n"}, "fpcalc output did not contain a fingerprint"),
+        (
+            {"stdout": "DURATION=5\nFINGERPRINT=113680835,not-a-number\n"},
+            "non-numeric fingerprint",
+        ),
+    ],
+    ids=["return code", "timeout", "OSError", "no fingerprint", "not numeric"],
+)
+def test_every_failure_names_the_file(params, expected, stub_fpcalc, caplog):
+    path = r"C:\music\Radiohead\Creep.mp3"
+    with caplog.at_level(logging.WARNING):
+        stub_fpcalc(**params)
+        result = compute_fingerprint(path)
+
+    assert result is None
+    assert path in caplog.text
+    assert expected in caplog.text
 
 
 def test_the_length_is_passed_to_fpcalc(stub_fpcalc):

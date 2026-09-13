@@ -192,13 +192,21 @@ def compute_fingerprint(file_path: str) -> list[int] | None:
             timeout=FPCALC_TIMEOUT_SECONDS,
         )
         if result.returncode != 0:
-            logging.warning("fpcalc failed with return code %d", result.returncode)
+            # fpcalc's own stderr says why, for example that it could not open
+            # the file. No test reads that text: part of it comes from the
+            # operating system, in the user's language.
+            logging.warning(
+                "fpcalc failed with return code %d for %s: %s",
+                result.returncode,
+                file_path,
+                result.stderr.strip(),
+            )
             return None
     # TimeoutExpired and OSError only. CalledProcessError cannot reach here,
     # because subprocess.run raises it only when called with check=True, and
     # the return code is examined above instead.
     except (subprocess.TimeoutExpired, OSError) as e:
-        logging.warning("fpcalc failed: %s", e)
+        logging.warning("fpcalc failed on %s: %s", file_path, e)
         return None
 
     # Read by prefix rather than by line number. fpcalc writes DURATION and
@@ -213,10 +221,12 @@ def compute_fingerprint(file_path: str) -> list[int] | None:
                 # fingerprint. It is caught anyway because this is the last
                 # path on which one unreadable file could still end a whole
                 # diff, which is the rule every other branch here obeys.
-                logging.warning("fpcalc wrote a fingerprint that is not numeric")
+                logging.warning(
+                    "fpcalc wrote a non-numeric fingerprint for %s", file_path
+                )
                 return None
 
-    logging.warning("fpcalc output did not contain a fingerprint")
+    logging.warning("fpcalc output did not contain a fingerprint for %s", file_path)
     return None
 
 
