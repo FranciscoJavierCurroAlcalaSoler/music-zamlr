@@ -27,7 +27,12 @@ drives directly with normal file operations. The React interface talks to it at
   compare the sound of two files. Without it, the tool compares tags only and
   shows a warning.
 - Both collections must be folders on the computer that runs the backend. An
-  external USB drive is enough.
+  external USB drive is enough. Read
+  [A collection keeps its path](#a-collection-keeps-its-path) before you use
+  one.
+- Audio files in the formats `.mp3`, `.flac`, or `.wav`. The scanner ignores
+  all other files and counts them as **Not audio**. This includes `.m4a`,
+  `.ogg`, `.opus`, and `.aiff` files.
 
 ## Install
 
@@ -99,13 +104,55 @@ Then open `http://localhost:5173` in a browser. The backend answers on port
 4. Examine the result table. Each track belongs to one group: missing, upgrade
    available, already have, needs review, or only in yours.
 5. Select the tracks to import. Select a destination folder, a folder
-   structure, and what must happen to a file that an upgrade replaces.
+   structure, and what must happen to a file that an upgrade replaces (see
+   [What happens to a replaced file](#what-happens-to-a-replaced-file)).
 6. Examine the preview. It lists every file operation before anything on disk
    changes.
 7. Select **Import**. The tool writes a log file into the destination folder.
 
 A scan and a comparison both report progress while they run. A large
 collection takes minutes.
+
+### A collection keeps its path
+
+A collection stores the path of its root folder when you add it. You cannot
+change that path later, and you cannot delete a collection. If Windows gives a
+USB drive a different drive letter, the tool cannot scan that collection
+again. The scan then fails with the message
+`Collection path not found. It may not be mounted.` Add the drive as a new
+collection, with a different name.
+
+### What happens to a replaced file
+
+Before an import, you select one of three actions for the files that the
+upgrades replace:
+
+- **Keep both tracks.** Your file stays where it is. The tool copies the
+  better file into the destination folder as a separate file.
+- **Move my track aside.** Your file moves into a folder named `_superseded`,
+  directly under the destination folder. All moved files go into this one
+  folder, without subfolders. If a file with the same name is already there,
+  the moved file gets a numbered suffix. You can move a file back by hand.
+- **Delete my track.** The tool deletes your file after it writes the better
+  copy. You cannot undo this.
+
+The scanner never reads a folder named `_superseded`, in any letter case and at
+any depth in a collection. This keeps moved files out of later comparisons. It
+also hides your own folder, if it has this name.
+
+### After an import
+
+A comparison does not know about the imported files until you scan again.
+Scan the collection that contains the destination folder. Until then, a new
+comparison still shows the imported tracks as missing. If the destination
+folder is not in one of your collections, the tool does not show the imported
+files.
+
+### Your selection is not saved
+
+A browser refresh clears the tracks that you selected and your answers in the
+review dialog. A new comparison clears them too. Do a review and its import in
+one session.
 
 ## How the tool decides that two tracks are the same
 
@@ -153,6 +200,32 @@ The third rule has two consequences that appear in the result table:
   obvious duplicate therefore waits for you. The tool never makes an uncertain
   decision on your behalf.
 
+**A file that cannot be read.** A comparison does not stop at a file that it
+cannot read. A warning above the result table lists each such file. The tool
+compares these tracks by tags only, so an upgrade among them can be a
+different recording of the song. A common cause is a file that moved, or that
+was deleted, after its scan. Scan the collection of that file again.
+
+## How the tool decides that a copy is better
+
+After the tool pairs your track with a track of theirs, it compares the two
+files:
+
+1. The format decides first. FLAC and WAV have the same rank, and both rank
+   above MP3. A file with a higher rank is always better, whatever its
+   bitrate.
+2. If the two formats have the same rank, the higher bitrate is better. If the
+   bitrates are equal, you already have the track.
+3. If the tool cannot read the bitrate of one of the two files, you already
+   have the track. The tool never offers to replace a file whose quality it
+   did not measure.
+
+**Known limit.** Between two lossless files, a higher bitrate does not mean
+better sound. A WAV file always has a higher bitrate than a FLAC file of the
+same audio, so it appears as an upgrade. A louder master compresses less, so
+it can appear as an upgrade too. With **Delete my track**, the upgrade then
+replaces your file. A new rule for lossless files comes next.
+
 ## Design notes
 
 **File size comes before tags.** A human compares artist and title first. The
@@ -182,19 +255,36 @@ deleted only after its replacement is written. An uncertain match goes to you.
 size of the files to copy against the free space on the destination drive. It
 warns and lets you continue, because you can clear space before you confirm.
 
+## Known limits
+
+- The action for a replaced file applies to every upgrade in one import. You
+  cannot select a different action for each file.
+- The tool identifies a file by its path. If you move or rename a file, the
+  tool forgets its stored hash and fingerprint, and the next comparison reads
+  the file again. On Windows, this also occurs when only the letter case of a
+  name changes.
+- The free-space warning in the preview does not count a file that moves into
+  `_superseded` on a different drive. That move copies the file, so the
+  destination drive can need more space than the preview shows.
+- Do not scan one collection from two browser tabs at the same time. The tool
+  does not prevent it, and one of the scans can fail.
+
 ## Status
 
 The scan, the comparison, and the import all work, and the browser shows live
 progress for each. The comparison uses file hashes, acoustic fingerprints, and
 tags.
 
-**Known limit.** Between two lossless files, the file with the higher bitrate
-counts as the better copy. A louder master compresses less, so it can appear
-as an upgrade. With the delete action, it then replaces your file.
+Three changes come next, in this order:
 
-Two changes come next: a setting for the quality order, and saved catalogs of
-offline drives. After that, a desktop package will include `fpcalc`, and you
-will not install it yourself.
+1. A new rule for two lossless files. Bit depth and sample rate decide, and
+   bitrate does not.
+2. Support for `.m4a` files. The tool reads the codec to tell ALAC, which is
+   lossless, from AAC, which is lossy.
+3. A setting for the order of formats.
+
+After that, a desktop package will include `fpcalc`, and you will not install
+it yourself.
 
 ## License
 
