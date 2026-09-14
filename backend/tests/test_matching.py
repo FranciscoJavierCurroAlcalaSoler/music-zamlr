@@ -1,7 +1,8 @@
 import pytest
 
+from enums import Bucket
 from fingerprinting import FPCALC_ALGORITHM, FPCALC_LENGTH_SECONDS, pack_fingerprint
-from matching import DURATION_TOLERANCE_SECONDS, match_collections
+from matching import DURATION_TOLERANCE_SECONDS, classify_pairing, match_collections
 
 
 @pytest.fixture
@@ -1749,3 +1750,104 @@ def test_lossless_wav_of_theirs_upgrades_a_lossy_mp3_of_mine(make_track):
 
     assert len(result.upgrade_available) == 1
     assert result.already_have == []
+
+
+def test_an_equal_wav_is_not_an_upgrade_over_a_flac(make_track):
+    mine = make_track(format="FLAC", bit_depth=16, sample_rate=44100, bit_rate=900000)
+    theirs = make_track(format="WAV", bit_depth=16, sample_rate=44100, bit_rate=1411200)
+
+    result = classify_pairing(mine_track=mine, theirs_track=theirs)
+
+    assert result == Bucket.ALREADY_HAVE
+
+
+def test_a_higher_bit_depth_is_an_upgrade(make_track):
+    mine = make_track(format="FLAC", bit_depth=16, sample_rate=44100, bit_rate=1000000)
+    theirs = make_track(format="FLAC", bit_depth=24, sample_rate=44100, bit_rate=900000)
+
+    result = classify_pairing(mine_track=mine, theirs_track=theirs)
+
+    assert result == Bucket.UPGRADE_AVAILABLE
+
+
+def test_a_higher_sample_rate_is_an_upgrade(make_track):
+    mine = make_track(format="FLAC", bit_depth=16, sample_rate=44100, bit_rate=1000000)
+    theirs = make_track(format="FLAC", bit_depth=16, sample_rate=96000, bit_rate=900000)
+
+    result = classify_pairing(mine_track=mine, theirs_track=theirs)
+
+    assert result == Bucket.UPGRADE_AVAILABLE
+
+
+# Both directions, because a lexicographic order fails only one of them: bit
+# depth first gets the first case wrong, sample rate first gets the second.
+# Theirs carries the higher bitrate in both, so the old bitrate rule would
+# call either one an upgrade.
+@pytest.mark.parametrize(
+    "mine_bit_depth, mine_sample_rate, theirs_bit_depth, theirs_sample_rate",
+    [
+        (16, 96000, 24, 44100),
+        (24, 44100, 16, 96000),
+    ],
+    ids=["more bits, lower rate", "higher rate, fewer bits"],
+)
+def test_a_mixed_pair_is_not_an_upgrade_in_either_direction(
+    make_track, mine_bit_depth, mine_sample_rate, theirs_bit_depth, theirs_sample_rate
+):
+    mine = make_track(
+        format="FLAC",
+        bit_depth=mine_bit_depth,
+        sample_rate=mine_sample_rate,
+        bit_rate=900000,
+    )
+    theirs = make_track(
+        format="FLAC",
+        bit_depth=theirs_bit_depth,
+        sample_rate=theirs_sample_rate,
+        bit_rate=1000000,
+    )
+
+    result = classify_pairing(mine_track=mine, theirs_track=theirs)
+
+    assert result == Bucket.ALREADY_HAVE
+
+
+# One None per case, and every other value makes theirs the better file: 24
+# bits over 16, 96 kHz over 44.1 kHz, and the higher bitrate. So the missing
+# value is the only thing that can stop the upgrade. With values that already
+# lose on their own, reading None as 0 passes every case, and Python's `and`
+# stops before it ever compares the None.
+@pytest.mark.parametrize(
+    "mine_bit_depth, mine_sample_rate, theirs_bit_depth, theirs_sample_rate",
+    [
+        (None, 44100, 24, 96000),
+        (16, None, 24, 96000),
+        (16, 44100, None, 96000),
+        (16, 44100, 24, None),
+    ],
+    ids=[
+        "mine: no bit depth",
+        "mine: no sample rate",
+        "theirs: no bit depth",
+        "theirs: no sample rate",
+    ],
+)
+def test_a_missing_value_is_not_an_upgrade(
+    make_track, mine_bit_depth, mine_sample_rate, theirs_bit_depth, theirs_sample_rate
+):
+    mine = make_track(
+        format="FLAC",
+        bit_depth=mine_bit_depth,
+        sample_rate=mine_sample_rate,
+        bit_rate=900000,
+    )
+    theirs = make_track(
+        format="FLAC",
+        bit_depth=theirs_bit_depth,
+        sample_rate=theirs_sample_rate,
+        bit_rate=1000000,
+    )
+
+    result = classify_pairing(mine_track=mine, theirs_track=theirs)
+
+    assert result == Bucket.ALREADY_HAVE

@@ -150,21 +150,15 @@ def durations_close(a: int, b: int) -> bool:
 # Higher number = better quality. Module-level for now; intended to become
 # a user-configurable setting later.
 #
-# FLAC and ALAC tie because both are lossless, so a FLAC/ALAC pairing falls
-# through to the bitrate tiebreak rather than being called an upgrade in
-# either direction. Note that .m4a files can hold either ALAC (lossless) or
-# AAC (lossy) and the extension alone can't tell them apart, so anything
-# scanned as "M4A" is currently unranked; disambiguating that needs the
-# codec read out of the file itself.
+# FLAC, ALAC and WAV tie because all three are lossless. A tie between two
+# lossless files goes to is_lossless_upgrade, never to bitrate. Note that
+# .m4a files can hold either ALAC (lossless) or AAC (lossy) and the extension
+# alone can't tell them apart, so anything scanned as "M4A" is currently
+# unranked; disambiguating that needs the codec read out of the file itself.
 #
-# WAV sits with the other two losslessly-encoded formats because it is
-# uncompressed PCM: audio-identical to a FLAC of the same source, just larger.
-# Ranking it by its absence — unknown formats score 0 — put a 128 kbps MP3
-# above a lossless WAV, and with the delete upgrade action that destroys the
-# WAV. Note the tie-break then favours WAV over FLAC on every pairing, since
-# uncompressed always carries the higher bitrate; that offers a bigger file
-# rather than a better one, and it is one more reason the ranking wants to be
-# a real setting (§12) rather than a table of formats we happened to meet.
+# WAV is uncompressed PCM: audio-identical to a FLAC of the same source, only
+# larger. Left out of this table it would rank 0, below MP3, and with the
+# delete action a 128 kbps MP3 would then replace a lossless WAV.
 FORMAT_RANK = {
     "FLAC": 3,
     "ALAC": 3,
@@ -173,11 +167,54 @@ FORMAT_RANK = {
     "AAC": 1,
 }
 
+# Whether a format is lossless is a fact about its codec, so it lives here
+# and not in FORMAT_RANK. The rank is meant to become a user setting, and a
+# rule keyed on "rank 3" would change meaning when the user reorders formats.
+LOSSLESS_FORMATS = frozenset(["FLAC", "ALAC", "WAV"])
+
 
 def format_rank(fmt: str | None) -> int:
     # Unknown/missing formats rank lowest so they never win an
     # upgrade comparison by accident.
     return FORMAT_RANK.get(fmt.upper(), 0) if fmt else 0
+
+
+def is_lossless(fmt: str | None) -> bool:
+    return fmt is not None and fmt.upper() in LOSSLESS_FORMATS
+
+
+def is_lossless_upgrade(mine_track: Track, theirs_track: Track) -> bool:
+    """Decide whether their lossless file is better than mine.
+
+    Dominance, not a lexicographic order: theirs must be no worse on bit depth
+    and on sample rate, and better on at least one. A pair that is better on
+    one value and worse on the other is an upgrade in neither direction, so
+    the delete action never removes a file that wins on one of them.
+    Comparing (bit_depth, sample_rate) tuples looks the same and is not: the
+    first value then decides alone.
+
+    Bitrate takes no part. A lossless bitrate measures how well the audio
+    compresses, not how good it is, so an uncompressed WAV or a louder master
+    would always win on it.
+
+    A missing value on either side is not an upgrade. Read as 0, a value the
+    scanner could not measure loses to any real one, and the delete action
+    then removes a file that nobody evaluated.
+    """
+    if (
+        mine_track.bit_depth is None
+        or mine_track.sample_rate is None
+        or theirs_track.bit_depth is None
+        or theirs_track.sample_rate is None
+    ):
+        return False
+    quality_pairs = [
+        (mine_track.bit_depth, theirs_track.bit_depth),
+        (mine_track.sample_rate, theirs_track.sample_rate),
+    ]
+    theirs_no_worse = all(theirs >= mine for mine, theirs in quality_pairs)
+    theirs_better = any(theirs > mine for mine, theirs in quality_pairs)
+    return theirs_no_worse and theirs_better
 
 
 def normalize(value: str | None) -> str | None:
@@ -218,13 +255,16 @@ def classify_pairing(mine_track: Track, theirs_track: Track) -> Bucket:
     than this function's range because it is shared with the routing that
     also produces MISSING and NEEDS_REVIEW. It judges quality, never
     identity — whether these two are the same recording was settled by the
-    caller, and for a fuzzy match that is a guess inside a ±2s window (§5a).
+    caller, and for a fuzzy match that is a guess inside a ±2s window.
+
+    The format rank decides first. Within one rank, two lossless files go to
+    is_lossless_upgrade; every other pair of equal rank goes to bitrate.
 
     This is the only definition of "what counts as an upgrade", called both
     for a confirmed single candidate and to label each candidate of an
     ambiguous one. One definition is what stops the review UI promising an
-    upgrade the planner would then decline; it is also the single point
-    Phase 6's configurable ranking has to reach.
+    upgrade the planner would then decline; it is also the single point that
+    a configurable ranking has to reach.
     """
     theirs_rank = format_rank(theirs_track.format)
     mine_rank = format_rank(mine_track.format)
@@ -234,12 +274,21 @@ def classify_pairing(mine_track: Track, theirs_track: Track) -> Bucket:
     elif theirs_rank < mine_rank:
         return Bucket.ALREADY_HAVE
     else:
-        # Same format rank, so bitrate breaks the tie. An unreadable
-        # bitrate on either side claims no upgrade: treating None as 0
-        # would let a known 320 kbps "beat" a file we simply couldn't
-        # measure, and with the delete action that removes an original
-        # we never evaluated. Equal bitrates fall the same way, since
-        # without a strict improvement the copy is pointless.
+        # Both branches return. A lossless pair that is not an upgrade must not
+        # reach the bitrate code below, where an uncompressed WAV always beats
+        # an equal FLAC.
+        if is_lossless(mine_track.format) and is_lossless(theirs_track.format):
+            if is_lossless_upgrade(mine_track, theirs_track):
+                return Bucket.UPGRADE_AVAILABLE
+            else:
+                return Bucket.ALREADY_HAVE
+
+        # Same format rank and not both lossless, so bitrate breaks the tie.
+        # An unreadable bitrate on either side claims no upgrade: treating
+        # None as 0 would let a known 320 kbps "beat" a file we simply
+        # couldn't measure, and with the delete action that removes an
+        # original we never evaluated. Equal bitrates fall the same way,
+        # since without a strict improvement the copy is pointless.
         if theirs_track.bit_rate is None or mine_track.bit_rate is None:
             return Bucket.ALREADY_HAVE
         elif theirs_track.bit_rate > mine_track.bit_rate:

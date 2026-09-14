@@ -214,17 +214,26 @@ files:
 1. The format decides first. FLAC and WAV have the same rank, and both rank
    above MP3. A file with a higher rank is always better, whatever its
    bitrate.
-2. If the two formats have the same rank, the higher bitrate is better. If the
-   bitrates are equal, you already have the track.
-3. If the tool cannot read the bitrate of one of the two files, you already
-   have the track. The tool never offers to replace a file whose quality it
-   did not measure.
+2. If both files are lossless (FLAC or WAV), bit depth and sample rate decide.
+   Their file is better only if neither value is lower than yours and at least
+   one value is higher. Bitrate does not count here. A lossless bitrate shows
+   how well the sound compresses, not how good the sound is.
+3. If both files are MP3, the higher bitrate is better.
+4. If the two files are equal, you already have the track. If the tool cannot
+   read a value that it needs from one of the files, you already have the
+   track too. The tool never offers to replace a file whose quality it did not
+   measure.
 
-**Known limit.** Between two lossless files, a higher bitrate does not mean
-better sound. A WAV file always has a higher bitrate than a FLAC file of the
-same audio, so it appears as an upgrade. A louder master compresses less, so
-it can appear as an upgrade too. With **Delete my track**, the upgrade then
-replaces your file. A new rule for lossless files comes next.
+The rule for lossless files has three consequences:
+
+- A remaster in the same format, bit depth, and sample rate is not offered as
+  an upgrade, even if it sounds different.
+- If each file is better on a different value, neither file is an upgrade.
+  For example, a 24-bit file at 44.1 kHz and a 16-bit file at 96 kHz are not
+  upgrades of each other.
+- **Known limit.** The rule reads the numbers in the file, not the sound. A
+  44.1 kHz recording that was converted to 96 kHz still counts as an upgrade.
+  So does a 32-bit float WAV file from an audio editor.
 
 ## Design notes
 
@@ -275,13 +284,11 @@ The scan, the comparison, and the import all work, and the browser shows live
 progress for each. The comparison uses file hashes, acoustic fingerprints, and
 tags.
 
-Three changes come next, in this order:
+Two changes come next, in this order:
 
-1. A new rule for two lossless files. Bit depth and sample rate decide, and
-   bitrate does not.
-2. Support for `.m4a` files. The tool reads the codec to tell ALAC, which is
+1. Support for `.m4a` files. The tool reads the codec to tell ALAC, which is
    lossless, from AAC, which is lossy.
-3. A setting for the order of formats.
+2. A setting for the order of formats.
 
 After that, a desktop package will include `fpcalc`, and you will not install
 it yourself.
