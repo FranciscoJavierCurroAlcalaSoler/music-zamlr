@@ -30,9 +30,11 @@ drives directly with normal file operations. The React interface talks to it at
   external USB drive is enough. Read
   [A collection keeps its path](#a-collection-keeps-its-path) before you use
   one.
-- Audio files in the formats `.mp3`, `.flac`, or `.wav`. The scanner ignores
-  all other files and counts them as **Not audio**. This includes `.m4a`,
-  `.ogg`, `.opus`, and `.aiff` files.
+- Audio files in the formats `.mp3`, `.flac`, `.wav`, or `.m4a`. An `.m4a`
+  file must hold ALAC or AAC audio. The scanner lists an `.m4a` file with any
+  other codec as a file that it cannot read. The scanner ignores all other
+  files and counts them as **Not audio**. This includes `.ogg`, `.opus`, and
+  `.aiff` files.
 
 ## Install
 
@@ -211,14 +213,15 @@ was deleted, after its scan. Scan the collection of that file again.
 After the tool pairs your track with a track of theirs, it compares the two
 files:
 
-1. The format decides first. FLAC and WAV have the same rank, and both rank
-   above MP3. A file with a higher rank is always better, whatever its
-   bitrate.
-2. If both files are lossless (FLAC or WAV), bit depth and sample rate decide.
+1. The format decides first. FLAC, ALAC, and WAV have the same rank. MP3 and
+   AAC have a lower rank. A file with a higher rank is always better, whatever
+   its bitrate.
+2. If both files are lossless (FLAC, ALAC, or WAV), bit depth and sample rate
+   decide.
    Their file is better only if neither value is lower than yours and at least
    one value is higher. Bitrate does not count here. A lossless bitrate shows
    how well the sound compresses, not how good the sound is.
-3. If both files are MP3, the higher bitrate is better.
+3. If both files are lossy (MP3 or AAC), the higher bitrate is better.
 4. If the two files are equal, you already have the track. If the tool cannot
    read a value that it needs from one of the files, you already have the
    track too. The tool never offers to replace a file whose quality it did not
@@ -284,11 +287,7 @@ The scan, the comparison, and the import all work, and the browser shows live
 progress for each. The comparison uses file hashes, acoustic fingerprints, and
 tags.
 
-Two changes come next, in this order:
-
-1. Support for `.m4a` files. The tool reads the codec to tell ALAC, which is
-   lossless, from AAC, which is lossy.
-2. A setting for the order of formats.
+One change comes next: a setting for the order of formats.
 
 After that, a desktop package will include `fpcalc`, and you will not install
 it yourself.

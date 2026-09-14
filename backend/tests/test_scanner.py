@@ -1,15 +1,24 @@
 # tests/test_scanner.py
+import logging
 import os
 import shutil
+import types
 
 import mutagen
+import pytest
 from sqlmodel import select
 
 import scanner
 from fingerprinting import FPCALC_ALGORITHM, FPCALC_LENGTH_SECONDS, pack_fingerprint
 from importing import SUPERSEDED_DIR_NAME
 from models import Collection, Track
-from scanner import read_track, scan_folder, track_number_from_tag, year_from_date
+from scanner import (
+    read_track,
+    scan_folder,
+    track_format,
+    track_number_from_tag,
+    year_from_date,
+)
 
 
 def test_read_track_mp3(test_collection, fixtures_dir):
@@ -54,6 +63,146 @@ def test_read_track_flac(test_collection, fixtures_dir):
     assert track.file_size == 78544
     assert track.file_hash is None
     assert track.collection_id == test_collection
+
+
+def test_read_track_alac(test_collection, fixtures_dir):
+    track = read_track(
+        str(fixtures_dir / "test_track_alac.m4a"), collection_id=test_collection
+    )
+
+    assert track is not None
+    assert track.file_name == "test_track_alac.m4a"
+    assert track.title == "Test Track ALAC"
+    assert track.artist == "Music Zamlr Fixtures"
+    assert track.album == "Synthetic Test Album"
+    assert track.track_number == 3
+    assert track.year == 2026
+    assert track.format == "ALAC"
+    assert track.bit_depth == 24
+    assert track.bit_rate == 2304000
+    assert track.sample_rate == 48000
+    assert track.duration == 1
+    assert track.file_size == 115334
+    assert track.file_hash is None
+    assert track.collection_id == test_collection
+
+
+def test_read_track_aac(test_collection, fixtures_dir):
+    track = read_track(
+        str(fixtures_dir / "test_track_aac.m4a"), collection_id=test_collection
+    )
+
+    assert track is not None
+    assert track.file_name == "test_track_aac.m4a"
+    assert track.title == "Test Track AAC"
+    assert track.artist == "Music Zamlr Fixtures"
+    assert track.album == "Synthetic Test Album"
+    assert track.track_number == 3
+    assert track.year == 2026
+    assert track.format == "AAC"
+    assert track.bit_rate == 217274
+    assert track.sample_rate == 44100
+    assert track.duration == 1
+    assert track.file_size == 28926
+    assert track.file_hash is None
+    assert track.collection_id == test_collection
+
+
+@pytest.mark.parametrize(
+    "file_path, codec, expected",
+    [
+        ("song.m4a", "alac", "ALAC"),
+        ("song.m4a", "mp4a.40.2", "AAC"),
+        ("song.m4a", "mp4a.40.5", "AAC"),
+        ("song.m4a", "mp4a.40", "AAC"),
+        ("SONG.M4A", "alac", "ALAC"),
+        ("song.m4a", "mp4a.6B", None),
+        ("song.m4a", "fLaC", None),
+        ("song.m4a", None, None),
+    ],
+    ids=[
+        "alac",
+        "aac lc",
+        "he-aac",
+        "aac with no object type",
+        "uppercase extension",
+        "mp3 inside mp4",
+        "flac inside mp4",
+        "no codec",
+    ],
+)
+def test_track_format_of_an_m4a_file_comes_from_its_codec(file_path, codec, expected):
+    info = types.SimpleNamespace(codec=codec)
+
+    assert track_format(file_path, info) == expected
+
+
+def test_track_format_of_other_files_comes_from_the_extension():
+    info = types.SimpleNamespace()
+
+    assert track_format("song.flac", info) == "FLAC"
+
+
+def test_read_track_returns_none_for_an_unknown_m4a_codec(
+    monkeypatch, fixtures_dir, test_collection
+):
+    monkeypatch.setattr("scanner.track_format", lambda path, info: None)
+
+    track = read_track(
+        str(fixtures_dir / "test_track_aac.m4a"), collection_id=test_collection
+    )
+
+    assert track is None
+
+
+def test_read_track_warns_about_an_mp3_named_m4a(
+    tmp_path, fixtures_dir, test_collection, caplog
+):
+    # mutagen detects the format from the content, so an MP3 file named .m4a
+    # arrives with no codec attribute. The result is None whether the file is
+    # turned away with a warning or falls into the broad catch, so the log
+    # levels are the assertion that matters: the broad catch writes at ERROR.
+    misnamed = tmp_path / "misnamed.m4a"
+    shutil.copy(fixtures_dir / "test_track.mp3", misnamed)
+
+    with caplog.at_level(logging.WARNING):
+        track = read_track(str(misnamed), collection_id=test_collection)
+
+    levels = [record.levelname for record in caplog.records]
+    assert track is None
+    assert "WARNING" in levels
+    assert "ERROR" not in levels
+
+
+def test_scan_folder_reads_m4a_files(fixtures_dir, tmp_path, test_collection, session):
+    shutil.copy(fixtures_dir / "test_track_alac.m4a", tmp_path / "test_track_alac.m4a")
+    shutil.copy(fixtures_dir / "test_track_aac.m4a", tmp_path / "test_track_aac.m4a")
+
+    result = scan_folder(str(tmp_path), collection_id=test_collection, session=session)
+
+    assert result.skipped_non_audio == 0
+    assert result.added == 2
+
+    tracks = session.exec(select(Track)).all()
+    assert len(tracks) == 2
+    formats = {t.format for t in tracks}
+    assert formats == {"ALAC", "AAC"}
+
+
+def test_scan_updates_the_format_when_the_codec_changes(
+    fixtures_dir, tmp_path, test_collection, session
+):
+    shutil.copy(fixtures_dir / "test_track_alac.m4a", tmp_path / "song.m4a")
+
+    scan_folder(str(tmp_path), collection_id=test_collection, session=session)
+
+    shutil.copy(fixtures_dir / "test_track_aac.m4a", tmp_path / "song.m4a")
+
+    scan_folder(str(tmp_path), collection_id=test_collection, session=session)
+
+    tracks = session.exec(select(Track)).all()
+    assert len(tracks) == 1
+    assert tracks[0].format == "AAC"
 
 
 def test_read_track_nonexistent_file_returns_none(test_collection, fixtures_dir):

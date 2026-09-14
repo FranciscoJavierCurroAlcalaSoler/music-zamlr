@@ -39,9 +39,50 @@ def track_number_from_tag(track_number_str: str | None) -> int | None:
         return None
 
 
+def track_format(file_path: str, info: object) -> str | None:
+    """Name the format of a scanned file, or return None for an unknown codec.
+
+    Every format except .m4a comes from the extension. An .m4a file can hold
+    ALAC, which is lossless, or AAC, which is lossy, so its codec decides.
+    mutagen writes AAC as "mp4a.40" and an audio object type, and it writes no
+    type when the stream has no decoder details. A bare "mp4a" prefix is not
+    enough, because MP3 inside an MP4 reports "mp4a.6B".
+
+    Any other codec gets None, never a new format name. A format that
+    FORMAT_RANK does not know ranks worst, so a lossless file of mine would
+    lose to any MP3, and the delete action would remove it.
+
+    The codec is read only for .m4a, because mutagen gives the other formats
+    no codec attribute. Even then it is read with getattr: mutagen detects the
+    format from the content, not the name, so an MP3 file named .m4a arrives
+    with no codec attribute at all.
+    """
+    if os.path.splitext(file_path)[1].lower() != ".m4a":
+        return os.path.splitext(file_path)[1].upper().strip(".")
+    codec = getattr(info, "codec", None)
+    if codec is None:
+        return None
+    if codec == "alac":
+        return "ALAC"
+    if codec == "mp4a.40" or codec.startswith("mp4a.40."):
+        return "AAC"
+    return None
+
+
 def read_track(file_path: str, collection_id: int) -> Track | None:
     try:
         audio = mutagen.File(file_path, easy=True)
+        fmt = track_format(file_path, audio.info)
+        # Return before a Track exists. A row with no format ranks worst, and
+        # this way the file appears in unreadable_files for the user to see.
+        if fmt is None:
+            logging.warning(
+                "Could not determine format for file %s with codec %s.",
+                file_path,
+                getattr(audio.info, "codec", None),
+            )
+            return None
+
         return Track(
             file_path=os.path.normpath(file_path),
             file_name=os.path.basename(file_path),
@@ -53,7 +94,7 @@ def read_track(file_path: str, collection_id: int) -> Track | None:
             album=get_tag(audio, ["album"]),
             track_number=track_number_from_tag(get_tag(audio, ["tracknumber"])),
             year=year_from_date(get_tag(audio, ["date", "year"])),
-            format=os.path.splitext(file_path)[1].upper().strip("."),
+            format=fmt,
             bit_depth=audio.info.bits_per_sample
             if hasattr(audio.info, "bits_per_sample")
             else None,
@@ -74,6 +115,7 @@ def read_track(file_path: str, collection_id: int) -> Track | None:
 
 ALLOWED_EXTENSIONS = {
     ".mp3",
+    ".m4a",
     ".flac",
     ".wav",
 }  # placeholder, config file comes later
@@ -89,6 +131,10 @@ ALLOWED_EXTENSIONS = {
 # the user as a warning that their drive could not be read.
 APPLE_DOUBLE_PREFIX = "._"
 BATCH_SIZE = 100  # placeholder, config file comes later
+# The fields that a re-scan compares with the stored row. format is one of
+# them because an .m4a file gets its format from the codec, so the format can
+# change while the path stays the same: an ALAC file re-encoded to AAC under
+# its old name.
 SCANNED_FIELDS = (
     "file_size",
     "bit_rate",
@@ -100,6 +146,7 @@ SCANNED_FIELDS = (
     "track_number",
     "year",
     "bit_depth",
+    "format",
 )
 
 

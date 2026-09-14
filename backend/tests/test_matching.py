@@ -1824,12 +1824,16 @@ def test_a_mixed_pair_is_not_an_upgrade_in_either_direction(
         (16, None, 24, 96000),
         (16, 44100, None, 96000),
         (16, 44100, 24, None),
+        (0, 44100, 24, 96000),
+        (16, 0, 24, 96000),
     ],
     ids=[
         "mine: no bit depth",
         "mine: no sample rate",
         "theirs: no bit depth",
         "theirs: no sample rate",
+        "mine: bit depth 0",
+        "mine: sample rate 0",
     ],
 )
 def test_a_missing_value_is_not_an_upgrade(
@@ -1846,6 +1850,21 @@ def test_a_missing_value_is_not_an_upgrade(
         bit_depth=theirs_bit_depth,
         sample_rate=theirs_sample_rate,
         bit_rate=1000000,
+    )
+
+    result = classify_pairing(mine_track=mine, theirs_track=theirs)
+
+    assert result == Bucket.ALREADY_HAVE
+
+
+def test_a_bitrate_of_zero_counts_as_unmeasured(make_track):
+    mine = make_track(
+        format="AAC",
+        bit_rate=0,
+    )
+    theirs = make_track(
+        format="MP3",
+        bit_rate=320000,
     )
 
     result = classify_pairing(mine_track=mine, theirs_track=theirs)

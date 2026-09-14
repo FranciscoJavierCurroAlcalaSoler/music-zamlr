@@ -151,10 +151,9 @@ def durations_close(a: int, b: int) -> bool:
 # a user-configurable setting later.
 #
 # FLAC, ALAC and WAV tie because all three are lossless. A tie between two
-# lossless files goes to is_lossless_upgrade, never to bitrate. Note that
-# .m4a files can hold either ALAC (lossless) or AAC (lossy) and the extension
-# alone can't tell them apart, so anything scanned as "M4A" is currently
-# unranked; disambiguating that needs the codec read out of the file itself.
+# lossless files goes to is_lossless_upgrade, never to bitrate. The scanner
+# names ALAC and AAC from the codec of an .m4a file, because the extension
+# alone cannot tell them apart.
 #
 # WAV is uncompressed PCM: audio-identical to a FLAC of the same source, only
 # larger. Left out of this table it would rank 0, below MP3, and with the
@@ -197,15 +196,19 @@ def is_lossless_upgrade(mine_track: Track, theirs_track: Track) -> bool:
     compresses, not how good it is, so an uncompressed WAV or a louder master
     would always win on it.
 
-    A missing value on either side is not an upgrade. Read as 0, a value the
+    A missing value on either side is not an upgrade, and 0 counts as
+    missing. mutagen reports an MP4 value that it could not read as 0, and a
+    bit depth or sample rate of 0 is never real. Otherwise a value that the
     scanner could not measure loses to any real one, and the delete action
-    then removes a file that nobody evaluated.
+    removes a file that nobody evaluated.
     """
-    if (
-        mine_track.bit_depth is None
-        or mine_track.sample_rate is None
-        or theirs_track.bit_depth is None
-        or theirs_track.sample_rate is None
+    if not all(
+        [
+            mine_track.bit_depth,
+            mine_track.sample_rate,
+            theirs_track.bit_depth,
+            theirs_track.sample_rate,
+        ]
     ):
         return False
     quality_pairs = [
@@ -284,12 +287,12 @@ def classify_pairing(mine_track: Track, theirs_track: Track) -> Bucket:
                 return Bucket.ALREADY_HAVE
 
         # Same format rank and not both lossless, so bitrate breaks the tie.
-        # An unreadable bitrate on either side claims no upgrade: treating
-        # None as 0 would let a known 320 kbps "beat" a file we simply
-        # couldn't measure, and with the delete action that removes an
-        # original we never evaluated. Equal bitrates fall the same way,
+        # A bitrate of None or 0 on either side claims no upgrade. mutagen
+        # reports an MP4 bitrate that it could not read as 0, and that 0
+        # would lose to any known bitrate, so the delete action would remove
+        # a file that nobody measured. Equal bitrates fall the same way,
         # since without a strict improvement the copy is pointless.
-        if theirs_track.bit_rate is None or mine_track.bit_rate is None:
+        if not all([theirs_track.bit_rate, mine_track.bit_rate]):
             return Bucket.ALREADY_HAVE
         elif theirs_track.bit_rate > mine_track.bit_rate:
             return Bucket.UPGRADE_AVAILABLE
