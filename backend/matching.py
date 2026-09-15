@@ -167,6 +167,7 @@ FORMAT_RANK = {
     "MP3": 1,
     "AAC": 1,
     "OPUS": 1,
+    "VORBIS": 1,
 }
 
 # Whether a format is lossless is a fact about its codec, so it lives here

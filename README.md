@@ -31,10 +31,11 @@ drives directly with normal file operations. The React interface talks to it at
   [A collection keeps its path](#a-collection-keeps-its-path) before you use
   one.
 - Audio files in the formats `.mp3`, `.flac`, `.wav`, `.aif` or `.aiff`,
-  `.aac`, `.opus`, `.tta`, or `.m4a`. An `.m4a` file must hold ALAC or AAC
-  audio. The scanner lists an `.m4a` file with any other codec as a file that
-  it cannot read. The scanner ignores all other files and counts them as
-  **Not audio**. This includes `.ogg`, `.ape`, `.wma`, and `.wv` files.
+  `.aac`, `.opus`, `.tta`, `.m4a`, or `.ogg`. An `.m4a` file must hold ALAC or
+  AAC audio, and an `.ogg` file must hold Vorbis, Opus, or FLAC audio. The
+  scanner lists a file with other audio inside as a file that it cannot read.
+  The scanner ignores all other files and counts them as **Not audio**. This
+  includes `.ape`, `.wma`, and `.wv` files.
 
 ## Install
 
@@ -217,8 +218,9 @@ After the tool pairs your track with a track of theirs, it compares the two
 files:
 
 1. The format decides first. The lossless formats (FLAC, ALAC, WAV, AIFF, and
-   TTA) have the same rank. The lossy formats (MP3, AAC, and Opus) have a lower
-   rank. A file with a higher rank is always better, whatever its bitrate.
+   TTA) have the same rank. The lossy formats (MP3, AAC, Opus, and Vorbis) have
+   a lower rank. A file with a higher rank is always better, whatever its
+   bitrate.
 2. If both files are lossless, bit depth and sample rate decide.
    Their file is better only if neither value is lower than yours and at least
    one value is higher. Bitrate does not count here. A lossless bitrate shows
@@ -298,8 +300,8 @@ tags.
 
 Two changes come next, in this order:
 
-1. More formats: Ogg, Monkey's Audio, TAK, OptimFROG, Musepack, WMA, WavPack,
-   and DSD.
+1. More formats: Monkey's Audio, TAK, OptimFROG, Musepack, WMA, WavPack, and
+   DSD.
 2. A setting for the order of formats.
 
 After that, a desktop package will include `fpcalc`, and you will not install

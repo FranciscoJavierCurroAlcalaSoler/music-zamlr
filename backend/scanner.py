@@ -10,6 +10,9 @@ import mutagen.aac
 from mutagen import MutagenError
 from mutagen.apev2 import APEv2
 from mutagen.id3 import ID3
+from mutagen.oggflac import OggFLACStreamInfo
+from mutagen.oggopus import OggOpusInfo
+from mutagen.oggvorbis import OggVorbisInfo
 from sqlmodel import Session, select
 
 from database import create_collection, create_db_and_tables, engine
@@ -122,12 +125,23 @@ EXTENSION_FORMATS = {
     ".tta": "TTA",
 }
 
+# The format for each stream that an .ogg file can hold, keyed by the stream
+# information class that mutagen chose by reading the content. An MP3 file
+# named .ogg arrives with MP3 stream information, which is not a key, so it
+# gets no format.
+OGG_STREAM_FORMATS = {
+    OggVorbisInfo: "VORBIS",
+    OggOpusInfo: "OPUS",
+    OggFLACStreamInfo: "FLAC",
+}
+
 
 def track_format(file_path: str, info: object) -> str | None:
     """Name the format of a scanned file, or return None if it has none.
 
-    Every format except .m4a comes from EXTENSION_FORMATS, and an extension
-    that the table does not know gets None. An .m4a file can hold
+    Every format except .m4a and .ogg comes from EXTENSION_FORMATS, and an
+    extension that the table does not know gets None. An .ogg file gets its
+    format from OGG_STREAM_FORMATS. An .m4a file can hold
     ALAC, which is lossless, or AAC, which is lossy, so its codec decides.
     mutagen writes AAC as "mp4a.40" and an audio object type, and it writes no
     type when the stream has no decoder details. A bare "mp4a" prefix is not
@@ -143,6 +157,8 @@ def track_format(file_path: str, info: object) -> str | None:
     with no codec attribute at all.
     """
     extension = os.path.splitext(file_path)[1].lower()
+    if extension == ".ogg":
+        return OGG_STREAM_FORMATS.get(type(info))
     if extension != ".m4a":
         return EXTENSION_FORMATS.get(extension)
     codec = getattr(info, "codec", None)
@@ -218,8 +234,8 @@ def read_track(file_path: str, collection_id: int) -> Track | None:
 
 
 # Built from EXTENSION_FORMATS, so an allowed extension always has a format.
-# .m4a is added by hand, because its codec names the format.
-ALLOWED_EXTENSIONS = {*EXTENSION_FORMATS, ".m4a"}
+# .m4a and .ogg are added by hand, because their content names the format.
+ALLOWED_EXTENSIONS = {*EXTENSION_FORMATS, ".m4a", ".ogg"}
 
 # macOS writes one of these beside every file it copies to a filesystem with
 # no resource-fork support — which is every filesystem a drive needs to be

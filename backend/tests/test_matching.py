@@ -1886,15 +1886,17 @@ def test_a_new_lossless_format_ties_with_flac(make_track, fmt):
 
 
 # Both directions, so a rank above MP3 fails the first case and a rank below
-# it fails the second.
+# it fails the second. Two stacked parametrize marks run every format with
+# every bitrate case.
+@pytest.mark.parametrize("fmt", ["OPUS", "VORBIS"])
 @pytest.mark.parametrize(
     "their_bit_rate, expected",
     [(128000, Bucket.ALREADY_HAVE), (512000, Bucket.UPGRADE_AVAILABLE)],
     ids=["lower bitrate", "higher bitrate"],
 )
-def test_opus_ranks_with_mp3(make_track, their_bit_rate, expected):
+def test_a_new_lossy_format_ranks_with_mp3(make_track, fmt, their_bit_rate, expected):
     mine = make_track(format="MP3", bit_rate=320000)
-    theirs = make_track(format="OPUS", bit_rate=their_bit_rate)
+    theirs = make_track(format=fmt, bit_rate=their_bit_rate)
 
     result = classify_pairing(mine_track=mine, theirs_track=theirs)
 

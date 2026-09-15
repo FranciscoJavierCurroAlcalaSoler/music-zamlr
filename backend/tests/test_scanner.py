@@ -15,6 +15,7 @@ from matching import FORMAT_RANK
 from models import Collection, Track
 from scanner import (
     ALLOWED_EXTENSIONS,
+    OGG_STREAM_FORMATS,
     read_track,
     scan_folder,
     track_format,
@@ -194,6 +195,43 @@ def test_read_track_tta(test_collection, fixtures_dir):
     assert track.file_size == 14788
 
 
+# One extension, three formats: the stream that mutagen detects decides. FLAC
+# inside Ogg reports no bitrate and Opus no sample rate, and 0 records both.
+@pytest.mark.parametrize(
+    "file_name, expected_format, bit_depth, bit_rate, sample_rate, file_size",
+    [
+        ("test_track_vorbis.ogg", "VORBIS", None, 128000, 44100, 7189),
+        ("test_track_opus.ogg", "OPUS", None, 112336, 0, 14282),
+        ("test_track_flac.ogg", "FLAC", 16, 0, 44100, 12703),
+    ],
+    ids=["vorbis", "opus", "flac"],
+)
+def test_read_track_ogg_streams(
+    test_collection,
+    fixtures_dir,
+    file_name,
+    expected_format,
+    bit_depth,
+    bit_rate,
+    sample_rate,
+    file_size,
+):
+    track = read_track(str(fixtures_dir / file_name), collection_id=test_collection)
+
+    assert track is not None
+    assert track.format == expected_format
+    assert track.title == f"Test Track {expected_format}"
+    assert track.artist == "Music Zamlr Fixtures"
+    assert track.album == "Synthetic Test Album"
+    assert track.track_number == 3
+    assert track.year == 2026
+    assert track.bit_depth == bit_depth
+    assert track.bit_rate == bit_rate
+    assert track.sample_rate == sample_rate
+    assert track.duration == 1
+    assert track.file_size == file_size
+
+
 @pytest.mark.parametrize(
     "file_path, codec, expected",
     [
@@ -262,12 +300,17 @@ def test_track_format_names_each_extension(file_path, expected):
 
 def test_every_allowed_extension_names_a_ranked_format():
     # A format that FORMAT_RANK does not know ranks worst, so a lossless file
-    # of mine would lose to any MP3. The two .m4a formats come from the codec,
-    # so they are added by name.
-    formats = {
-        track_format(f"song{extension}", types.SimpleNamespace())
-        for extension in ALLOWED_EXTENSIONS - {".m4a"}
-    } | {"ALAC", "AAC"}
+    # of mine would lose to any MP3. The .m4a and .ogg formats come from the
+    # content: .m4a has no table, so its two are named here, and .ogg's come
+    # from its table, so a stream added to it cannot miss a rank.
+    formats = (
+        {
+            track_format(f"song{extension}", types.SimpleNamespace())
+            for extension in ALLOWED_EXTENSIONS - {".m4a", ".ogg"}
+        }
+        | {"ALAC", "AAC"}
+        | set(OGG_STREAM_FORMATS.values())
+    )
 
     assert None not in formats
     assert formats <= FORMAT_RANK.keys()
@@ -285,14 +328,16 @@ def test_read_track_returns_none_for_an_unknown_m4a_codec(
     assert track is None
 
 
-def test_read_track_warns_about_an_mp3_named_m4a(
-    tmp_path, fixtures_dir, test_collection, caplog
+@pytest.mark.parametrize("extension", [".m4a", ".ogg"])
+def test_read_track_warns_about_an_mp3_with_a_container_extension(
+    tmp_path, fixtures_dir, test_collection, caplog, extension
 ):
     # mutagen detects the format from the content, so an MP3 file named .m4a
-    # arrives with no codec attribute. The result is None whether the file is
-    # turned away with a warning or falls into the broad catch, so the log
-    # levels are the assertion that matters: the broad catch writes at ERROR.
-    misnamed = tmp_path / "misnamed.m4a"
+    # or .ogg arrives with MP3 stream information, which names neither
+    # container's format. The result is None whether the file is turned away
+    # with a warning or falls into the broad catch, so the log levels are the
+    # assertion that matters: the broad catch writes at ERROR.
+    misnamed = tmp_path / f"misnamed{extension}"
     shutil.copy(fixtures_dir / "test_track.mp3", misnamed)
 
     with caplog.at_level(logging.WARNING):
@@ -353,6 +398,25 @@ def test_scan_folder_reads_aiff_aac_opus_and_tta_files(
     tracks = session.exec(select(Track)).all()
     assert {t.format for t in tracks} == {"AIFF", "AAC", "OPUS", "TTA"}
     assert all(t.title is not None for t in tracks)
+
+
+def test_scan_folder_reads_ogg_streams(
+    fixtures_dir, tmp_path, test_collection, session
+):
+    # One name in capitals: the scanner accepts an extension in any case, and
+    # track_format must still reach its .ogg branch for that file.
+    shutil.copy(
+        fixtures_dir / "test_track_vorbis.ogg", tmp_path / "TEST_TRACK_VORBIS.OGG"
+    )
+    shutil.copy(fixtures_dir / "test_track_opus.ogg", tmp_path / "test_track_opus.ogg")
+    shutil.copy(fixtures_dir / "test_track_flac.ogg", tmp_path / "test_track_flac.ogg")
+
+    result = scan_folder(str(tmp_path), collection_id=test_collection, session=session)
+
+    assert result.skipped_non_audio == 0
+    assert result.unreadable_files == []
+    tracks = session.exec(select(Track)).all()
+    assert {t.format for t in tracks} == {"VORBIS", "OPUS", "FLAC"}
 
 
 def test_read_track_nonexistent_file_returns_none(test_collection, fixtures_dir):
