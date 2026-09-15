@@ -32,12 +32,12 @@ drives directly with normal file operations. The React interface talks to it at
   one.
 - Audio files in the formats `.mp3`, `.flac`, `.wav`, `.aif` or `.aiff`,
   `.aac`, `.opus`, `.tta`, `.ape`, `.tak`, `.ofr`, `.mpc`, `.wv`, `.wma`,
-  `.m4a`, or `.ogg`. An `.m4a` file must hold ALAC or AAC audio, and an `.ogg`
-  file must hold Vorbis, Opus, or FLAC audio. A `.wv` file must not hold DSD
-  audio, and a `.wma` file must not hold WMA Pro over S/PDIF. The scanner
-  lists a file with other audio inside as a file that it cannot read. The
-  scanner ignores all other files and counts them as **Not audio**. This
-  includes `.dsf` and `.dff` files.
+  `.dsf`, `.dff`, `.m4a`, or `.ogg`. An `.m4a` file must hold ALAC or AAC
+  audio, and an `.ogg` file must hold Vorbis, Opus, or FLAC audio. A `.wv`
+  file must not hold DSD audio, and a `.wma` file must not hold WMA Pro over
+  S/PDIF. The scanner lists a file with other audio inside as a file that it
+  cannot read. The scanner ignores all other files and counts them as **Not
+  audio**.
 
 ## Install
 
@@ -220,16 +220,19 @@ After the tool pairs your track with a track of theirs, it compares the two
 files:
 
 1. The format decides first. The lossless formats (FLAC, ALAC, WAV, AIFF, TTA,
-   Monkey's Audio, TAK, OptimFROG, WavPack, and WMA Lossless) have the same
-   rank. The lossy formats (MP3, AAC, Opus, Vorbis, Musepack, WavPack hybrid,
+   Monkey's Audio, TAK, OptimFROG, WavPack, and WMA Lossless) and DSD have
+   the same rank. The lossy formats (MP3, AAC, Opus, Vorbis, Musepack, WavPack hybrid,
    and WMA) have a lower rank. A file with a higher rank is always better,
    whatever its bitrate.
 2. If both files are lossless, bit depth and sample rate decide.
    Their file is better only if neither value is lower than yours and at least
    one value is higher. Bitrate does not count here. A lossless bitrate shows
    how well the sound compresses, not how good the sound is.
-3. If both files are lossy, the higher bitrate is better.
-4. If the two files are equal, you already have the track. If the tool cannot
+3. If one file is DSD and the other file is lossless, neither file is better.
+   DSD records sound in a different way, so the numbers of the two files do
+   not compare. If both files are DSD, the higher sample rate is better.
+4. If both files are lossy, the higher bitrate is better.
+5. If the two files are equal, you already have the track. If the tool cannot
    read a value that it needs from one of the files, you already have the
    track too. The tool never offers to replace a file whose quality it did not
    measure.
@@ -306,6 +309,9 @@ warns and lets you continue, because you can clear space before you confirm.
   compare two hybrid files of one recording. You then already have the track.
 - A WMA Lossless file reports no bit depth. The tool then cannot compare it
   with another lossless file of one recording, so you already have the track.
+- `fpcalc` cannot read a DSDIFF (`.dff`) file. The tool compares a DSDIFF track
+  by artist, title, and duration only. An upgrade between two DSDIFF files can
+  therefore be a different recording of the song.
 
 ## Status
 
@@ -313,10 +319,7 @@ The scan, the comparison, and the import all work, and the browser shows live
 progress for each. The comparison uses file hashes, acoustic fingerprints, and
 tags.
 
-Two changes come next, in this order:
-
-1. More formats: DSD.
-2. A setting for the order of formats.
+One change comes next: a setting for the order of formats.
 
 After that, a desktop package will include `fpcalc`, and you will not install
 it yourself.

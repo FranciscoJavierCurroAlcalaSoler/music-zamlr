@@ -232,6 +232,35 @@ def test_read_track_header_only_files(
     assert track.bit_rate == 0
 
 
+# DSF and DFF files hold ID3 tags, which the ID3 path reads. The bitrate is
+# the one that mutagen computes: 2,822,400 samples a second for each of 2
+# channels, at 1 bit a sample.
+@pytest.mark.parametrize(
+    "file_name, title",
+    [
+        ("test_track.dsf", "Test Track DSF"),
+        ("test_track.dff", "Test Track DFF"),
+    ],
+    ids=["dsf", "dff"],
+)
+def test_read_track_dsd_files(make_dsd_file, test_collection, file_name, title):
+    path = make_dsd_file(file_name)
+
+    track = read_track(str(path), collection_id=test_collection)
+
+    assert track is not None
+    assert track.format == "DSD"
+    assert track.title == title
+    assert track.artist == "Music Zamlr Fixtures"
+    assert track.album == "Synthetic Test Album"
+    assert track.track_number == 3
+    assert track.year == 2026
+    assert track.bit_depth == 1
+    assert track.sample_rate == 2822400
+    assert track.bit_rate == 5644800
+    assert track.duration == 2
+
+
 def test_read_track_ape(test_collection, fixtures_dir):
     # The tags are APEv2 under "Track" and "Year". Monkey's Audio reports no
     # bitrate, and 0 records that.
@@ -463,6 +492,8 @@ def test_track_format_of_other_files_comes_from_the_extension():
         ("song.tak", "TAK"),
         ("song.ofr", "OPTIMFROG"),
         ("song.mpc", "MUSEPACK"),
+        ("song.dsf", "DSD"),
+        ("song.dff", "DSD"),
         ("song.xyz", None),
     ],
     ids=[
@@ -479,6 +510,8 @@ def test_track_format_of_other_files_comes_from_the_extension():
         "tak",
         "optimfrog",
         "musepack",
+        "dsf",
+        "dff",
         "unknown extension",
     ],
 )
@@ -708,6 +741,18 @@ def test_scan_folder_reads_wma_files(fixtures_dir, tmp_path, test_collection, se
     assert result.skipped_non_audio == 0
     assert result.unreadable_files == []
     assert session.exec(select(Track)).one().format == "WMA"
+
+
+def test_scan_folder_reads_dsd_files(make_dsd_file, tmp_path, test_collection, session):
+    make_dsd_file("test_track.dsf")
+    make_dsd_file("test_track.dff")
+
+    result = scan_folder(str(tmp_path), collection_id=test_collection, session=session)
+
+    assert result.skipped_non_audio == 0
+    assert result.unreadable_files == []
+    tracks = session.exec(select(Track)).all()
+    assert [t.format for t in tracks] == ["DSD", "DSD"]
 
 
 def test_read_track_nonexistent_file_returns_none(test_collection, fixtures_dir):

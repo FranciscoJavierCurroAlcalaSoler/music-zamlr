@@ -95,8 +95,8 @@ def tag_source(audio, file_path: str):
     """Return the object that get_tag reads: easy tags, or the same names.
 
     With easy=True, mutagen serves names such as "title" for most formats.
-    Five kinds of file need more. AIFF and WAV keep ID3 inside their own
-    chunks, and mutagen serves that ID3 only by frame id. Monkey's Audio, TAK,
+    Five kinds of file need more. AIFF, WAV, DSF and DFF keep ID3 inside
+    their own chunks, and mutagen serves that ID3 only by frame id. Monkey's Audio, TAK,
     OptimFROG, Musepack and WavPack files load APEv2 tags, which use "track"
     and "year" where easy tags use "tracknumber" and "date". WMA files load
     ASF attributes, which have names of their own, such as "Author" for the
@@ -142,8 +142,10 @@ def track_number_from_tag(track_number_str: str | None) -> int | None:
         return None
 
 
-# The format for each extension that names exactly one format. .m4a is not
-# here, because its codec names the format, in track_format.
+# The format for each extension that names exactly one format. .m4a, .ogg, .wv
+# and .wma are not here, because their content names the format, in
+# track_format. A .dff file can hold DST, which is a lossless compression of
+# the same 1-bit stream, so it is DSD too.
 EXTENSION_FORMATS = {
     ".mp3": "MP3",
     ".flac": "FLAC",
@@ -157,6 +159,8 @@ EXTENSION_FORMATS = {
     ".tak": "TAK",
     ".ofr": "OPTIMFROG",
     ".mpc": "MUSEPACK",
+    ".dsf": "DSD",
+    ".dff": "DSD",
 }
 
 # The format for each stream that an .ogg file can hold, keyed by the stream

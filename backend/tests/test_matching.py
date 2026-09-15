@@ -1919,3 +1919,59 @@ def test_a_lossy_format_is_compared_by_bitrate(make_track, fmt):
     result = classify_pairing(mine_track=mine, theirs_track=theirs)
 
     assert result == Bucket.UPGRADE_AVAILABLE
+
+
+# In each case the file of theirs has the higher bitrate, so the bitrate rule
+# would call it an upgrade. A DSD file and a PCM file in one rank are never
+# compared, whichever side each one is on.
+@pytest.mark.parametrize(
+    "mine_values, theirs_values",
+    [
+        (
+            dict(format="DSD", bit_depth=1, sample_rate=2822400, bit_rate=5644800),
+            dict(format="FLAC", bit_depth=24, sample_rate=192000, bit_rate=9216000),
+        ),
+        (
+            dict(format="FLAC", bit_depth=16, sample_rate=44100, bit_rate=1411200),
+            dict(format="DSD", bit_depth=1, sample_rate=2822400, bit_rate=5644800),
+        ),
+    ],
+    ids=["dsd of mine", "dsd of theirs"],
+)
+def test_a_dsd_file_and_a_pcm_file_are_never_upgrades(
+    make_track, mine_values, theirs_values
+):
+    mine = make_track(**mine_values)
+    theirs = make_track(**theirs_values)
+
+    result = classify_pairing(mine_track=mine, theirs_track=theirs)
+
+    assert result == Bucket.ALREADY_HAVE
+
+
+# The bit depth of DSD is always 1, so the sample rate decides. In the last
+# case the rates are equal and theirs has the higher bitrate, as an
+# uncompressed DFF file has beside a DST-compressed one. The bitrate rule
+# would call that an upgrade.
+@pytest.mark.parametrize(
+    "mine_rate, mine_bit_rate, theirs_rate, theirs_bit_rate, expected",
+    [
+        (2822400, 5644800, 5644800, 11289600, Bucket.UPGRADE_AVAILABLE),
+        (5644800, 11289600, 2822400, 5644800, Bucket.ALREADY_HAVE),
+        (2822400, 3000000, 2822400, 5644800, Bucket.ALREADY_HAVE),
+    ],
+    ids=["higher rate of theirs", "lower rate of theirs", "equal rates"],
+)
+def test_two_dsd_files_are_compared_by_sample_rate(
+    make_track, mine_rate, mine_bit_rate, theirs_rate, theirs_bit_rate, expected
+):
+    mine = make_track(
+        format="DSD", bit_depth=1, sample_rate=mine_rate, bit_rate=mine_bit_rate
+    )
+    theirs = make_track(
+        format="DSD", bit_depth=1, sample_rate=theirs_rate, bit_rate=theirs_bit_rate
+    )
+
+    result = classify_pairing(mine_track=mine, theirs_track=theirs)
+
+    assert result == expected

@@ -8,6 +8,9 @@ from typing import NamedTuple
 import pytest
 from fastapi.testclient import TestClient
 from mutagen.apev2 import APEv2
+from mutagen.dsdiff import DSDIFF
+from mutagen.dsf import DSF
+from mutagen.id3 import TALB, TDRC, TIT2, TPE1, TRCK
 from sqlalchemy import create_engine as _sa_create_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
@@ -104,6 +107,94 @@ def make_header_only_file(tmp_path):
         return path
 
     return _make_header_only_file
+
+
+# The stream values in every DSD file. DSD64 is the most common DSD rate, and
+# 2 seconds keeps the duration apart from the 1 second of the fixture files.
+_DSD_SAMPLE_RATE = 2822400
+_DSD_CHANNELS = 2
+_DSD_SECONDS = 2
+# The byte pattern that DSD uses for silence.
+_DSD_SILENCE = b"\x69"
+
+
+def _dsf_bytes() -> bytes:
+    # DSF is little-endian, with 8-byte sizes. The sample count is for each
+    # channel, and each channel's data fills whole blocks of 4096 bytes.
+    # -(-a // b) is a division that rounds up.
+    samples = _DSD_SAMPLE_RATE * _DSD_SECONDS
+    blocks = -(-samples // 8 // 4096)
+    data = _DSD_SILENCE * (blocks * 4096 * _DSD_CHANNELS)
+    # The fmt chunk: its size (52), format version 1, format 0 (raw DSD),
+    # channel type 2 (stereo), channels, sample rate, 1 bit per sample, sample
+    # count, block size, and 4 reserved bytes.
+    fmt_chunk = b"fmt " + struct.pack(
+        "<QIIIIIIQI4x",
+        52,
+        1,
+        0,
+        2,
+        _DSD_CHANNELS,
+        _DSD_SAMPLE_RATE,
+        1,
+        samples,
+        4096,
+    )
+    data_chunk = b"data" + struct.pack("<Q", 12 + len(data)) + data
+    # The DSD chunk: its size (28), the file size, and the offset of the
+    # metadata, which stays 0 until mutagen writes the tags.
+    total_size = 28 + len(fmt_chunk) + len(data_chunk)
+    dsd_chunk = b"DSD " + struct.pack("<QQQ", 28, total_size, 0)
+    return dsd_chunk + fmt_chunk + data_chunk
+
+
+def _dff_chunk(chunk_id: bytes, body: bytes) -> bytes:
+    # DSDIFF is big-endian, with 8-byte sizes. A body of odd length gets one
+    # padding byte, which the size does not count.
+    return chunk_id + struct.pack(">Q", len(body)) + body + bytes(len(body) % 2)
+
+
+def _dff_bytes() -> bytes:
+    version = _dff_chunk(b"FVER", struct.pack(">I", 0x01050000))
+    sample_rate = _dff_chunk(b"FS  ", struct.pack(">I", _DSD_SAMPLE_RATE))
+    channels = _dff_chunk(b"CHNL", struct.pack(">H", _DSD_CHANNELS) + b"SLFTSRGT")
+    name = b"not compressed"
+    compression = _dff_chunk(b"CMPR", b"DSD " + bytes([len(name)]) + name)
+    properties = _dff_chunk(b"PROP", b"SND " + sample_rate + channels + compression)
+    # mutagen computes the length of a DSDIFF file from the size of its audio
+    # data, not from a sample count, so the data is complete: one byte for
+    # each 8 samples of each channel.
+    data_size = _DSD_SAMPLE_RATE * _DSD_SECONDS // 8 * _DSD_CHANNELS
+    audio = _dff_chunk(b"DSD ", _DSD_SILENCE * data_size)
+    return _dff_chunk(b"FRM8", b"DSD " + version + properties + audio)
+
+
+@pytest.fixture
+def make_dsd_file(tmp_path):
+    """Write a DSF or DFF file of DSD silence, with ID3 tags.
+
+    ffmpeg decodes DSD but cannot encode it, so the tests build these files.
+    The extension of the name chooses the format. The tags follow the fixture
+    files, with the extension in the title.
+    """
+    formats = {".dsf": (_dsf_bytes, DSF), ".dff": (_dff_bytes, DSDIFF)}
+
+    def _make_dsd_file(name: str) -> Path:
+        path = tmp_path / name
+        extension = path.suffix.lower()
+        build, file_type = formats[extension]
+        path.write_bytes(build())
+        audio = file_type(path)
+        audio.add_tags()
+        audio.tags.add(TIT2(encoding=3, text=f"Test Track {extension[1:].upper()}"))
+        audio.tags.add(TPE1(encoding=3, text="Music Zamlr Fixtures"))
+        audio.tags.add(TALB(encoding=3, text="Synthetic Test Album"))
+        audio.tags.add(TDRC(encoding=3, text="2026"))
+        audio.tags.add(TRCK(encoding=3, text="3/10"))
+        audio.save()
+        return path
+
+    return _make_dsd_file
 
 
 def _refuse_connection():

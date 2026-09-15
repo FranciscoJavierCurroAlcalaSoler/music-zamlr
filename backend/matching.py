@@ -169,6 +169,7 @@ FORMAT_RANK = {
     "OPTIMFROG": 3,
     "WAVPACK": 3,
     "WMA LOSSLESS": 3,
+    "DSD": 3,
     "MP3": 1,
     "AAC": 1,
     "OPUS": 1,
@@ -196,6 +197,12 @@ LOSSLESS_FORMATS = frozenset(
     ]
 )
 
+# DSD loses nothing either, but it is 1-bit audio at a sample rate in the
+# megahertz range, not PCM, so its bit depth and sample rate measure something
+# else. It is not in LOSSLESS_FORMATS: classify_pairing compares a DSD file
+# only with another DSD file, never with a PCM file.
+DSD_FORMATS = frozenset(["DSD"])
+
 
 def format_rank(fmt: str | None) -> int:
     # Unknown/missing formats rank lowest so they never win an
@@ -205,6 +212,10 @@ def format_rank(fmt: str | None) -> int:
 
 def is_lossless(fmt: str | None) -> bool:
     return fmt is not None and fmt.upper() in LOSSLESS_FORMATS
+
+
+def is_dsd(fmt: str | None) -> bool:
+    return fmt is not None and fmt.upper() in DSD_FORMATS
 
 
 def is_lossless_upgrade(mine_track: Track, theirs_track: Track) -> bool:
@@ -285,8 +296,9 @@ def classify_pairing(mine_track: Track, theirs_track: Track) -> Bucket:
     identity — whether these two are the same recording was settled by the
     caller, and for a fuzzy match that is a guess inside a ±2s window.
 
-    The format rank decides first. Within one rank, two lossless files go to
-    is_lossless_upgrade; every other pair of equal rank goes to bitrate.
+    The format rank decides first. Within one rank, two DSD files or two
+    lossless files go to is_lossless_upgrade; a DSD file against any other
+    file is not an upgrade; every other pair of equal rank goes to bitrate.
 
     This is the only definition of "what counts as an upgrade", called both
     for a confirmed single candidate and to label each candidate of an
@@ -302,6 +314,18 @@ def classify_pairing(mine_track: Track, theirs_track: Track) -> Bucket:
     elif theirs_rank < mine_rank:
         return Bucket.ALREADY_HAVE
     else:
+        # A DSD file and a PCM file in one rank are an upgrade in neither
+        # direction. Their bit depths and sample rates measure different
+        # things, and the bitrate rule below would choose the DSD file only
+        # because 1-bit audio at megahertz rates has a high bitrate. Two DSD
+        # files use dominance: the bit depth is always 1, so the sample rate
+        # decides.
+        if is_dsd(mine_track.format) or is_dsd(theirs_track.format):
+            if is_dsd(mine_track.format) and is_dsd(theirs_track.format):
+                if is_lossless_upgrade(mine_track, theirs_track):
+                    return Bucket.UPGRADE_AVAILABLE
+            return Bucket.ALREADY_HAVE
+
         # Both branches return. A lossless pair that is not an upgrade must not
         # reach the bitrate code below, where an uncompressed WAV always beats
         # an equal FLAC.
