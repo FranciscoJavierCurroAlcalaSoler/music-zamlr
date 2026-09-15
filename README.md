@@ -30,11 +30,11 @@ drives directly with normal file operations. The React interface talks to it at
   external USB drive is enough. Read
   [A collection keeps its path](#a-collection-keeps-its-path) before you use
   one.
-- Audio files in the formats `.mp3`, `.flac`, `.wav`, or `.m4a`. An `.m4a`
-  file must hold ALAC or AAC audio. The scanner lists an `.m4a` file with any
-  other codec as a file that it cannot read. The scanner ignores all other
-  files and counts them as **Not audio**. This includes `.ogg`, `.opus`, and
-  `.aiff` files.
+- Audio files in the formats `.mp3`, `.flac`, `.wav`, `.aif` or `.aiff`,
+  `.aac`, `.opus`, `.tta`, or `.m4a`. An `.m4a` file must hold ALAC or AAC
+  audio. The scanner lists an `.m4a` file with any other codec as a file that
+  it cannot read. The scanner ignores all other files and counts them as
+  **Not audio**. This includes `.ogg`, `.ape`, `.wma`, and `.wv` files.
 
 ## Install
 
@@ -138,6 +138,9 @@ upgrades replace:
 - **Delete my track.** The tool deletes your file after it writes the better
   copy. You cannot undo this.
 
+If you are not sure that every upgrade is correct, select **Move my track
+aside**. It keeps your file, and you can move the file back.
+
 The scanner never reads a folder named `_superseded`, in any letter case and at
 any depth in a collection. This keeps moved files out of later comparisons. It
 also hides your own folder, if it has this name.
@@ -213,19 +216,22 @@ was deleted, after its scan. Scan the collection of that file again.
 After the tool pairs your track with a track of theirs, it compares the two
 files:
 
-1. The format decides first. FLAC, ALAC, and WAV have the same rank. MP3 and
-   AAC have a lower rank. A file with a higher rank is always better, whatever
-   its bitrate.
-2. If both files are lossless (FLAC, ALAC, or WAV), bit depth and sample rate
-   decide.
+1. The format decides first. The lossless formats (FLAC, ALAC, WAV, AIFF, and
+   TTA) have the same rank. The lossy formats (MP3, AAC, and Opus) have a lower
+   rank. A file with a higher rank is always better, whatever its bitrate.
+2. If both files are lossless, bit depth and sample rate decide.
    Their file is better only if neither value is lower than yours and at least
    one value is higher. Bitrate does not count here. A lossless bitrate shows
    how well the sound compresses, not how good the sound is.
-3. If both files are lossy (MP3 or AAC), the higher bitrate is better.
+3. If both files are lossy, the higher bitrate is better.
 4. If the two files are equal, you already have the track. If the tool cannot
    read a value that it needs from one of the files, you already have the
    track too. The tool never offers to replace a file whose quality it did not
    measure.
+
+Every upgrade in the table is a file that **Delete my track** removes from your
+collection. The rule can be wrong about a track, for example about a file that
+was converted to a higher sample rate. The deletion is then permanent.
 
 The rule for lossless files has three consequences:
 
@@ -280,6 +286,9 @@ warns and lets you continue, because you can clear space before you confirm.
   destination drive can need more space than the preview shows.
 - Do not scan one collection from two browser tabs at the same time. The tool
   does not prevent it, and one of the scans can fail.
+- A TrueAudio (`.tta`) file reports no bit depth. The tool then cannot compare
+  two TTA files of one recording, so you already have the track. The result
+  table shows no bitrate for a TTA file.
 
 ## Status
 
@@ -287,7 +296,11 @@ The scan, the comparison, and the import all work, and the browser shows live
 progress for each. The comparison uses file hashes, acoustic fingerprints, and
 tags.
 
-One change comes next: a setting for the order of formats.
+Two changes come next, in this order:
+
+1. More formats: Ogg, Monkey's Audio, TAK, OptimFROG, Musepack, WMA, WavPack,
+   and DSD.
+2. A setting for the order of formats.
 
 After that, a desktop package will include `fpcalc`, and you will not install
 it yourself.

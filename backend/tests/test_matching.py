@@ -1870,3 +1870,32 @@ def test_a_bitrate_of_zero_counts_as_unmeasured(make_track):
     result = classify_pairing(mine_track=mine, theirs_track=theirs)
 
     assert result == Bucket.ALREADY_HAVE
+
+
+# Equal bit depth and sample rate, and theirs carries the higher bitrate. A
+# format missing from LOSSLESS_FORMATS falls to the bitrate rule and becomes
+# an upgrade here.
+@pytest.mark.parametrize("fmt", ["AIFF", "TTA"])
+def test_a_new_lossless_format_ties_with_flac(make_track, fmt):
+    mine = make_track(format="FLAC", bit_depth=16, sample_rate=44100, bit_rate=900000)
+    theirs = make_track(format=fmt, bit_depth=16, sample_rate=44100, bit_rate=1411200)
+
+    result = classify_pairing(mine_track=mine, theirs_track=theirs)
+
+    assert result == Bucket.ALREADY_HAVE
+
+
+# Both directions, so a rank above MP3 fails the first case and a rank below
+# it fails the second.
+@pytest.mark.parametrize(
+    "their_bit_rate, expected",
+    [(128000, Bucket.ALREADY_HAVE), (512000, Bucket.UPGRADE_AVAILABLE)],
+    ids=["lower bitrate", "higher bitrate"],
+)
+def test_opus_ranks_with_mp3(make_track, their_bit_rate, expected):
+    mine = make_track(format="MP3", bit_rate=320000)
+    theirs = make_track(format="OPUS", bit_rate=their_bit_rate)
+
+    result = classify_pairing(mine_track=mine, theirs_track=theirs)
+
+    assert result == expected

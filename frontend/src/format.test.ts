@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  bitrate,
   progressPercent,
   shortenPath,
   fileSize,
@@ -126,5 +127,21 @@ describe("unreadableFilesSummary", () => {
     expect(unreadableFilesSummary(2)).toBe(
       "2 files could not be read, so their tracks were compared by tags only.",
     );
+  });
+});
+
+describe("bitrate", () => {
+  it("shows kilobits per second", () => {
+    expect(bitrate(320000)).toBe("320 kbps");
+  });
+
+  it("shows the placeholder for a missing bitrate", () => {
+    expect(bitrate(null)).toBe("—");
+  });
+
+  // 0 is what the scanner stores when a file reports no bitrate, as a
+  // TrueAudio file does. "0 kbps" would claim a measurement.
+  it("shows the placeholder for a bitrate of 0", () => {
+    expect(bitrate(0)).toBe("—");
   });
 });

@@ -104,9 +104,11 @@ export function duration(seconds: number | null): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-// read_track stores audio.info.bitrate, which is bits per second.
+// read_track stores audio.info.bitrate, which is bits per second. It stores 0
+// when the file reports no bitrate, as a TrueAudio file does, so 0 shows the
+// same placeholder as a missing value, never "0 kbps".
 export function bitrate(bitsPerSecond: number | null): string {
-  return bitsPerSecond === null
+  return bitsPerSecond === null || bitsPerSecond === 0
     ? PLACEHOLDER
     : `${Math.round(bitsPerSecond / 1000)} kbps`;
 }

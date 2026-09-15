@@ -6,6 +6,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 import mutagen
+import mutagen.aac
+from mutagen import MutagenError
+from mutagen.apev2 import APEv2
+from mutagen.id3 import ID3
 from sqlmodel import Session, select
 
 from database import create_collection, create_db_and_tables, engine
@@ -21,6 +25,72 @@ def get_tag(audio, keys: list[str]) -> str | None:
         if value is not None and value != "":
             return value
     return None
+
+
+# The ID3 frames that hold the values read_track asks for.
+ID3_FRAMES = {
+    "title": "TIT2",
+    "artist": "TPE1",
+    "album": "TALB",
+    "date": "TDRC",
+    "tracknumber": "TRCK",
+}
+
+# The APEv2 keys for the same values. mutagen compares APEv2 keys without
+# case, and writers use "date" or "year" for the year, so both are read.
+APE_KEYS = {
+    "title": "title",
+    "artist": "artist",
+    "album": "album",
+    "date": "date",
+    "year": "year",
+    "tracknumber": "track",
+}
+
+
+def _values_from_id3(tags) -> dict[str, list[str]]:
+    values = {}
+    for name, frame_id in ID3_FRAMES.items():
+        frame = tags.get(frame_id)
+        if frame is not None and frame.text:
+            values[name] = [str(frame.text[0])]
+    return values
+
+
+def _values_from_ape(tags) -> dict[str, list[str]]:
+    values = {}
+    for name, key in APE_KEYS.items():
+        value = tags.get(key)
+        if value is not None:
+            values[name] = [str(value)]
+    return values
+
+
+def tag_source(audio, file_path: str):
+    """Return the object that get_tag reads: easy tags, or the same names.
+
+    With easy=True, mutagen serves names such as "title" for most formats.
+    Three kinds of file need more. AIFF and WAV keep ID3 inside their own
+    chunks, and mutagen serves that ID3 only by frame id. A raw AAC file can
+    start with an ID3 tag, which the AAC reader does not load. A TrueAudio
+    file with APEv2 tags looks untagged, because its reader loads only ID3.
+
+    A file with no readable tags gives an empty dict, so every tag reads as
+    None. A damaged tag block gives the same result, because the audio is
+    still readable and the file must still get a row.
+    """
+    if isinstance(audio.tags, ID3):
+        return _values_from_id3(audio.tags)
+    if audio.tags is not None:
+        return audio
+    try:
+        return _values_from_id3(ID3(file_path))
+    except MutagenError:
+        pass
+    try:
+        return _values_from_ape(APEv2(file_path))
+    except MutagenError:
+        return {}
 
 
 def year_from_date(date_str: str | None) -> int | None:
@@ -39,10 +109,25 @@ def track_number_from_tag(track_number_str: str | None) -> int | None:
         return None
 
 
-def track_format(file_path: str, info: object) -> str | None:
-    """Name the format of a scanned file, or return None for an unknown codec.
+# The format for each extension that names exactly one format. .m4a is not
+# here, because its codec names the format, in track_format.
+EXTENSION_FORMATS = {
+    ".mp3": "MP3",
+    ".flac": "FLAC",
+    ".wav": "WAV",
+    ".aif": "AIFF",
+    ".aiff": "AIFF",
+    ".aac": "AAC",
+    ".opus": "OPUS",
+    ".tta": "TTA",
+}
 
-    Every format except .m4a comes from the extension. An .m4a file can hold
+
+def track_format(file_path: str, info: object) -> str | None:
+    """Name the format of a scanned file, or return None if it has none.
+
+    Every format except .m4a comes from EXTENSION_FORMATS, and an extension
+    that the table does not know gets None. An .m4a file can hold
     ALAC, which is lossless, or AAC, which is lossy, so its codec decides.
     mutagen writes AAC as "mp4a.40" and an audio object type, and it writes no
     type when the stream has no decoder details. A bare "mp4a" prefix is not
@@ -57,8 +142,9 @@ def track_format(file_path: str, info: object) -> str | None:
     format from the content, not the name, so an MP3 file named .m4a arrives
     with no codec attribute at all.
     """
-    if os.path.splitext(file_path)[1].lower() != ".m4a":
-        return os.path.splitext(file_path)[1].upper().strip(".")
+    extension = os.path.splitext(file_path)[1].lower()
+    if extension != ".m4a":
+        return EXTENSION_FORMATS.get(extension)
     codec = getattr(info, "codec", None)
     if codec is None:
         return None
@@ -69,9 +155,22 @@ def track_format(file_path: str, info: object) -> str | None:
     return None
 
 
+def open_audio(file_path: str):
+    """Open a file with mutagen, and choose the reader where detection fails.
+
+    A raw AAC file opens with the AAC reader directly. mutagen chooses a
+    reader by score, and an ID3 tag at the start of a file scores 2 for MP3
+    against 1 for the .aac extension. Detection then gives a tagged AAC file
+    to the MP3 reader, which fails on it.
+    """
+    if os.path.splitext(file_path)[1].lower() == ".aac":
+        return mutagen.aac.AAC(file_path)
+    return mutagen.File(file_path, easy=True)
+
+
 def read_track(file_path: str, collection_id: int) -> Track | None:
     try:
-        audio = mutagen.File(file_path, easy=True)
+        audio = open_audio(file_path)
         fmt = track_format(file_path, audio.info)
         # Return before a Track exists. A row with no format ranks worst, and
         # this way the file appears in unreadable_files for the user to see.
@@ -83,17 +182,22 @@ def read_track(file_path: str, collection_id: int) -> Track | None:
             )
             return None
 
+        tags = tag_source(audio, file_path)
         return Track(
             file_path=os.path.normpath(file_path),
             file_name=os.path.basename(file_path),
-            bit_rate=audio.info.bitrate,
-            sample_rate=audio.info.sample_rate,
+            # getattr with 0, because Opus reports no sample rate and
+            # TrueAudio no bitrate. Neither column can hold None, and 0 counts
+            # as unmeasured wherever they are compared. round, because a raw
+            # AAC bitrate arrives as a float.
+            bit_rate=round(getattr(audio.info, "bitrate", 0) or 0),
+            sample_rate=getattr(audio.info, "sample_rate", 0) or 0,
             duration=round(audio.info.length),
-            title=get_tag(audio, ["title"]),
-            artist=get_tag(audio, ["artist"]),
-            album=get_tag(audio, ["album"]),
-            track_number=track_number_from_tag(get_tag(audio, ["tracknumber"])),
-            year=year_from_date(get_tag(audio, ["date", "year"])),
+            title=get_tag(tags, ["title"]),
+            artist=get_tag(tags, ["artist"]),
+            album=get_tag(tags, ["album"]),
+            track_number=track_number_from_tag(get_tag(tags, ["tracknumber"])),
+            year=year_from_date(get_tag(tags, ["date", "year"])),
             format=fmt,
             bit_depth=audio.info.bits_per_sample
             if hasattr(audio.info, "bits_per_sample")
@@ -113,12 +217,9 @@ def read_track(file_path: str, collection_id: int) -> Track | None:
         return None
 
 
-ALLOWED_EXTENSIONS = {
-    ".mp3",
-    ".m4a",
-    ".flac",
-    ".wav",
-}  # placeholder, config file comes later
+# Built from EXTENSION_FORMATS, so an allowed extension always has a format.
+# .m4a is added by hand, because its codec names the format.
+ALLOWED_EXTENSIONS = {*EXTENSION_FORMATS, ".m4a"}
 
 # macOS writes one of these beside every file it copies to a filesystem with
 # no resource-fork support — which is every filesystem a drive needs to be

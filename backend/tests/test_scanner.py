@@ -11,8 +11,10 @@ from sqlmodel import select
 import scanner
 from fingerprinting import FPCALC_ALGORITHM, FPCALC_LENGTH_SECONDS, pack_fingerprint
 from importing import SUPERSEDED_DIR_NAME
+from matching import FORMAT_RANK
 from models import Collection, Track
 from scanner import (
+    ALLOWED_EXTENSIONS,
     read_track,
     scan_folder,
     track_format,
@@ -108,6 +110,90 @@ def test_read_track_aac(test_collection, fixtures_dir):
     assert track.collection_id == test_collection
 
 
+def test_read_track_aiff(test_collection, fixtures_dir):
+    # The tags live in an ID3 chunk inside the AIFF file, which mutagen serves
+    # only by frame id. Without that path, every tag below reads as None.
+    track = read_track(
+        str(fixtures_dir / "test_track.aiff"), collection_id=test_collection
+    )
+
+    assert track is not None
+    assert track.title == "Test Track AIFF"
+    assert track.artist == "Music Zamlr Fixtures"
+    assert track.album == "Synthetic Test Album"
+    assert track.track_number == 3
+    assert track.year == 2026
+    assert track.format == "AIFF"
+    assert track.bit_depth == 16
+    assert track.bit_rate == 705600
+    assert track.sample_rate == 44100
+    assert track.duration == 1
+    assert track.file_size == 88430
+
+
+def test_read_track_raw_aac_with_an_id3_tag(test_collection, fixtures_dir):
+    # The fixture starts with an ID3 tag, which makes mutagen's detection pick
+    # the MP3 reader. A None here means the AAC reader was not chosen.
+    track = read_track(
+        str(fixtures_dir / "test_track.aac"), collection_id=test_collection
+    )
+
+    assert track is not None
+    assert track.title == "Test Track AAC"
+    assert track.artist == "Music Zamlr Fixtures"
+    assert track.album == "Synthetic Test Album"
+    assert track.track_number == 3
+    assert track.year == 2026
+    assert track.format == "AAC"
+    assert track.sample_rate == 44100
+    assert track.duration == 1
+    assert track.file_size == 16790
+    # isinstance as well as ==, because mutagen gives this bitrate as the float
+    # 125049.0, and 125049.0 == 125049 is true in Python.
+    assert track.bit_rate == 125049
+    assert isinstance(track.bit_rate, int)
+
+
+def test_read_track_opus(test_collection, fixtures_dir):
+    track = read_track(
+        str(fixtures_dir / "test_track.opus"), collection_id=test_collection
+    )
+
+    assert track is not None
+    assert track.title == "Test Track OPUS"
+    assert track.artist == "Music Zamlr Fixtures"
+    assert track.album == "Synthetic Test Album"
+    assert track.track_number == 3
+    assert track.year == 2026
+    assert track.format == "OPUS"
+    assert track.bit_rate == 112336
+    # Opus reports no sample rate, and 0 is how the column records that.
+    assert track.sample_rate == 0
+    assert track.duration == 1
+    assert track.file_size == 14282
+
+
+def test_read_track_tta(test_collection, fixtures_dir):
+    # The tags are APEv2, which the TrueAudio reader does not load, and the
+    # file reports no bitrate and no bit depth.
+    track = read_track(
+        str(fixtures_dir / "test_track.tta"), collection_id=test_collection
+    )
+
+    assert track is not None
+    assert track.title == "Test Track TTA"
+    assert track.artist == "Music Zamlr Fixtures"
+    assert track.album == "Synthetic Test Album"
+    assert track.track_number == 3
+    assert track.year == 2026
+    assert track.format == "TTA"
+    assert track.bit_rate == 0
+    assert track.bit_depth is None
+    assert track.sample_rate == 44100
+    assert track.duration == 1
+    assert track.file_size == 14788
+
+
 @pytest.mark.parametrize(
     "file_path, codec, expected",
     [
@@ -141,6 +227,50 @@ def test_track_format_of_other_files_comes_from_the_extension():
     info = types.SimpleNamespace()
 
     assert track_format("song.flac", info) == "FLAC"
+
+
+@pytest.mark.parametrize(
+    "file_path, expected",
+    [
+        ("song.mp3", "MP3"),
+        ("song.flac", "FLAC"),
+        ("song.wav", "WAV"),
+        ("song.aif", "AIFF"),
+        ("song.aiff", "AIFF"),
+        ("SONG.AIFF", "AIFF"),
+        ("song.aac", "AAC"),
+        ("song.opus", "OPUS"),
+        ("song.tta", "TTA"),
+        ("song.xyz", None),
+    ],
+    ids=[
+        "mp3",
+        "flac",
+        "wav",
+        "aif",
+        "aiff",
+        "uppercase aiff",
+        "aac",
+        "opus",
+        "tta",
+        "unknown extension",
+    ],
+)
+def test_track_format_names_each_extension(file_path, expected):
+    assert track_format(file_path, types.SimpleNamespace()) == expected
+
+
+def test_every_allowed_extension_names_a_ranked_format():
+    # A format that FORMAT_RANK does not know ranks worst, so a lossless file
+    # of mine would lose to any MP3. The two .m4a formats come from the codec,
+    # so they are added by name.
+    formats = {
+        track_format(f"song{extension}", types.SimpleNamespace())
+        for extension in ALLOWED_EXTENSIONS - {".m4a"}
+    } | {"ALAC", "AAC"}
+
+    assert None not in formats
+    assert formats <= FORMAT_RANK.keys()
 
 
 def test_read_track_returns_none_for_an_unknown_m4a_codec(
@@ -203,6 +333,26 @@ def test_scan_updates_the_format_when_the_codec_changes(
     tracks = session.exec(select(Track)).all()
     assert len(tracks) == 1
     assert tracks[0].format == "AAC"
+
+
+def test_scan_folder_reads_aiff_aac_opus_and_tta_files(
+    fixtures_dir, tmp_path, test_collection, session
+):
+    for name in (
+        "test_track.aiff",
+        "test_track.aac",
+        "test_track.opus",
+        "test_track.tta",
+    ):
+        shutil.copy(fixtures_dir / name, tmp_path / name)
+
+    result = scan_folder(str(tmp_path), collection_id=test_collection, session=session)
+
+    assert result.skipped_non_audio == 0
+    assert result.unreadable_files == []
+    tracks = session.exec(select(Track)).all()
+    assert {t.format for t in tracks} == {"AIFF", "AAC", "OPUS", "TTA"}
+    assert all(t.title is not None for t in tracks)
 
 
 def test_read_track_nonexistent_file_returns_none(test_collection, fixtures_dir):

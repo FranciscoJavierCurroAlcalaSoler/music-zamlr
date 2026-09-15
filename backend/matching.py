@@ -150,7 +150,7 @@ def durations_close(a: int, b: int) -> bool:
 # Higher number = better quality. Module-level for now; intended to become
 # a user-configurable setting later.
 #
-# FLAC, ALAC and WAV tie because all three are lossless. A tie between two
+# Every lossless format ties at 3, and every lossy format at 1. A tie between two
 # lossless files goes to is_lossless_upgrade, never to bitrate. The scanner
 # names ALAC and AAC from the codec of an .m4a file, because the extension
 # alone cannot tell them apart.
@@ -162,14 +162,17 @@ FORMAT_RANK = {
     "FLAC": 3,
     "ALAC": 3,
     "WAV": 3,
+    "AIFF": 3,
+    "TTA": 3,
     "MP3": 1,
     "AAC": 1,
+    "OPUS": 1,
 }
 
 # Whether a format is lossless is a fact about its codec, so it lives here
 # and not in FORMAT_RANK. The rank is meant to become a user setting, and a
 # rule keyed on "rank 3" would change meaning when the user reorders formats.
-LOSSLESS_FORMATS = frozenset(["FLAC", "ALAC", "WAV"])
+LOSSLESS_FORMATS = frozenset(["FLAC", "ALAC", "WAV", "AIFF", "TTA"])
 
 
 def format_rank(fmt: str | None) -> int:
