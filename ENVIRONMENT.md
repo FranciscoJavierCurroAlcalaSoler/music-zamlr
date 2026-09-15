@@ -2,7 +2,7 @@
 
 Reproducible inventory of the dev/runtime setup. Update whenever something is installed, upgraded, or reconfigured. Language-level packages are tracked by their lockfiles, not here — see "Not tracked here" at the bottom.
 
-Last updated: 2026-09-04
+Last updated: 2026-09-15
 
 ## Machine
 | | |
@@ -24,6 +24,7 @@ Last updated: 2026-09-04
 | GitHub CLI (`gh`) | 2.100.0 | Added 2026-09-04, `winget install --id GitHub.cli`. Reads Actions run logs without a browser: `gh run view --log-failed`. Authenticated over HTTPS. **Not** set as Git's credential helper — `gh auth login` offers to take that role and was declined, so Git Credential Manager keeps it. |
 | Chromaprint (`fpcalc`) | 1.6.1 (FFmpeg Lavc62.11.100) | Added 2026-09-05, `winget install --id AcoustID.Chromaprint --exact`. The fingerprinting binary for Phase 5. No lockfile covers it, which is why it is here. Installed as a winget *portable* package: the exe lands under `%LOCALAPPDATA%\Microsoft\WinGet\Packages\AcoustID.Chromaprint_.../chromaprint-fpcalc-1.6.1-windows-x86_64\` and is reachable on PATH only in shells started after the install. Locate it in code with `shutil.which("fpcalc")`, the only form that honours `PATHEXT` and so finds `fpcalc.exe`. This is the **x86_64** build. **CI pins this same 1.6.1 and installs it from the project's own GitHub release on all three runners** rather than from a package manager, so every leg tests the version this machine has — see `FPCALC_VERSION` in `.github/workflows/ci.yml`, and move the two together or neither. Package managers were rejected for that reason: apt's `libchromaprint-tools` and Homebrew's `chromaprint` each ship whatever their distribution froze, and Chocolatey's `chromaprint` is stuck at **1.1**, over a decade old. |
 | ffmpeg | 8.1.2 (Gyan full build) | Not installed for the app — it generates the manual test collections (the two `make_fixtures*.sh` scripts) and the synthetic fixtures under `backend/tests/fixtures/`. Recorded 2026-09-05 because nothing else names it and a clone cannot rebuild those collections without it. The app itself shells out to `fpcalc`, never to ffmpeg; see the spec's Phase 5 entry for why that choice was made. |
+| Monkey's Audio | 13.26 (x64) | Added 2026-09-15, from the official installer `MAC_1326_x64.exe` at monkeysaudio.com (no published checksum; Authenticode signature checked as Valid, signer Matthew Ashland). Default folder `C:\Program Files\Monkey's Audio x64\`, **not on PATH** — call `MAC.exe` by its full path. Not installed for the app: `MAC.exe` encodes the fixture `backend/tests/fixtures/test_track.ape`, which ffmpeg cannot encode. The installer also added the GUI `Monkey's Audio.exe` and an `uninstall.exe`. |
 
 ## VS Code extensions
 Verified against `code --list-extensions` on 2026-09-07. Check with that
@@ -119,7 +120,8 @@ These are captured by their own files and should not be duplicated here:
 - Node packages → `frontend/package.json` + `package-lock.json`
 
 System binaries have no lockfile, so they live in the Tools table above:
-`fpcalc` and `ffmpeg` are both recorded there as of 2026-09-05.
+`fpcalc` and `ffmpeg` are both recorded there as of 2026-09-05, and Monkey's
+Audio as of 2026-09-15.
 
 **Regenerating `requirements.txt` on Windows: mind the encoding.** The file
 was stored as UTF-16LE with a BOM until 2026-09-05, because `pip freeze >

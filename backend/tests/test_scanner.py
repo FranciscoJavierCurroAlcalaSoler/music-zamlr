@@ -195,6 +195,80 @@ def test_read_track_tta(test_collection, fixtures_dir):
     assert track.file_size == 14788
 
 
+# The files hold a stream header and APEv2 tags, and no audio. The tags need
+# their own path: "track" and "year" are not easy-tag names, so without it
+# the track number and the year read as None.
+@pytest.mark.parametrize(
+    "file_name, expected_format, title",
+    [
+        ("test_track.tak", "TAK", "Test Track TAK"),
+        ("test_track.ofr", "OPTIMFROG", "Test Track OFR"),
+    ],
+    ids=["tak", "optimfrog"],
+)
+def test_read_track_header_only_files(
+    make_header_only_file, test_collection, file_name, expected_format, title
+):
+    path = make_header_only_file(file_name)
+
+    track = read_track(str(path), collection_id=test_collection)
+
+    assert track is not None
+    assert track.format == expected_format
+    assert track.title == title
+    assert track.artist == "Music Zamlr Fixtures"
+    assert track.album == "Synthetic Test Album"
+    assert track.track_number == 3
+    assert track.year == 2026
+    assert track.bit_depth == 24
+    assert track.sample_rate == 96000
+    assert track.duration == 3
+    # Neither reader reports a bitrate.
+    assert track.bit_rate == 0
+
+
+def test_read_track_ape(test_collection, fixtures_dir):
+    # The tags are APEv2 under "Track" and "Year". Monkey's Audio reports no
+    # bitrate, and 0 records that.
+    track = read_track(
+        str(fixtures_dir / "test_track.ape"), collection_id=test_collection
+    )
+
+    assert track is not None
+    assert track.title == "Test Track APE"
+    assert track.artist == "Music Zamlr Fixtures"
+    assert track.album == "Synthetic Test Album"
+    assert track.track_number == 3
+    assert track.year == 2026
+    assert track.format == "APE"
+    assert track.bit_depth == 16
+    assert track.bit_rate == 0
+    assert track.sample_rate == 44100
+    assert track.duration == 1
+    assert track.file_size == 12752
+
+
+def test_read_track_musepack(test_collection, fixtures_dir):
+    # The tags are APEv2 under "Track" and "Year", as in the header-only files,
+    # but this file holds real audio. Musepack reports no bit depth.
+    track = read_track(
+        str(fixtures_dir / "test_track.mpc"), collection_id=test_collection
+    )
+
+    assert track is not None
+    assert track.title == "Test Track MUSEPACK"
+    assert track.artist == "Music Zamlr Fixtures"
+    assert track.album == "Synthetic Test Album"
+    assert track.track_number == 3
+    assert track.year == 2026
+    assert track.format == "MUSEPACK"
+    assert track.bit_depth is None
+    assert track.bit_rate == 49520
+    assert track.sample_rate == 44100
+    assert track.duration == 1
+    assert track.file_size == 6190
+
+
 # One extension, three formats: the stream that mutagen detects decides. FLAC
 # inside Ogg reports no bitrate and Opus no sample rate, and 0 records both.
 @pytest.mark.parametrize(
@@ -279,6 +353,10 @@ def test_track_format_of_other_files_comes_from_the_extension():
         ("song.aac", "AAC"),
         ("song.opus", "OPUS"),
         ("song.tta", "TTA"),
+        ("song.ape", "APE"),
+        ("song.tak", "TAK"),
+        ("song.ofr", "OPTIMFROG"),
+        ("song.mpc", "MUSEPACK"),
         ("song.xyz", None),
     ],
     ids=[
@@ -291,6 +369,10 @@ def test_track_format_of_other_files_comes_from_the_extension():
         "aac",
         "opus",
         "tta",
+        "ape",
+        "tak",
+        "optimfrog",
+        "musepack",
         "unknown extension",
     ],
 )
@@ -417,6 +499,22 @@ def test_scan_folder_reads_ogg_streams(
     assert result.unreadable_files == []
     tracks = session.exec(select(Track)).all()
     assert {t.format for t in tracks} == {"VORBIS", "OPUS", "FLAC"}
+
+
+def test_scan_folder_reads_apev2_tagged_formats(
+    make_header_only_file, fixtures_dir, tmp_path, test_collection, session
+):
+    make_header_only_file("test_track.tak")
+    make_header_only_file("test_track.ofr")
+    shutil.copy(fixtures_dir / "test_track.mpc", tmp_path / "test_track.mpc")
+    shutil.copy(fixtures_dir / "test_track.ape", tmp_path / "test_track.ape")
+
+    result = scan_folder(str(tmp_path), collection_id=test_collection, session=session)
+
+    assert result.skipped_non_audio == 0
+    assert result.unreadable_files == []
+    tracks = session.exec(select(Track)).all()
+    assert {t.format for t in tracks} == {"TAK", "OPTIMFROG", "MUSEPACK", "APE"}
 
 
 def test_read_track_nonexistent_file_returns_none(test_collection, fixtures_dir):

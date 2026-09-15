@@ -1,11 +1,13 @@
 import json
 import random
+import struct
 from itertools import count
 from pathlib import Path
 from typing import NamedTuple
 
 import pytest
 from fastapi.testclient import TestClient
+from mutagen.apev2 import APEv2
 from sqlalchemy import create_engine as _sa_create_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
@@ -21,6 +23,87 @@ from models import Collection, Track
 @pytest.fixture
 def fixtures_dir() -> Path:
     return Path(__file__).parent / "fixtures"
+
+
+# The stream values in every header-only file. No two are equal, and none is
+# the 44.1 kHz and 16 bits of the fixture files, so a field read from the
+# wrong bits gives a wrong value instead of a lucky right one.
+_SAMPLE_RATE = 96000
+_BIT_DEPTH = 24
+_CHANNELS = 2
+_SECONDS = 3
+
+
+def _tak_header() -> bytes:
+    # The STREAM_INFO fields, packed from the lowest bit up, because TAK
+    # reads each byte from its lowest bit: 6 bits codec, 4 profile, 4 frame
+    # size, 35 sample count, 3 data type, 18 sample rate above 6000, 5 bit
+    # depth above 8, 4 channels above 1, 1 extension flag. The fields that
+    # stay 0 are fields the scanner does not read.
+    fields = (
+        (_SAMPLE_RATE * _SECONDS) << 14
+        | (_SAMPLE_RATE - 6000) << 52
+        | (_BIT_DEPTH - 8) << 70
+        | (_CHANNELS - 1) << 75
+    )
+    # The 80 bits fill 10 bytes. 3 zero bytes take the place of the CRC,
+    # which mutagen does not check but counts in the block size.
+    stream_info = fields.to_bytes(10, "little") + bytes(3)
+    # Each block starts with its type in one byte (1 is STREAM_INFO) and its
+    # size in 3 little-endian bytes. A block of type 0 (END) stops the reader.
+    stream_info_block = bytes([1]) + len(stream_info).to_bytes(3, "little")
+    return b"tBaK" + stream_info_block + stream_info + bytes(4)
+
+
+def _optimfrog_header() -> bytes:
+    # After the "OFR " magic: the size of the header data, which must be 15
+    # or more for OptimFROG 4.5 and later; the sample count over all
+    # channels, as 32 low bits and 16 high bits; the sample type (4 is
+    # 24-bit); the channels less 1; the sample rate; the encoder id.
+    fields = struct.pack(
+        "<IHBBIH",
+        _SAMPLE_RATE * _SECONDS * _CHANNELS,
+        0,
+        4,
+        _CHANNELS - 1,
+        _SAMPLE_RATE,
+        0,
+    )
+    # mutagen reads exactly 76 bytes and refuses a shorter header.
+    return (b"OFR " + struct.pack("<I", 15) + fields).ljust(76, b"\0")
+
+
+@pytest.fixture
+def make_header_only_file(tmp_path):
+    """Write a TAK or OptimFROG file with a stream header and APEv2 tags.
+
+    ffmpeg can encode neither format, so the tests build these files. A file
+    holds no audio, which is enough for read_track: it reads only the header
+    and the tags. It is not enough for fpcalc, so do not use one in a test
+    that needs the sound.
+
+    The extension of the name chooses the header. The tags follow the fixture
+    files, with the extension in the title, and APEv2 writes them under
+    "Track" and "Year".
+    """
+    headers = {".tak": _tak_header, ".ofr": _optimfrog_header}
+
+    def _make_header_only_file(name: str) -> Path:
+        path = tmp_path / name
+        extension = path.suffix.lower()
+        path.write_bytes(headers[extension]())
+        tags = APEv2()
+        tags["Title"] = f"Test Track {extension[1:].upper()}"
+        tags["Artist"] = "Music Zamlr Fixtures"
+        tags["Album"] = "Synthetic Test Album"
+        tags["Year"] = "2026"
+        tags["Track"] = "3/10"
+        # save appends the tag block to the end of the file, where APEv2
+        # readers look for it.
+        tags.save(path)
+        return path
+
+    return _make_header_only_file
 
 
 def _refuse_connection():

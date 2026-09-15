@@ -164,16 +164,22 @@ FORMAT_RANK = {
     "WAV": 3,
     "AIFF": 3,
     "TTA": 3,
+    "APE": 3,
+    "TAK": 3,
+    "OPTIMFROG": 3,
     "MP3": 1,
     "AAC": 1,
     "OPUS": 1,
     "VORBIS": 1,
+    "MUSEPACK": 1,
 }
 
 # Whether a format is lossless is a fact about its codec, so it lives here
 # and not in FORMAT_RANK. The rank is meant to become a user setting, and a
 # rule keyed on "rank 3" would change meaning when the user reorders formats.
-LOSSLESS_FORMATS = frozenset(["FLAC", "ALAC", "WAV", "AIFF", "TTA"])
+LOSSLESS_FORMATS = frozenset(
+    ["FLAC", "ALAC", "WAV", "AIFF", "TTA", "APE", "TAK", "OPTIMFROG"]
+)
 
 
 def format_rank(fmt: str | None) -> int:

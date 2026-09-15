@@ -31,11 +31,11 @@ drives directly with normal file operations. The React interface talks to it at
   [A collection keeps its path](#a-collection-keeps-its-path) before you use
   one.
 - Audio files in the formats `.mp3`, `.flac`, `.wav`, `.aif` or `.aiff`,
-  `.aac`, `.opus`, `.tta`, `.m4a`, or `.ogg`. An `.m4a` file must hold ALAC or
-  AAC audio, and an `.ogg` file must hold Vorbis, Opus, or FLAC audio. The
-  scanner lists a file with other audio inside as a file that it cannot read.
-  The scanner ignores all other files and counts them as **Not audio**. This
-  includes `.ape`, `.wma`, and `.wv` files.
+  `.aac`, `.opus`, `.tta`, `.ape`, `.tak`, `.ofr`, `.mpc`, `.m4a`, or `.ogg`.
+  An `.m4a` file must hold ALAC or AAC audio, and an `.ogg` file must hold
+  Vorbis, Opus, or FLAC audio. The scanner lists a file with other audio
+  inside as a file that it cannot read. The scanner ignores all other files
+  and counts them as **Not audio**. This includes `.wma` and `.wv` files.
 
 ## Install
 
@@ -217,10 +217,10 @@ was deleted, after its scan. Scan the collection of that file again.
 After the tool pairs your track with a track of theirs, it compares the two
 files:
 
-1. The format decides first. The lossless formats (FLAC, ALAC, WAV, AIFF, and
-   TTA) have the same rank. The lossy formats (MP3, AAC, Opus, and Vorbis) have
-   a lower rank. A file with a higher rank is always better, whatever its
-   bitrate.
+1. The format decides first. The lossless formats (FLAC, ALAC, WAV, AIFF, TTA,
+   Monkey's Audio, TAK, and OptimFROG) have the same rank. The lossy formats
+   (MP3, AAC, Opus, Vorbis, and Musepack) have a lower rank. A file with a
+   higher rank is always better, whatever its bitrate.
 2. If both files are lossless, bit depth and sample rate decide.
    Their file is better only if neither value is lower than yours and at least
    one value is higher. Bitrate does not count here. A lossless bitrate shows
@@ -291,6 +291,12 @@ warns and lets you continue, because you can clear space before you confirm.
 - A TrueAudio (`.tta`) file reports no bit depth. The tool then cannot compare
   two TTA files of one recording, so you already have the track. The result
   table shows no bitrate for a TTA file.
+- The result table shows no bitrate for a Monkey's Audio (`.ape`), TAK, or
+  OptimFROG (`.ofr`) file. These files report no bitrate. The comparison does not need it, because bit
+  depth and sample rate decide between two lossless files.
+- `fpcalc` cannot read an OptimFROG file. The tool compares an OptimFROG track
+  by artist, title, and duration only. An upgrade to or from an OptimFROG file
+  can therefore be a different recording of the song.
 
 ## Status
 
@@ -300,8 +306,7 @@ tags.
 
 Two changes come next, in this order:
 
-1. More formats: Monkey's Audio, TAK, OptimFROG, Musepack, WMA, WavPack, and
-   DSD.
+1. More formats: WMA, WavPack, and DSD.
 2. A setting for the order of formats.
 
 After that, a desktop package will include `fpcalc`, and you will not install

@@ -73,10 +73,12 @@ def tag_source(audio, file_path: str):
     """Return the object that get_tag reads: easy tags, or the same names.
 
     With easy=True, mutagen serves names such as "title" for most formats.
-    Three kinds of file need more. AIFF and WAV keep ID3 inside their own
-    chunks, and mutagen serves that ID3 only by frame id. A raw AAC file can
-    start with an ID3 tag, which the AAC reader does not load. A TrueAudio
-    file with APEv2 tags looks untagged, because its reader loads only ID3.
+    Four kinds of file need more. AIFF and WAV keep ID3 inside their own
+    chunks, and mutagen serves that ID3 only by frame id. Monkey's Audio, TAK,
+    OptimFROG and Musepack files load APEv2 tags, which use "track" and "year"
+    where easy tags use "tracknumber" and "date". A raw AAC file can start
+    with an ID3 tag, which the AAC reader does not load. A TrueAudio file with
+    APEv2 tags looks untagged, because its reader loads only ID3.
 
     A file with no readable tags gives an empty dict, so every tag reads as
     None. A damaged tag block gives the same result, because the audio is
@@ -84,6 +86,8 @@ def tag_source(audio, file_path: str):
     """
     if isinstance(audio.tags, ID3):
         return _values_from_id3(audio.tags)
+    if isinstance(audio.tags, APEv2):
+        return _values_from_ape(audio.tags)
     if audio.tags is not None:
         return audio
     try:
@@ -123,6 +127,10 @@ EXTENSION_FORMATS = {
     ".aac": "AAC",
     ".opus": "OPUS",
     ".tta": "TTA",
+    ".ape": "APE",
+    ".tak": "TAK",
+    ".ofr": "OPTIMFROG",
+    ".mpc": "MUSEPACK",
 }
 
 # The format for each stream that an .ogg file can hold, keyed by the stream
