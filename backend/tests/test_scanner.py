@@ -2,6 +2,7 @@
 import logging
 import os
 import shutil
+import struct
 import types
 
 import mutagen
@@ -16,10 +17,13 @@ from models import Collection, Track
 from scanner import (
     ALLOWED_EXTENSIONS,
     OGG_STREAM_FORMATS,
+    WAVPACK_DSD_FLAG,
+    WAVPACK_HYBRID_FLAG,
     read_track,
     scan_folder,
     track_format,
     track_number_from_tag,
+    wavpack_format,
     year_from_date,
 )
 
@@ -248,6 +252,65 @@ def test_read_track_ape(test_collection, fixtures_dir):
     assert track.file_size == 12752
 
 
+def test_read_track_wavpack(fixtures_dir, test_collection):
+    track = read_track(
+        str(fixtures_dir / "test_track.wv"), collection_id=test_collection
+    )
+
+    assert track is not None
+    assert track.title == "Test Track WAVPACK"
+    assert track.artist == "Music Zamlr Fixtures"
+    assert track.album == "Synthetic Test Album"
+    assert track.track_number == 3
+    assert track.year == 2026
+    assert track.format == "WAVPACK"
+    assert track.bit_depth == 16
+    assert track.bit_rate == 0
+    assert track.sample_rate == 44100
+    assert track.duration == 1
+    assert track.file_size == 35924
+
+
+def test_read_track_names_a_hybrid_wavpack_file_lossy(
+    fixtures_dir, tmp_path, test_collection
+):
+    # Only the hybrid bit changes, and mutagen ignores it, so the copy still
+    # opens. The format then proves that track_format reads the flags from
+    # the file itself.
+    fixture = bytearray((fixtures_dir / "test_track.wv").read_bytes())
+    flags = struct.unpack_from("<I", fixture, 24)[0]
+    struct.pack_into("<I", fixture, 24, flags | WAVPACK_HYBRID_FLAG)
+
+    hybrid_file = tmp_path / "test_track_hybrid.wv"
+    hybrid_file.write_bytes(fixture)
+
+    track = read_track(str(hybrid_file), collection_id=test_collection)
+
+    assert track is not None
+    assert track.format == "WAVPACK HYBRID"
+
+
+def test_read_track_refuses_dsd_inside_wavpack(
+    fixtures_dir, tmp_path, test_collection, caplog
+):
+    fixture = bytearray((fixtures_dir / "test_track.wv").read_bytes())
+    flags = struct.unpack_from("<I", fixture, 24)[0]
+    struct.pack_into("<I", fixture, 24, flags | WAVPACK_DSD_FLAG)
+
+    dsd_file = tmp_path / "test_track_dsd.wv"
+    dsd_file.write_bytes(fixture)
+
+    # None alone passes whatever happens, because the broad catch in
+    # read_track also returns None. The log levels show that the file was
+    # refused on purpose: the broad catch writes at ERROR.
+    caplog.set_level(logging.WARNING)
+    track = read_track(str(dsd_file), collection_id=test_collection)
+
+    assert track is None
+    assert any(record.levelno == logging.WARNING for record in caplog.records)
+    assert not any(record.levelno >= logging.ERROR for record in caplog.records)
+
+
 def test_read_track_musepack(test_collection, fixtures_dir):
     # The tags are APEv2 under "Track" and "Year", as in the header-only files,
     # but this file holds real audio. Musepack reports no bit depth.
@@ -388,14 +451,44 @@ def test_every_allowed_extension_names_a_ranked_format():
     formats = (
         {
             track_format(f"song{extension}", types.SimpleNamespace())
-            for extension in ALLOWED_EXTENSIONS - {".m4a", ".ogg"}
+            for extension in ALLOWED_EXTENSIONS - {".m4a", ".ogg", ".wv"}
         }
         | {"ALAC", "AAC"}
+        | {"WAVPACK", "WAVPACK HYBRID"}
         | set(OGG_STREAM_FORMATS.values())
     )
 
     assert None not in formats
     assert formats <= FORMAT_RANK.keys()
+
+
+# The fixture's real flags set many other bits, so a mask that tests more than
+# one bit fails that case. The DSD-and-hybrid case is the only one that fails
+# when the hybrid bit is checked first.
+@pytest.mark.parametrize(
+    "flags, expected",
+    [
+        (0, "WAVPACK"),
+        (WAVPACK_HYBRID_FLAG, "WAVPACK HYBRID"),
+        (WAVPACK_DSD_FLAG, None),
+        (WAVPACK_DSD_FLAG | WAVPACK_HYBRID_FLAG, None),
+        (0x04BC1831, "WAVPACK"),
+    ],
+    ids=["no flags", "hybrid", "dsd", "dsd and hybrid", "fixture flags"],
+)
+def test_wavpack_format_reads_the_flags(flags, expected):
+    header = struct.pack("<4s20xI4x", b"wvpk", flags)
+
+    assert wavpack_format(header) == expected
+
+
+@pytest.mark.parametrize(
+    "header",
+    [b"wvpk", b"RIFF" + bytes(28)],
+    ids=["too short", "not wavpack"],
+)
+def test_wavpack_format_refuses_a_header_that_is_not_wavpack(header):
+    assert wavpack_format(header) is None
 
 
 def test_read_track_returns_none_for_an_unknown_m4a_codec(
@@ -410,7 +503,7 @@ def test_read_track_returns_none_for_an_unknown_m4a_codec(
     assert track is None
 
 
-@pytest.mark.parametrize("extension", [".m4a", ".ogg"])
+@pytest.mark.parametrize("extension", [".m4a", ".ogg", ".wv"])
 def test_read_track_warns_about_an_mp3_with_a_container_extension(
     tmp_path, fixtures_dir, test_collection, caplog, extension
 ):
@@ -508,13 +601,20 @@ def test_scan_folder_reads_apev2_tagged_formats(
     make_header_only_file("test_track.ofr")
     shutil.copy(fixtures_dir / "test_track.mpc", tmp_path / "test_track.mpc")
     shutil.copy(fixtures_dir / "test_track.ape", tmp_path / "test_track.ape")
+    shutil.copy(fixtures_dir / "test_track.wv", tmp_path / "test_track.wv")
 
     result = scan_folder(str(tmp_path), collection_id=test_collection, session=session)
 
     assert result.skipped_non_audio == 0
     assert result.unreadable_files == []
     tracks = session.exec(select(Track)).all()
-    assert {t.format for t in tracks} == {"TAK", "OPTIMFROG", "MUSEPACK", "APE"}
+    assert {t.format for t in tracks} == {
+        "TAK",
+        "OPTIMFROG",
+        "MUSEPACK",
+        "APE",
+        "WAVPACK",
+    }
 
 
 def test_read_track_nonexistent_file_returns_none(test_collection, fixtures_dir):

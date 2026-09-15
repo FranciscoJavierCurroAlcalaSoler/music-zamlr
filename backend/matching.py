@@ -167,18 +167,20 @@ FORMAT_RANK = {
     "APE": 3,
     "TAK": 3,
     "OPTIMFROG": 3,
+    "WAVPACK": 3,
     "MP3": 1,
     "AAC": 1,
     "OPUS": 1,
     "VORBIS": 1,
     "MUSEPACK": 1,
+    "WAVPACK HYBRID": 1,
 }
 
 # Whether a format is lossless is a fact about its codec, so it lives here
 # and not in FORMAT_RANK. The rank is meant to become a user setting, and a
 # rule keyed on "rank 3" would change meaning when the user reorders formats.
 LOSSLESS_FORMATS = frozenset(
-    ["FLAC", "ALAC", "WAV", "AIFF", "TTA", "APE", "TAK", "OPTIMFROG"]
+    ["FLAC", "ALAC", "WAV", "AIFF", "TTA", "APE", "TAK", "OPTIMFROG", "WAVPACK"]
 )
 
 

@@ -1,5 +1,6 @@
 import logging
 import os
+import struct
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -143,13 +144,48 @@ OGG_STREAM_FORMATS = {
     OggFLACStreamInfo: "FLAC",
 }
 
+# Two bits of the flags in a WavPack block header. A hybrid file is lossy. Its
+# correction data is in a separate .wvc file, which an import does not copy
+# and fpcalc does not read. Bit 31 marks DSD audio, for which mutagen guesses
+# the sample rate, so its values cannot be compared.
+WAVPACK_HYBRID_FLAG = 0x8
+WAVPACK_DSD_FLAG = 0x80000000
+
+
+def wavpack_format(header: bytes) -> str | None:
+    """Name the format of a WavPack file from the start of its first block.
+
+    mutagen reads the stream values but does not give the flags, so this
+    function reads them: the magic at offset 0, and 4 little-endian flag
+    bytes at offset 24. It takes bytes, not a path, so a test can give it any
+    flags.
+
+    A header that is too short, or that does not start with "wvpk", gets
+    None. A file of another format can have the .wv extension, and mutagen
+    opens it anyway, because it detects the format from the content.
+
+    DSD is checked before hybrid. A DSD file with the hybrid bit must get no
+    format, not the format of a lossy file.
+    """
+    if len(header) < struct.calcsize("<4s20xI"):
+        return None
+    magic, flags = struct.unpack_from("<4s20xI", header)
+    if magic != b"wvpk":
+        return None
+    if flags & WAVPACK_DSD_FLAG:
+        return None
+    if flags & WAVPACK_HYBRID_FLAG:
+        return "WAVPACK HYBRID"
+    return "WAVPACK"
+
 
 def track_format(file_path: str, info: object) -> str | None:
     """Name the format of a scanned file, or return None if it has none.
 
-    Every format except .m4a and .ogg comes from EXTENSION_FORMATS, and an
-    extension that the table does not know gets None. An .ogg file gets its
-    format from OGG_STREAM_FORMATS. An .m4a file can hold
+    Every format except .m4a, .ogg and .wv comes from EXTENSION_FORMATS, and
+    an extension that the table does not know gets None. An .ogg file gets its
+    format from OGG_STREAM_FORMATS. A .wv file gets its format from the flags
+    in its header, which wavpack_format reads. An .m4a file can hold
     ALAC, which is lossless, or AAC, which is lossy, so its codec decides.
     mutagen writes AAC as "mp4a.40" and an audio object type, and it writes no
     type when the stream has no decoder details. A bare "mp4a" prefix is not
@@ -167,6 +203,9 @@ def track_format(file_path: str, info: object) -> str | None:
     extension = os.path.splitext(file_path)[1].lower()
     if extension == ".ogg":
         return OGG_STREAM_FORMATS.get(type(info))
+    if extension == ".wv":
+        with open(file_path, "rb") as file:
+            return wavpack_format(file.read(32))
     if extension != ".m4a":
         return EXTENSION_FORMATS.get(extension)
     codec = getattr(info, "codec", None)
@@ -242,8 +281,8 @@ def read_track(file_path: str, collection_id: int) -> Track | None:
 
 
 # Built from EXTENSION_FORMATS, so an allowed extension always has a format.
-# .m4a and .ogg are added by hand, because their content names the format.
-ALLOWED_EXTENSIONS = {*EXTENSION_FORMATS, ".m4a", ".ogg"}
+# .m4a, .ogg and .wv are added by hand, because their content names the format.
+ALLOWED_EXTENSIONS = {*EXTENSION_FORMATS, ".m4a", ".ogg", ".wv"}
 
 # macOS writes one of these beside every file it copies to a filesystem with
 # no resource-fork support — which is every filesystem a drive needs to be
