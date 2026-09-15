@@ -31,12 +31,13 @@ drives directly with normal file operations. The React interface talks to it at
   [A collection keeps its path](#a-collection-keeps-its-path) before you use
   one.
 - Audio files in the formats `.mp3`, `.flac`, `.wav`, `.aif` or `.aiff`,
-  `.aac`, `.opus`, `.tta`, `.ape`, `.tak`, `.ofr`, `.mpc`, `.wv`, `.m4a`, or
-  `.ogg`. An `.m4a` file must hold ALAC or AAC audio, an `.ogg` file must hold
-  Vorbis, Opus, or FLAC audio, and a `.wv` file must not hold DSD audio. The
-  scanner lists a file with other audio inside as a file that it cannot read.
-  The scanner ignores all other files and counts them as **Not audio**. This
-  includes `.wma` files.
+  `.aac`, `.opus`, `.tta`, `.ape`, `.tak`, `.ofr`, `.mpc`, `.wv`, `.wma`,
+  `.m4a`, or `.ogg`. An `.m4a` file must hold ALAC or AAC audio, and an `.ogg`
+  file must hold Vorbis, Opus, or FLAC audio. A `.wv` file must not hold DSD
+  audio, and a `.wma` file must not hold WMA Pro over S/PDIF. The scanner
+  lists a file with other audio inside as a file that it cannot read. The
+  scanner ignores all other files and counts them as **Not audio**. This
+  includes `.dsf` and `.dff` files.
 
 ## Install
 
@@ -219,9 +220,10 @@ After the tool pairs your track with a track of theirs, it compares the two
 files:
 
 1. The format decides first. The lossless formats (FLAC, ALAC, WAV, AIFF, TTA,
-   Monkey's Audio, TAK, OptimFROG, and WavPack) have the same rank. The lossy
-   formats (MP3, AAC, Opus, Vorbis, Musepack, and WavPack hybrid) have a lower
-   rank. A file with a higher rank is always better, whatever its bitrate.
+   Monkey's Audio, TAK, OptimFROG, WavPack, and WMA Lossless) have the same
+   rank. The lossy formats (MP3, AAC, Opus, Vorbis, Musepack, WavPack hybrid,
+   and WMA) have a lower rank. A file with a higher rank is always better,
+   whatever its bitrate.
 2. If both files are lossless, bit depth and sample rate decide.
    Their file is better only if neither value is lower than yours and at least
    one value is higher. Bitrate does not count here. A lossless bitrate shows
@@ -302,6 +304,8 @@ warns and lets you continue, because you can clear space before you confirm.
   (`.wvc`) is beside it. The import copies only the `.wv` file, and `fpcalc`
   reads only that file. A hybrid file reports no bitrate, so the tool cannot
   compare two hybrid files of one recording. You then already have the track.
+- A WMA Lossless file reports no bit depth. The tool then cannot compare it
+  with another lossless file of one recording, so you already have the track.
 
 ## Status
 
@@ -311,7 +315,7 @@ tags.
 
 Two changes come next, in this order:
 
-1. More formats: WMA and DSD.
+1. More formats: DSD.
 2. A setting for the order of formats.
 
 After that, a desktop package will include `fpcalc`, and you will not install

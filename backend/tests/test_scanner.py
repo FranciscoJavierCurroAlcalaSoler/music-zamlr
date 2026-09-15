@@ -19,6 +19,7 @@ from scanner import (
     OGG_STREAM_FORMATS,
     WAVPACK_DSD_FLAG,
     WAVPACK_HYBRID_FLAG,
+    WMA_CODEC_FORMATS,
     read_track,
     scan_folder,
     track_format,
@@ -311,6 +312,48 @@ def test_read_track_refuses_dsd_inside_wavpack(
     assert not any(record.levelno >= logging.ERROR for record in caplog.records)
 
 
+def test_read_track_wma(test_collection, fixtures_dir):
+    # The tags are ASF attributes under names of their own, such as "Author",
+    # and WM/TrackNumber is a number, not text. WMA reports no bit depth.
+    track = read_track(
+        str(fixtures_dir / "test_track.wma"), collection_id=test_collection
+    )
+
+    assert track is not None
+    assert track.title == "Test Track WMA"
+    assert track.artist == "Music Zamlr Fixtures"
+    assert track.album == "Synthetic Test Album"
+    assert track.track_number == 3
+    assert track.year == 2026
+    assert track.format == "WMA"
+    assert track.bit_depth is None
+    assert track.bit_rate == 128000
+    assert track.sample_rate == 44100
+    assert track.duration == 1
+    assert track.file_size == 21043
+
+
+def test_read_track_names_wma_lossless_from_its_codec(
+    fixtures_dir, tmp_path, test_collection
+):
+    # ffmpeg cannot encode WMA Lossless, so the copy changes only the codec id
+    # in the codec list, which is where mutagen gets the codec name. In the
+    # codec list, the id follows its length of 2. The id alone appears twice
+    # in the file, so the count below keeps the patch on the right bytes.
+    fixture = bytearray((fixtures_dir / "test_track.wma").read_bytes())
+    codec_entry = struct.pack("<HH", 2, 0x0161)
+    assert fixture.count(codec_entry) == 1
+    struct.pack_into("<H", fixture, fixture.index(codec_entry) + 2, 0x0163)
+
+    lossless_file = tmp_path / "test_track_lossless.wma"
+    lossless_file.write_bytes(fixture)
+
+    track = read_track(str(lossless_file), collection_id=test_collection)
+
+    assert track is not None
+    assert track.format == "WMA LOSSLESS"
+
+
 def test_read_track_musepack(test_collection, fixtures_dir):
     # The tags are APEv2 under "Track" and "Year", as in the header-only files,
     # but this file holds real audio. Musepack reports no bit depth.
@@ -451,10 +494,11 @@ def test_every_allowed_extension_names_a_ranked_format():
     formats = (
         {
             track_format(f"song{extension}", types.SimpleNamespace())
-            for extension in ALLOWED_EXTENSIONS - {".m4a", ".ogg", ".wv"}
+            for extension in ALLOWED_EXTENSIONS - {".m4a", ".ogg", ".wv", ".wma"}
         }
         | {"ALAC", "AAC"}
         | {"WAVPACK", "WAVPACK HYBRID"}
+        | set(WMA_CODEC_FORMATS.values())
         | set(OGG_STREAM_FORMATS.values())
     )
 
@@ -491,6 +535,45 @@ def test_wavpack_format_refuses_a_header_that_is_not_wavpack(header):
     assert wavpack_format(header) is None
 
 
+@pytest.mark.parametrize(
+    "codec_type, expected",
+    [
+        ("Windows Media Audio 9 Lossless", "WMA LOSSLESS"),
+        ("Windows Media Audio Standard", "WMA"),
+        ("Windows Media Audio 9 Standard", "WMA"),
+        ("Windows Media Audio 9 Professional", "WMA"),
+        ("Windows Media Audio 9 Voice", "WMA"),
+        ("Windows Media Audio 10 Voice", "WMA"),
+        ("Windows Media Audio Pro over SPDIF", None),
+        ("", None),
+    ],
+    ids=[
+        "lossless",
+        "standard",
+        "9 standard",
+        "9 professional",
+        "9 voice",
+        "10 voice",
+        "pro over spdif",
+        "no codec list",
+    ],
+)
+def test_track_format_of_a_wma_file_comes_from_its_codec_type(codec_type, expected):
+    info = types.SimpleNamespace(codec_type=codec_type)
+
+    assert track_format("song.wma", info) == expected
+
+
+def test_every_wma_codec_name_is_a_name_that_mutagen_gives():
+    # The keys are mutagen's names, not codec ids. A key that mutagen never
+    # gives, from a typo or a renamed codec, would turn every file of that
+    # codec into an unreadable file. The table is private to mutagen, so a
+    # mutagen update that moves it fails here, which is the point.
+    from mutagen.asf._util import CODECS
+
+    assert WMA_CODEC_FORMATS.keys() <= set(CODECS.values())
+
+
 def test_read_track_returns_none_for_an_unknown_m4a_codec(
     monkeypatch, fixtures_dir, test_collection
 ):
@@ -503,7 +586,7 @@ def test_read_track_returns_none_for_an_unknown_m4a_codec(
     assert track is None
 
 
-@pytest.mark.parametrize("extension", [".m4a", ".ogg", ".wv"])
+@pytest.mark.parametrize("extension", [".m4a", ".ogg", ".wv", ".wma"])
 def test_read_track_warns_about_an_mp3_with_a_container_extension(
     tmp_path, fixtures_dir, test_collection, caplog, extension
 ):
@@ -615,6 +698,16 @@ def test_scan_folder_reads_apev2_tagged_formats(
         "APE",
         "WAVPACK",
     }
+
+
+def test_scan_folder_reads_wma_files(fixtures_dir, tmp_path, test_collection, session):
+    shutil.copy(fixtures_dir / "test_track.wma", tmp_path / "test_track.wma")
+
+    result = scan_folder(str(tmp_path), collection_id=test_collection, session=session)
+
+    assert result.skipped_non_audio == 0
+    assert result.unreadable_files == []
+    assert session.exec(select(Track)).one().format == "WMA"
 
 
 def test_read_track_nonexistent_file_returns_none(test_collection, fixtures_dir):

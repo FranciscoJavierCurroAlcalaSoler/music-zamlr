@@ -10,6 +10,7 @@ import mutagen
 import mutagen.aac
 from mutagen import MutagenError
 from mutagen.apev2 import APEv2
+from mutagen.asf import ASFTags
 from mutagen.id3 import ID3
 from mutagen.oggflac import OggFLACStreamInfo
 from mutagen.oggopus import OggOpusInfo
@@ -51,6 +52,16 @@ APE_KEYS = {
     "tracknumber": "track",
 }
 
+# The ASF attribute names for the same values, which WMA files use. Easy names
+# such as "title" do not reach them.
+ASF_KEYS = {
+    "title": "Title",
+    "artist": "Author",
+    "album": "WM/AlbumTitle",
+    "date": "WM/Year",
+    "tracknumber": "WM/TrackNumber",
+}
+
 
 def _values_from_id3(tags) -> dict[str, list[str]]:
     values = {}
@@ -70,14 +81,26 @@ def _values_from_ape(tags) -> dict[str, list[str]]:
     return values
 
 
+def _values_from_asf(tags) -> dict[str, list[str]]:
+    values = {}
+    for name, key in ASF_KEYS.items():
+        attributes = tags.get(key)
+        if attributes:
+            # str, because writers often store WM/TrackNumber as a number.
+            values[name] = [str(attributes[0])]
+    return values
+
+
 def tag_source(audio, file_path: str):
     """Return the object that get_tag reads: easy tags, or the same names.
 
     With easy=True, mutagen serves names such as "title" for most formats.
-    Four kinds of file need more. AIFF and WAV keep ID3 inside their own
+    Five kinds of file need more. AIFF and WAV keep ID3 inside their own
     chunks, and mutagen serves that ID3 only by frame id. Monkey's Audio, TAK,
-    OptimFROG and Musepack files load APEv2 tags, which use "track" and "year"
-    where easy tags use "tracknumber" and "date". A raw AAC file can start
+    OptimFROG, Musepack and WavPack files load APEv2 tags, which use "track"
+    and "year" where easy tags use "tracknumber" and "date". WMA files load
+    ASF attributes, which have names of their own, such as "Author" for the
+    artist. A raw AAC file can start
     with an ID3 tag, which the AAC reader does not load. A TrueAudio file with
     APEv2 tags looks untagged, because its reader loads only ID3.
 
@@ -89,6 +112,8 @@ def tag_source(audio, file_path: str):
         return _values_from_id3(audio.tags)
     if isinstance(audio.tags, APEv2):
         return _values_from_ape(audio.tags)
+    if isinstance(audio.tags, ASFTags):
+        return _values_from_asf(audio.tags)
     if audio.tags is not None:
         return audio
     try:
@@ -144,6 +169,20 @@ OGG_STREAM_FORMATS = {
     OggFLACStreamInfo: "FLAC",
 }
 
+# The format for each codec that a .wma file can hold, keyed by the name that
+# mutagen gives the codec id in the file's codec list. A file with no codec
+# list gets an empty name, which is not a key. WMA Pro over S/PDIF is not a
+# key either: it passes a surround stream through to a receiver, and its
+# values cannot be compared with those of a file for playback.
+WMA_CODEC_FORMATS = {
+    "Windows Media Audio 9 Lossless": "WMA LOSSLESS",
+    "Windows Media Audio Standard": "WMA",
+    "Windows Media Audio 9 Standard": "WMA",
+    "Windows Media Audio 9 Professional": "WMA",
+    "Windows Media Audio 9 Voice": "WMA",
+    "Windows Media Audio 10 Voice": "WMA",
+}
+
 # Two bits of the flags in a WavPack block header. A hybrid file is lossy. Its
 # correction data is in a separate .wvc file, which an import does not copy
 # and fpcalc does not read. Bit 31 marks DSD audio, for which mutagen guesses
@@ -182,10 +221,11 @@ def wavpack_format(header: bytes) -> str | None:
 def track_format(file_path: str, info: object) -> str | None:
     """Name the format of a scanned file, or return None if it has none.
 
-    Every format except .m4a, .ogg and .wv comes from EXTENSION_FORMATS, and
-    an extension that the table does not know gets None. An .ogg file gets its
-    format from OGG_STREAM_FORMATS. A .wv file gets its format from the flags
-    in its header, which wavpack_format reads. An .m4a file can hold
+    Every format except .m4a, .ogg, .wv and .wma comes from EXTENSION_FORMATS,
+    and an extension that the table does not know gets None. An .ogg file gets
+    its format from OGG_STREAM_FORMATS. A .wv file gets its format from the
+    flags in its header, which wavpack_format reads. A .wma file gets its
+    format from WMA_CODEC_FORMATS. An .m4a file can hold
     ALAC, which is lossless, or AAC, which is lossy, so its codec decides.
     mutagen writes AAC as "mp4a.40" and an audio object type, and it writes no
     type when the stream has no decoder details. A bare "mp4a" prefix is not
@@ -195,10 +235,10 @@ def track_format(file_path: str, info: object) -> str | None:
     FORMAT_RANK does not know ranks worst, so a lossless file of mine would
     lose to any MP3, and the delete action would remove it.
 
-    The codec is read only for .m4a, because mutagen gives the other formats
-    no codec attribute. Even then it is read with getattr: mutagen detects the
-    format from the content, not the name, so an MP3 file named .m4a arrives
-    with no codec attribute at all.
+    The codec is read only for .m4a and .wma, because mutagen gives the other
+    formats no codec attribute. Even then it is read with getattr: mutagen
+    detects the format from the content, not the name, so an MP3 file named
+    .m4a or .wma arrives with no codec attribute at all.
     """
     extension = os.path.splitext(file_path)[1].lower()
     if extension == ".ogg":
@@ -206,6 +246,8 @@ def track_format(file_path: str, info: object) -> str | None:
     if extension == ".wv":
         with open(file_path, "rb") as file:
             return wavpack_format(file.read(32))
+    if extension == ".wma":
+        return WMA_CODEC_FORMATS.get(getattr(info, "codec_type", None))
     if extension != ".m4a":
         return EXTENSION_FORMATS.get(extension)
     codec = getattr(info, "codec", None)
@@ -281,8 +323,9 @@ def read_track(file_path: str, collection_id: int) -> Track | None:
 
 
 # Built from EXTENSION_FORMATS, so an allowed extension always has a format.
-# .m4a, .ogg and .wv are added by hand, because their content names the format.
-ALLOWED_EXTENSIONS = {*EXTENSION_FORMATS, ".m4a", ".ogg", ".wv"}
+# .m4a, .ogg, .wv and .wma are added by hand, because their content names the
+# format.
+ALLOWED_EXTENSIONS = {*EXTENSION_FORMATS, ".m4a", ".ogg", ".wv", ".wma"}
 
 # macOS writes one of these beside every file it copies to a filesystem with
 # no resource-fork support — which is every filesystem a drive needs to be
