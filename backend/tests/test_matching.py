@@ -1975,3 +1975,142 @@ def test_two_dsd_files_are_compared_by_sample_rate(
     result = classify_pairing(mine_track=mine, theirs_track=theirs)
 
     assert result == expected
+
+
+REVERSED_ORDER = {"MP3": 3, "FLAC": 1}
+
+
+def test_classify_pairing_uses_the_order_it_is_given(make_track):
+    mine = make_track(format="FLAC")
+    theirs = make_track(format="MP3")
+
+    assert (
+        classify_pairing(
+            mine_track=mine, theirs_track=theirs, format_ranks=REVERSED_ORDER
+        )
+        == Bucket.UPGRADE_AVAILABLE
+    )
+    assert classify_pairing(mine_track=mine, theirs_track=theirs) == Bucket.ALREADY_HAVE
+
+
+def test_match_collections_passes_the_order_to_the_tag_tier(make_track):
+    mine = [
+        make_track(
+            format="FLAC",
+            duration=200,
+            file_size=1_000_000,
+            title="A Title",
+            artist="An Artist",
+        )
+    ]
+    theirs = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=2_000_000,
+            title="A Title",
+            artist="An Artist",
+        )
+    ]
+
+    result = match_collections(mine, theirs, format_ranks=REVERSED_ORDER)
+
+    assert len(result.upgrade_available) == 1
+
+
+def test_match_collections_passes_the_order_to_tag_review_candidates(make_track):
+    mine = [
+        make_track(format="MP3", duration=120, file_size=1_000_000),
+        make_track(format="FLAC", duration=123, file_size=3_000_000),
+    ]
+    theirs = [make_track(format="MP3", duration=121, file_size=2_000_000)]
+
+    result = match_collections(mine, theirs, format_ranks=REVERSED_ORDER)
+
+    (ambiguous,) = result.needs_review
+    assert {c.mine.format: c.would_be for c in ambiguous.candidates} == {
+        "MP3": "already_have",
+        "FLAC": "upgrade_available",
+    }
+
+
+def test_match_collections_passes_the_order_to_the_fingerprint_tier(
+    make_track, fake_fingerprint
+):
+    fingerprint = pack_fingerprint(fake_fingerprint(31, 200))
+    mine = [
+        make_track(
+            format="FLAC",
+            duration=200,
+            file_size=1_000_000,
+            title=None,
+            artist=None,
+            fingerprint=fingerprint,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        )
+    ]
+    theirs = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=4_000_000,
+            title=None,
+            artist=None,
+            fingerprint=fingerprint,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        )
+    ]
+
+    result = match_collections(mine, theirs, format_ranks=REVERSED_ORDER)
+
+    assert len(result.upgrade_available) == 1
+
+
+def test_match_collections_passes_the_order_to_fingerprint_review_candidates(
+    make_track, fake_fingerprint
+):
+    fingerprint = pack_fingerprint(fake_fingerprint(32, 200))
+    mine = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=1_000_000,
+            title=None,
+            artist=None,
+            fingerprint=fingerprint,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
+        make_track(
+            format="FLAC",
+            duration=200,
+            file_size=3_000_000,
+            title=None,
+            artist=None,
+            fingerprint=fingerprint,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        ),
+    ]
+    theirs = [
+        make_track(
+            format="MP3",
+            duration=200,
+            file_size=2_000_000,
+            title=None,
+            artist=None,
+            fingerprint=fingerprint,
+            fingerprint_length=FPCALC_LENGTH_SECONDS,
+            fingerprint_algorithm=FPCALC_ALGORITHM,
+        )
+    ]
+
+    result = match_collections(mine, theirs, format_ranks=REVERSED_ORDER)
+
+    (ambiguous,) = result.needs_review
+    assert {c.mine.format: c.would_be for c in ambiguous.candidates} == {
+        "MP3": "already_have",
+        "FLAC": "upgrade_available",
+    }

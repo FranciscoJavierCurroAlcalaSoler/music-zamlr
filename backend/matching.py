@@ -39,7 +39,7 @@ logic unit-testable against plain in-memory objects.
 """
 
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 from enums import Bucket
@@ -147,8 +147,9 @@ def durations_close(a: int, b: int) -> bool:
     return abs(a - b) <= DURATION_TOLERANCE_SECONDS
 
 
-# Higher number = better quality. Module-level for now; intended to become
-# a user-configurable setting later.
+# Higher number = better quality. This is the default order, which the matcher
+# ranks by when its caller passes none. A caller with a saved order passes that
+# instead, as format_ranks.
 #
 # Every lossless format ties at 3, and every lossy format at 1. A tie between two
 # lossless files goes to is_lossless_upgrade, never to bitrate. The scanner
@@ -180,8 +181,8 @@ FORMAT_RANK = {
 }
 
 # Whether a format is lossless is a fact about its codec, so it lives here
-# and not in FORMAT_RANK. The rank is meant to become a user setting, and a
-# rule keyed on "rank 3" would change meaning when the user reorders formats.
+# and not in FORMAT_RANK. The order is the user's to change, so a rule keyed
+# on "rank 3" would change meaning as soon as they reordered the formats.
 LOSSLESS_FORMATS = frozenset(
     [
         "FLAC",
@@ -204,10 +205,10 @@ LOSSLESS_FORMATS = frozenset(
 DSD_FORMATS = frozenset(["DSD"])
 
 
-def format_rank(fmt: str | None) -> int:
+def format_rank(fmt: str | None, format_ranks: Mapping[str, int]) -> int:
     # Unknown/missing formats rank lowest so they never win an
     # upgrade comparison by accident.
-    return FORMAT_RANK.get(fmt.upper(), 0) if fmt else 0
+    return format_ranks.get(fmt.upper(), 0) if fmt else 0
 
 
 def is_lossless(fmt: str | None) -> bool:
@@ -287,7 +288,11 @@ def route(result, consumed, bucket, payload):
         result.needs_review.append(payload)
 
 
-def classify_pairing(mine_track: Track, theirs_track: Track) -> Bucket:
+def classify_pairing(
+    mine_track: Track,
+    theirs_track: Track,
+    format_ranks: Mapping[str, int] = FORMAT_RANK,
+) -> Bucket:
     """Decide which bucket a pairing of mine and theirs falls into.
 
     Returns only UPGRADE_AVAILABLE or ALREADY_HAVE; the Bucket type is wider
@@ -305,9 +310,16 @@ def classify_pairing(mine_track: Track, theirs_track: Track) -> Bucket:
     ambiguous one. One definition is what stops the review UI promising an
     upgrade the planner would then decline; it is also the single point that
     a configurable ranking has to reach.
+
+    The order arrives as a parameter, never as a module global that a request
+    replaces for the length of its diff. A diff runs on a worker thread, so
+    two requests with different orders would overwrite each other's ranking
+    halfway through. Mapping, not dict, because nothing here may change it:
+    the default is the module's own FORMAT_RANK, and a change would outlive
+    the diff that made it.
     """
-    theirs_rank = format_rank(theirs_track.format)
-    mine_rank = format_rank(mine_track.format)
+    theirs_rank = format_rank(theirs_track.format, format_ranks)
+    mine_rank = format_rank(mine_track.format, format_ranks)
 
     if theirs_rank > mine_rank:
         return Bucket.UPGRADE_AVAILABLE
@@ -350,12 +362,22 @@ def classify_pairing(mine_track: Track, theirs_track: Track) -> Bucket:
 
 
 def attempt_fuzzy_match(
-    theirs_track: Track, tracks_mine: list[Track], consumed: set[int]
+    theirs_track: Track,
+    tracks_mine: list[Track],
+    consumed: set[int],
+    format_ranks: Mapping[str, int],
 ):
     """Classify one track of theirs by normalized tags plus duration.
 
     Returns a (Bucket, payload) pair rather than mutating anything, so the
     decision and its consequences stay separate; route() applies them.
+
+    format_ranks has no default here, and none in the other tier functions.
+    The default on classify_pairing serves callers outside this module. Inside
+    it, a tier that forgot to pass the order on would rank by the default
+    order and answer with it, and every test that runs on the default order
+    would still pass. Required, the same mistake is a TypeError on the first
+    call.
     """
     # Blank-tag guard, and it is load-bearing. Without it, a track of
     # theirs with no artist/title matches every untagged track of mine,
@@ -397,7 +419,7 @@ def attempt_fuzzy_match(
     elif len(fuzzy_candidates) == 1:
         mine_track = fuzzy_candidates[0]
         return (
-            classify_pairing(mine_track, theirs_track),
+            classify_pairing(mine_track, theirs_track, format_ranks=format_ranks),
             Match(mine=mine_track, theirs=theirs_track),
         )
     else:
@@ -411,7 +433,12 @@ def attempt_fuzzy_match(
             AmbiguousMatch(
                 theirs=theirs_track,
                 candidates=[
-                    ReviewCandidate(mine=m, would_be=classify_pairing(m, theirs_track))
+                    ReviewCandidate(
+                        mine=m,
+                        would_be=classify_pairing(
+                            m, theirs_track, format_ranks=format_ranks
+                        ),
+                    )
                     for m in fuzzy_candidates
                 ],
             ),
@@ -475,6 +502,7 @@ def attempt_fingerprint_match(
     refused: set[int],
     mine_by_duration: dict[int, list[Track]],
     fingerprint_run: FingerprintRun,
+    format_ranks: Mapping[str, int],
 ) -> tuple[Bucket, Match | AmbiguousMatch | Track] | None:
     """Classify one track of theirs by the sound of it, or decline to.
 
@@ -605,7 +633,7 @@ def attempt_fingerprint_match(
     elif len(matching_candidates) == 1:
         mine_track = matching_candidates[0]
         return (
-            classify_pairing(mine_track, theirs_track),
+            classify_pairing(mine_track, theirs_track, format_ranks=format_ranks),
             Match(mine=mine_track, theirs=theirs_track),
         )
     else:
@@ -621,7 +649,9 @@ def attempt_fingerprint_match(
                 candidates=[
                     ReviewCandidate(
                         mine=m,
-                        would_be=classify_pairing(m, theirs_track),
+                        would_be=classify_pairing(
+                            m, theirs_track, format_ranks=format_ranks
+                        ),
                     )
                     for m in matching_candidates
                 ],
@@ -635,6 +665,7 @@ def _place_track(
     mine_by_duration: dict[int, list[Track]],
     consumed: set[int],
     fingerprint_run: FingerprintRun,
+    format_ranks: Mapping[str, int],
 ) -> tuple[Bucket, Match | AmbiguousMatch | Track]:
     """Run the tiers below the hash tier, best first.
 
@@ -653,7 +684,12 @@ def _place_track(
     # whole diff and carry one track's refusals into the next.
     refused: set[int] = set()
     outcome = attempt_fingerprint_match(
-        theirs_track, consumed, refused, mine_by_duration, fingerprint_run
+        theirs_track,
+        consumed,
+        refused,
+        mine_by_duration,
+        fingerprint_run,
+        format_ranks=format_ranks,
     )
     if outcome is None:
         # A union, never consumed.update(refused). Without refused, a decline
@@ -662,7 +698,9 @@ def _place_track(
         # delete action turns into a deletion. Put into consumed instead, a
         # candidate this track refused is lost to every later track, where it
         # may be the right pairing.
-        outcome = attempt_fuzzy_match(theirs_track, tracks_mine, consumed | refused)
+        outcome = attempt_fuzzy_match(
+            theirs_track, tracks_mine, consumed | refused, format_ranks=format_ranks
+        )
     return outcome
 
 
@@ -671,11 +709,13 @@ def match_collections(
     tracks_theirs: list[Track],
     on_progress: Callable[[DiffProgress], None] | None = None,
     fingerprints_available: bool = True,
+    format_ranks: Mapping[str, int] = FORMAT_RANK,
 ) -> MatchResult:
     # Told, never looked up here: the caller asks PATH once per diff. A matcher
     # that looked for itself would pass or fail its tests according to what
     # the machine has installed. The planner receives path_exists for the same
-    # reason.
+    # reason. The format order arrives the same way, and the endpoint reads it
+    # from the database once per diff.
     result = MatchResult(fingerprints_available=fingerprints_available)
     # Tracks of mine already paired with something, held by id() rather
     # than by their database id. Two reasons: an unsaved track has an id of
@@ -800,11 +840,17 @@ def match_collections(
                     mine_by_duration,
                     consumed,
                     fingerprint_run,
+                    format_ranks=format_ranks,
                 )
                 route(result, consumed, bucket, payload)
         else:
             bucket, payload = _place_track(
-                theirs_track, tracks_mine, mine_by_duration, consumed, fingerprint_run
+                theirs_track,
+                tracks_mine,
+                mine_by_duration,
+                consumed,
+                fingerprint_run,
+                format_ranks=format_ranks,
             )
             route(result, consumed, bucket, payload)
         theirs_processed_count += 1
