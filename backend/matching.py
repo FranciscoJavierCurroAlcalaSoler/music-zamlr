@@ -219,6 +219,10 @@ def is_dsd(fmt: str | None) -> bool:
     return fmt is not None and fmt.upper() in DSD_FORMATS
 
 
+def is_lossy(fmt: str | None) -> bool:
+    return fmt is not None and not is_lossless(fmt) and not is_dsd(fmt)
+
+
 def is_lossless_upgrade(mine_track: Track, theirs_track: Track) -> bool:
     """Decide whether their lossless file is better than mine.
 
