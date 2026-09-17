@@ -1938,6 +1938,8 @@ def test_format_order_is_the_default_when_nothing_is_saved(client):
     assert body["tiers"] == main.default_tiers()
     assert body["placed"] == []
     assert body["updated_at"] is None
+    assert "MP3" in body["lossy_formats"]
+    assert "FLAC" not in body["lossy_formats"]
 
 
 def test_put_format_order_is_read_back(client):

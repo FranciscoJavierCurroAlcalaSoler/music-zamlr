@@ -39,6 +39,8 @@ import {
   executeImport,
   describeFetchError,
 } from "../api";
+import type { ComparisonInputs } from "../comparison";
+import { comparisonIsStale } from "../comparison";
 import { ImportSettings } from "./ImportSettings";
 import { ImportPreviewDialog } from "./ImportPreviewDialog";
 import { ImportProgressView } from "./ImportProgressView";
@@ -142,6 +144,7 @@ const onlyInMineColumns: GridColDef[] = [
 interface DiffViewProps {
   collections: Collection[];
   loadingCollections: boolean;
+  formatOrderUpdatedAt: string | null;
 }
 
 function describeStatus(
@@ -169,7 +172,11 @@ function describeStatus(
   return "Resolved · replaces yours";
 }
 
-export function DiffView({ collections, loadingCollections }: DiffViewProps) {
+export function DiffView({
+  collections,
+  loadingCollections,
+  formatOrderUpdatedAt,
+}: DiffViewProps) {
   const [loadingDiff, setLoadingDiff] = useState(false);
   const [progress, setProgress] = useState<DiffProgress | null>(null);
   const [diffError, setDiffError] = useState<string | null>(null);
@@ -196,10 +203,11 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
   const [executeProgress, setExecuteProgress] = useState<ImportProgress | null>(
     null,
   );
-  const [diffScannedAt, setDiffScannedAt] = useState<{
-    mine: string | null;
-    theirs: string | null;
-  } | null>(null);
+  // What the shown comparison was made from. One state for all three values,
+  // because they answer one question, and two states could disagree about
+  // whether a comparison is current.
+  const [comparedAgainst, setComparedAgainst] =
+    useState<ComparisonInputs | null>(null);
   const [reviewing, setReviewing] = useState<AmbiguousMatch | null>(null);
   const [resolutions, setResolutions] = useState<Map<number, number | null>>(
     new Map(),
@@ -349,9 +357,19 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
 
   const stale =
     diff !== null &&
-    diffScannedAt !== null &&
-    (scannedAt(mineId) !== diffScannedAt.mine ||
-      scannedAt(theirsId) !== diffScannedAt.theirs);
+    comparisonIsStale(comparedAgainst, {
+      mine: scannedAt(mineId),
+      theirs: scannedAt(theirsId),
+      order: formatOrderUpdatedAt,
+    });
+  // Which of the two happened, so the message names the real cause. Both can
+  // be true at once, and then the alert says both.
+  const rescanned =
+    comparedAgainst !== null &&
+    (scannedAt(mineId) !== comparedAgainst.mine ||
+      scannedAt(theirsId) !== comparedAgainst.theirs);
+  const orderChanged =
+    comparedAgainst !== null && formatOrderUpdatedAt !== comparedAgainst.order;
 
   async function runDiff() {
     setLoadingDiff(true);
@@ -366,9 +384,10 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
       }
       const result: DiffResult = await fetchDiff(mineId, theirsId, setProgress);
       setDiff(result);
-      setDiffScannedAt({
+      setComparedAgainst({
         mine: scannedAt(mineId),
         theirs: scannedAt(theirsId),
+        order: formatOrderUpdatedAt,
       });
     } catch (error: unknown) {
       setDiffError(describeFetchError(error));
@@ -517,8 +536,11 @@ export function DiffView({ collections, loadingCollections }: DiffViewProps) {
             >
               {stale && (
                 <Alert severity="info" sx={{ mt: 1 }}>
-                  These collections were re-scanned since this comparison. Run
-                  Compare again for current results.
+                  {rescanned &&
+                    "These collections were re-scanned since this comparison. "}
+                  {orderChanged &&
+                    "The format order changed since this comparison. "}
+                  Run Compare again for current results.
                 </Alert>
               )}
               {/* The text names the risk, not only the fault. Without the

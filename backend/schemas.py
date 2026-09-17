@@ -278,5 +278,6 @@ class FormatOrderRead(BaseModel):
     # None means no order was ever saved, so the tiers above are the default.
     # No default value: a missing timestamp must not read as a saved order.
     updated_at: str | None
+    lossy_formats: list[str]
 
     model_config = ConfigDict(from_attributes=True)

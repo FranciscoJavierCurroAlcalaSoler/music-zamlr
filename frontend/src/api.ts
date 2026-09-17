@@ -8,6 +8,7 @@ import type {
   Collection,
   ScanProgress,
   ScanResult,
+  FormatOrder,
 } from "./types";
 
 export const API_BASE = "http://localhost:8000";
@@ -267,4 +268,26 @@ export async function executeImport(
     "import",
     onProgress,
   );
+}
+
+export async function fetchFormatOrder(): Promise<FormatOrder> {
+  const response = await fetch(`${API_BASE}/api/settings/format-order`);
+  if (!response.ok) {
+    await throwForResponse(response);
+  }
+  return response.json();
+}
+
+export async function saveFormatOrder(tiers: string[][]): Promise<FormatOrder> {
+  const response = await fetch(`${API_BASE}/api/settings/format-order`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ tiers: tiers }),
+  });
+  if (!response.ok) {
+    await throwForResponse(response);
+  }
+  return response.json();
 }

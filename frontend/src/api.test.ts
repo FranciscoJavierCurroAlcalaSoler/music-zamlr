@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createCollection,
   fetchDiff,
+  fetchFormatOrder,
   rescanCollection,
   previewImport,
   executeImport,
+  saveFormatOrder,
 } from "./api";
 import type {
   ScanProgress,
@@ -436,5 +438,56 @@ describe("reading an import stream", () => {
     );
 
     await expect(executeImport(importRequest)).rejects.toThrow("import");
+  });
+});
+
+describe("the format order", () => {
+  const savedOrder = {
+    tiers: [["FLAC"], ["MP3"]],
+    default_tiers: [["FLAC"], ["MP3"]],
+    placed: [],
+    lossy_formats: ["MP3"],
+    updated_at: "2026-09-17T16:02:00",
+  };
+
+  function jsonServer(body: unknown, status = 200) {
+    const calls: RequestInit[] = [];
+    vi.stubGlobal("fetch", (_url: string, init: RequestInit = {}) => {
+      calls.push(init);
+      return Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    });
+    return calls;
+  }
+
+  it("reads the saved order", async () => {
+    jsonServer(savedOrder);
+
+    await expect(fetchFormatOrder()).resolves.toEqual(savedOrder);
+  });
+
+  it("saves an order with PUT, which is the method the endpoint answers", async () => {
+    const calls = jsonServer(savedOrder);
+
+    await saveFormatOrder([["FLAC"], ["MP3"]]);
+
+    expect(calls[0].method).toBe("PUT");
+    expect(JSON.parse(String(calls[0].body))).toEqual({
+      tiers: [["FLAC"], ["MP3"]],
+    });
+  });
+
+  it("throws the message the server sends when an order is refused", async () => {
+    // The detail names the format at fault, and the editor shows it: without
+    // this path the user is told only that something went wrong.
+    jsonServer({ detail: "mixed lossy and non-lossy formats: FLAC, MP3" }, 400);
+
+    await expect(saveFormatOrder([["FLAC", "MP3"]])).rejects.toThrow(
+      "mixed lossy and non-lossy formats: FLAC, MP3",
+    );
   });
 });

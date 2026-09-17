@@ -27,10 +27,12 @@ from importing import (
     plan_import,
 )
 from matching import (
+    FORMAT_RANK,
     DiffProgress,
     Match,
     MatchResult,
     classify_pairing,
+    is_lossy,
     match_collections,
 )
 from models import Collection, FormatOrderRow, Track
@@ -926,11 +928,16 @@ def _format_order_state(session: Session) -> FormatOrderRead:
     ranks = {row.format: row.rank for row in rows}
     tiers, placed = effective_tiers(ranks)
     updated_at = max((row.updated_at for row in rows), default=None)
+    # Sent so the editor can refuse a move that would make a lossy format tie
+    # with a lossless one. Derived here rather than listed again in the
+    # browser, where it would drift from the scanner as formats are added.
+    lossy_formats = [name for name in FORMAT_RANK if is_lossy(name)]
     return FormatOrderRead(
         tiers=tiers,
         default_tiers=default_tiers(),
         placed=placed,
         updated_at=updated_at,
+        lossy_formats=lossy_formats,
     )
 
 

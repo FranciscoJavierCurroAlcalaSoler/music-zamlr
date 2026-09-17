@@ -223,7 +223,8 @@ files:
    Monkey's Audio, TAK, OptimFROG, WavPack, and WMA Lossless) and DSD have
    the same rank. The lossy formats (MP3, AAC, Opus, Vorbis, Musepack, WavPack hybrid,
    and WMA) have a lower rank. A file with a higher rank is always better,
-   whatever its bitrate.
+   whatever its bitrate. You can change this order. See
+   [The order of the formats](#the-order-of-the-formats).
 2. If both files are lossless, bit depth and sample rate decide.
    Their file is better only if neither value is lower than yours and at least
    one value is higher. Bitrate does not count here. A lossless bitrate shows
@@ -251,6 +252,47 @@ The rule for lossless files has three consequences:
 - **Known limit.** The rule reads the numbers in the file, not the sound. A
   44.1 kHz recording that was converted to 96 kHz still counts as an upgrade.
   So does a 32-bit float WAV file from an audio editor.
+
+### The order of the formats
+
+The **Settings** tab holds the order of the formats. The tool starts with the
+order in rule 1 above, and you can change it.
+
+The formats are in tiers. All the formats in one tier are equally good. A file
+in a higher tier is better than a file in a lower tier, whatever its bitrate.
+Two files in the same tier go to rules 2 to 5 above.
+
+Each format has two buttons: **↑** moves it to the tier above, **↓** to the
+tier below. A format that is alone in the top or the bottom tier does not
+move. A format that shares a tier moves out of it into a new tier of its own.
+Each tier has its own buttons, **↑ Move tier** and **↓ Move tier**, which move
+the whole tier with all its formats.
+
+Select **Save** to store the order. The tool uses the stored order for every
+comparison, and also for the comparison that it makes again during an import.
+Select **Reset** to go back to the order in rule 1.
+
+Three rules apply to every order:
+
+- **A lossy format and a lossless format are never in the same tier.** A
+  bitrate means something different for the two, so the tool blocks the move
+  and shows a message. Use **↑ Move tier** to change the position of a whole
+  tier.
+- **A DSD format can be in a tier with lossless formats.** Rule 3 above still
+  applies: a DSD file and a lossless file are never upgrades of each other.
+- **A format that a later version of the tool adds** goes into the lowest tier
+  of its own kind. A lossless format goes into the lowest lossless tier, and a
+  lossy format into the lowest lossy tier. The tab then lists the names of
+  these formats. Move them if you want them in a different tier.
+
+A comparison on the screen shows the result of the order that was stored when
+it ran. If you store a different order after that, the comparison says that it
+is out of date. Select **Compare** again to get current results.
+
+> **Warning.** You can put a lossy tier above a lossless tier. The tool then
+> offers a lossy file as an upgrade of a lossless file. With **Delete my
+> track**, the import deletes your lossless file. The Settings tab shows a
+> warning while the order has a lossy tier above a lossless tier.
 
 ## Design notes
 
@@ -317,12 +359,10 @@ warns and lets you continue, because you can clear space before you confirm.
 
 The scan, the comparison, and the import all work, and the browser shows live
 progress for each. The comparison uses file hashes, acoustic fingerprints, and
-tags.
+tags. The **Settings** tab holds the order of the formats.
 
-One change comes next: a setting for the order of formats.
-
-After that, a desktop package will include `fpcalc`, and you will not install
-it yourself.
+A desktop package will come next. It will include `fpcalc`, and you will not
+install it yourself.
 
 ## License
 

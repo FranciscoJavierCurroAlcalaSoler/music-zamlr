@@ -155,3 +155,11 @@ export interface ImportRequestBody {
   upgrade_action: UpgradeAction;
   resolutions: TrackResolution[];
 }
+
+export interface FormatOrder {
+  tiers: string[][];
+  default_tiers: string[][];
+  placed: string[];
+  lossy_formats: string[];
+  updated_at: string | null;
+}
