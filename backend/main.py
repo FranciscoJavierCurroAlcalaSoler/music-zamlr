@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -118,6 +118,10 @@ def _run_diff(
     session: Session,
     mine_collection: Collection,
     theirs_collection: Collection,
+    # Told, never looked up here, like fingerprints_available below: both
+    # callers read it from the session they own, and the import reads it once
+    # for this call and for the review answer it judges itself.
+    format_ranks: Mapping[str, int],
     on_progress: Callable[[DiffProgress], None] | None = None,
 ) -> MatchResult:
     tracks_mine = session.exec(
@@ -135,6 +139,7 @@ def _run_diff(
         tracks_theirs,
         on_progress=on_progress,
         fingerprints_available=fpcalc_available(),
+        format_ranks=format_ranks,
     )
     session.commit()  # persist the hashes the matcher computed
     return match_result
@@ -233,7 +238,14 @@ def _diff_worker(
                 session, mine_id, theirs_id
             )
             match_result = _run_diff(
-                session, mine_collection, theirs_collection, on_progress=on_progress
+                session,
+                mine_collection,
+                theirs_collection,
+                # Read here, inside the session this thread owns. The
+                # request's session may not cross into the worker, which is
+                # why the collections above are loaded again as well.
+                format_ranks=_format_ranks(session),
+                on_progress=on_progress,
             )
             diff_result = DiffResult(
                 match_results=match_result,
@@ -597,8 +609,16 @@ def _build_plan(
     mine_collection, theirs_collection = _load_collections(
         session, mine_collection_id, theirs_collection_id
     )
+    # Once, for the diff below and for the review answers further down. Two
+    # reads could straddle a save and answer differently, and the request
+    # would then judge one pairing by one order and the next by another.
+    format_ranks = _format_ranks(session)
     match_result = _run_diff(
-        session, mine_collection, theirs_collection, on_progress=on_progress
+        session,
+        mine_collection,
+        theirs_collection,
+        format_ranks=format_ranks,
+        on_progress=on_progress,
     )
 
     missing: list[Track] = []
@@ -655,7 +675,9 @@ def _build_plan(
                 placed_ids.add(resolution.theirs_id)
             else:
                 mine = candidates_by_id[resolution.mine_id]
-                pairing_bucket = classify_pairing(mine_track=mine, theirs_track=theirs)
+                pairing_bucket = classify_pairing(
+                    mine_track=mine, theirs_track=theirs, format_ranks=format_ranks
+                )
                 if pairing_bucket == Bucket.UPGRADE_AVAILABLE:
                     upgrade_available.append(Match(mine=mine, theirs=theirs))
                     placed_ids.add(resolution.theirs_id)
@@ -910,6 +932,18 @@ def _format_order_state(session: Session) -> FormatOrderRead:
         placed=placed,
         updated_at=updated_at,
     )
+
+
+def _format_ranks(session: Session) -> dict[str, int]:
+    """Return the ranks a comparison should use, from the saved order.
+
+    Built from the tiers the GET answers with, not from the rows: those tiers
+    are the effective ones, with a format the saved order never named already
+    placed. Read straight from the rows, such a format would rank 0 in a
+    comparison while the editor showed it inside a tier, and 0 is the rank of
+    a format the app cannot read at all.
+    """
+    return tiers_to_ranks(_format_order_state(session).tiers)
 
 
 @app.get("/api/settings/format-order", response_model=FormatOrderRead)

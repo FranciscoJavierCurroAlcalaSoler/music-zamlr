@@ -1807,7 +1807,11 @@ def test_diff_stream_reports_progress_frames(event_stream, monkeypatch, collecti
     mine, theirs = collections
 
     def slow_match(
-        tracks_mine, tracks_theirs, on_progress=None, fingerprints_available=True
+        tracks_mine,
+        tracks_theirs,
+        on_progress=None,
+        fingerprints_available=True,
+        format_ranks=None,
     ):
         on_progress(
             # One of three, not three of three: a fake that claims to be
@@ -1844,7 +1848,11 @@ def test_diff_stream_reports_a_failure_as_an_error_frame(
     mine, theirs = collections
 
     def exploding_match(
-        tracks_mine, tracks_theirs, on_progress=None, fingerprints_available=True
+        tracks_mine,
+        tracks_theirs,
+        on_progress=None,
+        fingerprints_available=True,
+        format_ranks=None,
     ):
         raise OSError("the drive went away")
 
@@ -2010,6 +2018,127 @@ def test_a_format_missing_from_the_saved_order_is_listed_as_placed(client, sessi
 
     assert body["placed"] == ["FLAC"]
     assert any("FLAC" in tier for tier in body["tiers"])
+
+
+def test_the_diff_uses_the_saved_format_order(
+    client, session, tmp_path, make_track, collections, event_stream
+):
+    # One FLAC of mine against one MP3 of theirs: an upgrade only while MP3
+    # outranks FLAC, which is what the saved order below says and the default
+    # order does not. The file sizes differ, so the hash tier stays out of it,
+    # and the tags and durations match, so the tag tier pairs the two.
+    mine, theirs = collections
+    session.add(
+        make_track(
+            collection_id=mine.id,
+            format="FLAC",
+            file_path=str(tmp_path / "mine" / "song.flac"),
+            file_size=4_000_000,
+        )
+    )
+    session.add(
+        make_track(
+            collection_id=theirs.id,
+            format="MP3",
+            file_path=str(tmp_path / "theirs" / "song.mp3"),
+            file_size=1_000_000,
+        )
+    )
+    session.commit()
+    client.put("/api/settings/format-order", json={"tiers": _reordered_tiers()})
+
+    stream = event_stream(f"/api/diff?mine={mine.id}&theirs={theirs.id}", "GET")
+
+    assert stream.done["match_counts"]["upgrade_available"] == 1
+
+
+def _saved_order_pair(session, tmp_path, make_track, collections):
+    """One FLAC of mine and one MP3 of theirs, paired by their tags."""
+    mine, theirs = collections
+    session.add(
+        make_track(
+            collection_id=mine.id,
+            format="FLAC",
+            file_path=str(tmp_path / "mine" / "song.flac"),
+            file_size=4_000_000,
+        )
+    )
+    their_track = make_track(
+        collection_id=theirs.id,
+        format="MP3",
+        file_path=str(tmp_path / "theirs" / "song.mp3"),
+        file_size=1_000_000,
+    )
+    session.add(their_track)
+    session.commit()
+    return their_track
+
+
+def test_the_import_recompute_uses_the_saved_format_order(
+    client, session, tmp_path, make_track, collections, destination, event_stream
+):
+    # The import classifies again on the server before it plans, and that is
+    # the pass that decides a deletion. Under the default order this track is
+    # already_have, and the request is refused as not an import candidate.
+    mine, theirs = collections
+    their_track = _saved_order_pair(session, tmp_path, make_track, collections)
+    client.put("/api/settings/format-order", json={"tiers": _reordered_tiers()})
+
+    stream = event_stream(
+        "/api/import/preview",
+        "POST",
+        json=_import_body(mine, theirs, destination, [their_track.id]),
+    )
+
+    assert stream.error is None
+    assert len(stream.done["upgrades"]) == 1
+
+
+def test_a_format_placed_after_its_row_vanished_is_ranked_in_a_diff(
+    client, session, tmp_path, make_track, collections, event_stream
+):
+    # The state a format added by an update arrives in: every other format has
+    # a saved row and this one has none. effective_tiers places it, so it must
+    # rank where the editor shows it. Ranked from the rows alone it would
+    # score 0, below every format, and their MP3 would lose to my FLAC.
+    mine, theirs = collections
+    _saved_order_pair(session, tmp_path, make_track, collections)
+    client.put("/api/settings/format-order", json={"tiers": _reordered_tiers()})
+    session.delete(session.get(FormatOrderRow, "MP3"))
+    session.commit()
+
+    stream = event_stream(f"/api/diff?mine={mine.id}&theirs={theirs.id}", "GET")
+
+    assert stream.done["match_counts"]["upgrade_available"] == 1
+
+
+def test_a_review_answer_uses_the_saved_format_order(
+    client, collections, destination, make_ambiguity, event_stream
+):
+    # The other place the server classifies a pairing: the answer to a review,
+    # judged by classify_pairing itself rather than by the matcher. Under the
+    # default order this request answers 400, because the file chosen is at
+    # least as good as theirs.
+    mine, theirs = collections
+    ambiguity = make_ambiguity(theirs_format="MP3", mine_format="FLAC")
+    their_track = ambiguity.theirs[0]
+    chosen = ambiguity.candidates[0]
+    client.put("/api/settings/format-order", json={"tiers": _reordered_tiers()})
+
+    stream = event_stream(
+        "/api/import/preview",
+        "POST",
+        json=_import_body(
+            mine,
+            theirs,
+            destination,
+            [their_track.id],
+            resolutions=[{"theirs_id": their_track.id, "mine_id": chosen.id}],
+        ),
+    )
+
+    assert stream.error is None
+    assert len(stream.done["upgrades"]) == 1
 
 
 def test_a_rejected_put_leaves_the_saved_order_alone(client):
