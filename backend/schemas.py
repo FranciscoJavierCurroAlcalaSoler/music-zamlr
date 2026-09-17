@@ -255,3 +255,28 @@ class ScanResultRead(BaseModel):
     collection: CollectionRead
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class FormatOrderWrite(BaseModel):
+    # Only the shape is checked here. Which formats may share a tier is a fact
+    # about formats, so validate_tiers judges it and the endpoint answers 400
+    # with the message, where a field validator would answer 422 with the text
+    # buried in an error list.
+    tiers: list[list[str]]
+
+
+class FormatOrderRead(BaseModel):
+    tiers: list[list[str]]
+    # Sent with every answer, so the editor can offer reset without knowing
+    # the default itself, and so a default that changes in a later release
+    # reaches the editor at once.
+    default_tiers: list[list[str]]
+    # The formats the server put into the saved order itself, because the
+    # saved order never named them. Without this the user meets a format in
+    # the editor that they never placed and cannot account for.
+    placed: list[str]
+    # None means no order was ever saved, so the tiers above are the default.
+    # No default value: a missing timestamp must not read as a saved order.
+    updated_at: str | None
+
+    model_config = ConfigDict(from_attributes=True)

@@ -40,3 +40,14 @@ class Track(SQLModel, table=True):
     fingerprint_length: int | None = None
     collection_id: int = Field(foreign_key="collection.id")
     collection: Collection = Relationship(back_populates="tracks")
+
+
+# One row per format, and only while the user has an order of their own: no
+# rows means the default order, which is what reset leaves behind. The format
+# is the key because the rank is the part that changes, and updated_at sits on
+# every row, all of them written together, so that the answer can carry one
+# "saved at" without a second table to keep in step with this one.
+class FormatOrderRow(SQLModel, table=True):
+    format: str = Field(primary_key=True)
+    rank: int
+    updated_at: str

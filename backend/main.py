@@ -18,6 +18,7 @@ from sqlmodel import Session, select
 from database import create_collection, create_db_and_tables, get_session
 from enums import ActionType, Bucket, ImportPhase, OperationStatus
 from fingerprinting import fpcalc_available
+from format_order import default_tiers, effective_tiers, tiers_to_ranks, validate_tiers
 from importing import (
     ExecuteProgress,
     OperationResult,
@@ -32,12 +33,14 @@ from matching import (
     classify_pairing,
     match_collections,
 )
-from models import Collection, Track
+from models import Collection, FormatOrderRow, Track
 from scanner import ScanProgress, scan_folder
 from schemas import (
     CollectionRead,
     DiffProgressRead,
     DiffResultRead,
+    FormatOrderRead,
+    FormatOrderWrite,
     ImportPreviewRead,
     ImportProgressRead,
     ImportRequest,
@@ -884,3 +887,82 @@ def rescan_collection(
         partial(_scan_worker, collection.root_path, collection.id, session.get_bind()),
         ScanProgressRead,
     )
+
+
+def _format_order_state(session: Session) -> FormatOrderRead:
+    """Read the saved order and answer with what the matcher would rank by.
+
+    Both endpoints answer with this, so a PUT reports the state a later GET
+    returns. They differ for a PUT of the default order, which saves nothing:
+    a body built from the request would claim a saved order that the server
+    does not hold.
+
+    No rows means no saved order, so max() needs the default: the timestamp
+    is then None, which is how the editor knows it is showing the default.
+    """
+    rows = session.exec(select(FormatOrderRow)).all()
+    ranks = {row.format: row.rank for row in rows}
+    tiers, placed = effective_tiers(ranks)
+    updated_at = max((row.updated_at for row in rows), default=None)
+    return FormatOrderRead(
+        tiers=tiers,
+        default_tiers=default_tiers(),
+        placed=placed,
+        updated_at=updated_at,
+    )
+
+
+@app.get("/api/settings/format-order", response_model=FormatOrderRead)
+def list_format_order(session: Session = Depends(get_session)):
+    return _format_order_state(session)
+
+
+@app.put("/api/settings/format-order", response_model=FormatOrderRead)
+def save_format_order(
+    body: FormatOrderWrite,
+    session: Session = Depends(get_session),
+):
+    """Replace the saved format order, or clear it when it is the default.
+
+    A PUT says what the whole order is, so validate_tiers refuses an order
+    that leaves a format out rather than filling it in. It runs before
+    anything is deleted: a refused order must leave the saved one exactly as
+    it was.
+
+    The rows are replaced, never updated in place. An order saved earlier can
+    name a format that this one does not, and an in-place update would leave
+    that row behind to outrank something for ever.
+
+    An order equal to the default is stored as no rows at all, which is what
+    reset writes. Storing it would freeze today's default, so a later release
+    that improves the default order would never reach a user who once pressed
+    reset.
+    """
+    try:
+        validate_tiers(body.tiers)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    for row in session.exec(select(FormatOrderRow)).all():
+        session.delete(row)
+    # Sends the deletes before the inserts below, rather than leaving the
+    # order of the two to the session. Every PUT after the first writes the
+    # formats the old rows already hold, and SQLite refuses a duplicate
+    # primary key. SQLAlchemy orders the two safely today, so no test can see
+    # this line go; it is here so that a change in that order cannot turn
+    # every second save into a 500.
+    session.flush()
+
+    if body.tiers != default_tiers():
+        updated_at = datetime.now().isoformat()
+        for format_name, rank in tiers_to_ranks(body.tiers).items():
+            session.add(
+                FormatOrderRow(
+                    format=format_name,
+                    rank=rank,
+                    updated_at=updated_at,
+                )
+            )
+
+    session.commit()
+    return _format_order_state(session)

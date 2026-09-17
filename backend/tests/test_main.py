@@ -13,7 +13,7 @@ from enums import ActionType, ImportPhase
 from fingerprinting import FPCALC_ALGORITHM, FPCALC_LENGTH_SECONDS, pack_fingerprint
 from importing import ExecuteProgress, PlannedOperation
 from matching import DiffProgress, MatchResult
-from models import Collection, Track
+from models import Collection, FormatOrderRow, Track
 from scanner import ScanProgress, ScanResult
 
 
@@ -1906,3 +1906,119 @@ def test_diff_validation_failure_never_opens_a_stream(client, collections):
     for response, status in ((self_comparison, 400), (unknown_collection, 404)):
         assert response.status_code == status
         assert response.headers["content-type"].startswith("application/json")
+
+
+def _format_order_body(client):
+    response = client.get("/api/settings/format-order")
+    assert response.status_code == 200
+    return response.json()
+
+
+def _reordered_tiers():
+    """The default order with its tiers swapped, which the rules still allow."""
+    return main.default_tiers()[::-1]
+
+
+def _split_tiers():
+    """The default order with its first tier split in two: three tiers, all legal."""
+    lossless, lossy = main.default_tiers()
+    return [[lossless[0]], lossless[1:], lossy]
+
+
+def test_format_order_is_the_default_when_nothing_is_saved(client):
+    body = _format_order_body(client)
+    assert body["tiers"] == main.default_tiers()
+    assert body["placed"] == []
+    assert body["updated_at"] is None
+
+
+def test_put_format_order_is_read_back(client):
+    order = _reordered_tiers()
+    assert (
+        client.put("/api/settings/format-order", json={"tiers": order}).status_code
+        == 200
+    )
+    body = _format_order_body(client)
+    assert body["tiers"] == order
+    assert body["updated_at"] is not None
+
+
+def test_put_the_default_order_saves_no_rows(client, session):
+    assert (
+        client.put(
+            "/api/settings/format-order", json={"tiers": main.default_tiers()}
+        ).status_code
+        == 200
+    )
+    assert session.exec(select(FormatOrderRow)).all() == []
+    assert _format_order_body(client)["updated_at"] is None
+
+
+def test_put_replaces_the_whole_order(client, session):
+    # Two complete orders that name the same formats, which is what every
+    # second PUT does: the rows of the first must be gone, and their formats
+    # must be writable again in the same request.
+    first = _split_tiers()
+    second = _reordered_tiers()
+
+    assert (
+        client.put("/api/settings/format-order", json={"tiers": first}).status_code
+        == 200
+    )
+    assert (
+        client.put("/api/settings/format-order", json={"tiers": second}).status_code
+        == 200
+    )
+
+    assert len(session.exec(select(FormatOrderRow)).all()) == len(
+        [name for tier in second for name in tier]
+    )
+    assert _format_order_body(client)["tiers"] == second
+
+
+# Each order has the shape the schema asks for, so every one of them reaches
+# validate_tiers. A list of strings instead of a list of tiers would be turned
+# away by pydantic with 422, and would test nothing about the rules.
+@pytest.mark.parametrize(
+    "bad, expected",
+    [
+        ([["FLAC", "MP3"]], "MP3"),
+        ([["MP3"]], "FLAC"),
+        ([*main.default_tiers(), ["NOT_A_FORMAT"]], "NOT_A_FORMAT"),
+    ],
+    ids=["mixed tier", "missing formats", "unknown format"],
+)
+def test_put_rejects_a_bad_order(client, bad, expected):
+    response = client.put("/api/settings/format-order", json={"tiers": bad})
+
+    assert response.status_code == 400
+    # The message names the format at fault, because the editor shows it to
+    # the user, who has to know which chip to move.
+    assert expected in response.json()["detail"]
+
+
+def test_a_format_missing_from_the_saved_order_is_listed_as_placed(client, session):
+    # A saved order that is not the default, because a PUT of the default
+    # saves no rows and there would be nothing to delete. Removing one row is
+    # the state a new format arrives in: every other format is ranked, and
+    # this one has never been.
+    client.put("/api/settings/format-order", json={"tiers": _reordered_tiers()})
+    session.delete(session.get(FormatOrderRow, "FLAC"))
+    session.commit()
+
+    body = _format_order_body(client)
+
+    assert body["placed"] == ["FLAC"]
+    assert any("FLAC" in tier for tier in body["tiers"])
+
+
+def test_a_rejected_put_leaves_the_saved_order_alone(client):
+    order = _reordered_tiers()
+    client.put("/api/settings/format-order", json={"tiers": order})
+
+    response = client.put(
+        "/api/settings/format-order", json={"tiers": [["FLAC", "MP3"]]}
+    )
+
+    assert response.status_code == 400
+    assert _format_order_body(client)["tiers"] == order
