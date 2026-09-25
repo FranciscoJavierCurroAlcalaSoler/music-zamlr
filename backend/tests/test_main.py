@@ -2153,3 +2153,31 @@ def test_a_rejected_put_leaves_the_saved_order_alone(client):
 
     assert response.status_code == 400
     assert _format_order_body(client)["tiers"] == order
+
+
+def test_the_dev_origin_passes_a_preflight(client):
+    origin = "http://localhost:5173"
+
+    response = client.options(
+        "/api/collections",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == origin
+
+
+def test_an_unlisted_origin_fails_a_preflight(client):
+    response = client.options(
+        "/api/collections",
+        headers={
+            "Origin": "http://example.test",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "access-control-allow-origin" not in response.headers

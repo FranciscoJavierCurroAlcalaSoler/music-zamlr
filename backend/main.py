@@ -26,6 +26,7 @@ from importing import (
     execute_plan,
     plan_import,
 )
+from launch_settings import read_launch_settings
 from matching import (
     FORMAT_RANK,
     DiffProgress,
@@ -75,11 +76,17 @@ async def lifespan(app: FastAPI):
     yield
 
 
+# Read once, here, because add_middleware runs at import: by the time any
+# request arrives the origins are already baked into the middleware. Changing
+# the variable therefore needs the process restarted, and no test can vary it
+# in-process — the environment wiring is checked by hand instead.
+launch_settings = read_launch_settings(os.environ)
+
 app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=launch_settings.allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
