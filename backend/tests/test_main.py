@@ -6,6 +6,7 @@ import types
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 from sqlmodel import select
 
 import main
@@ -2181,3 +2182,16 @@ def test_an_unlisted_origin_fails_a_preflight(client):
 
     assert response.status_code == 400
     assert "access-control-allow-origin" not in response.headers
+
+
+def test_health_answers_without_touching_the_database():
+    # Deliberately not the client fixture: that one overrides get_session with
+    # the test's own, which would answer any query the endpoint made and leave
+    # this test saying nothing. Without the override a query reaches the engine
+    # conftest poisons, and the health endpoint has to answer while nothing
+    # else is ready yet. Note the limit of that: a session the endpoint asks
+    # for and never uses opens no connection, so only a query is caught here.
+    response = TestClient(main.app).get("/api/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}

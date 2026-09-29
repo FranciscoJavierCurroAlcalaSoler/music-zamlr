@@ -2,7 +2,11 @@ import re
 
 import pytest
 
-from launch_settings import ALLOWED_ORIGINS_VARIABLE, read_launch_settings
+from launch_settings import (
+    ALLOWED_ORIGINS_VARIABLE,
+    TOKEN_VARIABLE,
+    read_launch_settings,
+)
 
 
 def test_origins_default_to_the_vite_dev_server():
@@ -33,3 +37,19 @@ def test_a_bad_origin_list_is_refused(value, rule):
 def test_a_refusal_names_the_variable():
     with pytest.raises(ValueError, match=ALLOWED_ORIGINS_VARIABLE):
         read_launch_settings({ALLOWED_ORIGINS_VARIABLE: "*"})
+
+
+def test_the_token_is_absent_by_default():
+    assert read_launch_settings({}).token is None
+
+
+def test_the_token_is_read_from_the_environment():
+    assert (
+        read_launch_settings({TOKEN_VARIABLE: "secret-token"}).token == "secret-token"
+    )
+
+
+@pytest.mark.parametrize("value", ["", "   "], ids=["empty", "blank"])
+def test_an_empty_token_is_refused(value):
+    with pytest.raises(ValueError, match=re.escape(TOKEN_VARIABLE)):
+        read_launch_settings({TOKEN_VARIABLE: value})

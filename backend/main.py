@@ -54,6 +54,7 @@ from schemas import (
     ScanResultRead,
     TrackRead,
 )
+from token_middleware import TokenMiddleware
 
 
 @asynccontextmanager
@@ -84,12 +85,22 @@ launch_settings = read_launch_settings(os.environ)
 
 app = FastAPI(lifespan=lifespan)
 
+
+if launch_settings.token is not None:
+    app.add_middleware(TokenMiddleware, secret=launch_settings.token)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=launch_settings.allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/api/health")
+def get_health():
+    return {"status": "ok"}
 
 
 @app.get("/api/tracks", response_model=list[TrackRead])
