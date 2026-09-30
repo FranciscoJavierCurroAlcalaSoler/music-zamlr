@@ -9,6 +9,7 @@ from launch_settings import (
     FPCALC_PATH_VARIABLE,
     LOG_DIRECTORY_VARIABLE,
     TOKEN_VARIABLE,
+    WATCH_STDIN_VARIABLE,
     read_launch_settings,
 )
 
@@ -135,3 +136,26 @@ def test_a_relative_log_directory_is_refused():
 def test_an_empty_log_directory_is_refused(value):
     with pytest.raises(ValueError, match="contains an empty path"):
         read_launch_settings({LOG_DIRECTORY_VARIABLE: value})
+
+
+def test_the_stdin_watch_is_off_by_default():
+    assert read_launch_settings({}).watch_stdin is False
+
+
+def test_the_stdin_watch_is_on_for_one():
+    assert read_launch_settings({WATCH_STDIN_VARIABLE: "1"}).watch_stdin is True
+
+
+def test_the_stdin_watch_is_off_for_zero():
+    # Its own test rather than a case of the one above, because "off when
+    # asked for off" and "off when not asked at all" reach it by different
+    # routes, and a mutation can break one while the other still passes.
+    assert read_launch_settings({WATCH_STDIN_VARIABLE: "0"}).watch_stdin is False
+
+
+@pytest.mark.parametrize(
+    "value", ["true", "yes", "", "2"], ids=["true", "yes", "empty", "two"]
+)
+def test_an_unknown_stdin_watch_value_is_refused(value):
+    with pytest.raises(ValueError, match="must be 1 or 0"):
+        read_launch_settings({WATCH_STDIN_VARIABLE: value})

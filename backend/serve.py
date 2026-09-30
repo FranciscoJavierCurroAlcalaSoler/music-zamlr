@@ -12,6 +12,8 @@ builds a binary that starts and then fails to find its own application.
 import logging
 import os
 import socket
+import sys
+import threading
 from logging.handlers import RotatingFileHandler
 
 from uvicorn import Config, Server
@@ -26,6 +28,10 @@ LOG_FILE_NAME = "music-zamlr.log"
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 MAX_LOG_BYTES = 1024 * 1024
 LOG_FILES_KEPT = 3
+# A shutdown waits for open connections, and four endpoints here hold one for
+# the length of a scan or an import. When the shell is already gone there is
+# nobody left to finish them for, so the wait is bounded.
+SHUTDOWN_TIMEOUT_SECONDS = 5
 
 
 def configure_file_logging(log_directory: str) -> str:
@@ -86,6 +92,33 @@ def bind_local_socket():
     return server_socket
 
 
+def exit_when_input_closes(server: Server) -> threading.Thread:
+    """Stop the server once the pipe from the shell closes.
+
+    The shell stops this process when the app closes normally. Nothing runs
+    when the shell crashes, and an orphan holds the port, the database and
+    the log file, so the next launch looks like a broken installation. The
+    pipe closes however the parent dies, which is the one signal that
+    arrives in every case.
+
+    One byte, because nothing is ever sent on this pipe: only its closing
+    carries meaning. A daemon thread, because a plain thread blocked on a
+    read would keep the interpreter alive after the server had stopped.
+
+    should_exit is set rather than the process being ended here. Uvicorn
+    polls that flag and runs its own shutdown, which is what leaves the
+    database whole.
+    """
+
+    def wait_for_end_of_input():
+        sys.stdin.buffer.read(1)
+        server.should_exit = True
+
+    watcher = threading.Thread(target=wait_for_end_of_input, daemon=True)
+    watcher.start()
+    return watcher
+
+
 def port_line(port):
     return f"{PORT_LINE_PREFIX}{port}"
 
@@ -123,8 +156,22 @@ def main():
         "Backend starting on port %s with database %s", port, DB_PATH
     )
 
-    config = Config(app=app, host="127.0.0.1", port=port, reload=False, log_config=None)
-    Server(config).run(sockets=[server_socket])
+    config = Config(
+        app=app,
+        host="127.0.0.1",
+        port=port,
+        reload=False,
+        log_config=None,
+        timeout_graceful_shutdown=SHUTDOWN_TIMEOUT_SECONDS,
+    )
+    server = Server(config)
+    # Only when the shell asks. A process started with no input at all sees
+    # the end of it at once, so a watcher nobody asked for would stop the
+    # server as it started. The flag is the shell's word that it opened a
+    # pipe on the other side.
+    if launch_settings.watch_stdin:
+        exit_when_input_closes(server)
+    server.run(sockets=[server_socket])
 
 
 if __name__ == "__main__":

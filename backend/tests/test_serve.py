@@ -14,6 +14,7 @@ from launch_settings import (
     DATABASE_PATH_VARIABLE,
     LOG_DIRECTORY_VARIABLE,
     TOKEN_VARIABLE,
+    WATCH_STDIN_VARIABLE,
 )
 from serve import (
     LOG_FILE_NAME,
@@ -31,6 +32,10 @@ TOKEN = "serve-test-token"
 # measurement of how fast the start is, and it is also what a failing run
 # costs, so it stays as short as that leaves it safe.
 START_TIMEOUT_SECONDS = 15
+# Deliberately shorter than the start guard. A process that should stop has
+# already started, so this wait has only a shutdown to cover, and keeping the
+# two apart is what stops the guard from answering for the assertion.
+EXIT_TIMEOUT_SECONDS = 5
 
 
 def test_the_port_line_carries_the_port():
@@ -229,4 +234,98 @@ def _read_announcements(process: subprocess.Popen) -> tuple[int, str]:
     raise AssertionError(
         f"The server announced port={port} and log={log_path}. Its output was:\n"
         + "".join(seen)
+    )
+
+
+def _start_server(tmp_path, **variables) -> subprocess.Popen:
+    """Start serve.py with its own database and whatever else is asked."""
+    environment = {k: v for k, v in os.environ.items() if not k.startswith("ZAMLR_")}
+    environment[DATABASE_PATH_VARIABLE] = str(tmp_path / "watch-test.db")
+    environment.update(variables)
+    return subprocess.Popen(
+        [sys.executable, str(SERVE_SCRIPT)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=environment,
+    )
+
+
+def test_the_server_exits_when_its_input_closes(tmp_path):
+    process = _start_server(tmp_path, **{WATCH_STDIN_VARIABLE: "1"})
+    killer = threading.Timer(START_TIMEOUT_SECONDS, process.kill)
+    killer.start()
+    try:
+        _read_port_only(process)
+        # Disarmed the moment the read it guards is over, and before the
+        # assertion below. A killer still armed for the same number of
+        # seconds as the wait rescues it: the process dies of the timer just
+        # as the wait gives up, wait returns a code, and the test passes
+        # against a server that never noticed its input close at all.
+        killer.cancel()
+
+        process.stdin.close()
+
+        # A timeout of its own, so a server that ignores the closed pipe
+        # fails here in a few seconds rather than holding the suite open.
+        process.wait(timeout=EXIT_TIMEOUT_SECONDS)
+    finally:
+        killer.cancel()
+        process.terminate()
+        process.wait(timeout=START_TIMEOUT_SECONDS)
+
+
+def test_the_server_exits_when_it_is_terminated(tmp_path):
+    # The ordinary case: the shell stops a child it is finished with. The
+    # watcher thread is still blocked on a read that will never return, and
+    # a plain thread in that state keeps the interpreter alive after the
+    # server has stopped. On Windows terminate() ends the process outright,
+    # so this only reaches that fault on the Linux and macOS runners.
+    process = _start_server(tmp_path, **{WATCH_STDIN_VARIABLE: "1"})
+    killer = threading.Timer(START_TIMEOUT_SECONDS, process.kill)
+    killer.start()
+    try:
+        _read_port_only(process)
+        killer.cancel()
+
+        process.terminate()
+
+        process.wait(timeout=EXIT_TIMEOUT_SECONDS)
+    finally:
+        killer.cancel()
+        process.kill()
+        process.wait(timeout=START_TIMEOUT_SECONDS)
+
+
+def test_the_server_stays_when_the_watch_is_off(tmp_path):
+    process = _start_server(tmp_path)
+    killer = threading.Timer(START_TIMEOUT_SECONDS, process.kill)
+    killer.start()
+    try:
+        _read_port_only(process)
+        killer.cancel()
+
+        process.stdin.close()
+
+        # A wait, because this test is about something that must not happen.
+        # Without the watch the server has no reason to notice the closed
+        # pipe, so a second is enough to catch a watcher that runs unasked,
+        # which would stop the server the moment it started.
+        with pytest.raises(subprocess.TimeoutExpired):
+            process.wait(timeout=1)
+    finally:
+        killer.cancel()
+        process.terminate()
+        process.wait(timeout=START_TIMEOUT_SECONDS)
+
+
+def _read_port_only(process: subprocess.Popen) -> int:
+    seen = []
+    for line in process.stdout:
+        if line.startswith(PORT_LINE_PREFIX):
+            return int(line.removeprefix(PORT_LINE_PREFIX).strip())
+        seen.append(line)
+    raise AssertionError(
+        "The server never announced a port. Its output was:\n" + "".join(seen)
     )

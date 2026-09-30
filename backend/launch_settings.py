@@ -20,7 +20,9 @@ TOKEN_VARIABLE = "ZAMLR_TOKEN"
 DATABASE_PATH_VARIABLE = "ZAMLR_DATABASE_PATH"
 FPCALC_PATH_VARIABLE = "ZAMLR_FPCALC"
 LOG_DIRECTORY_VARIABLE = "ZAMLR_LOG_DIR"
+WATCH_STDIN_VARIABLE = "ZAMLR_WATCH_STDIN"
 DEFAULT_ALLOWED_ORIGINS = ("http://localhost:5173",)
+WATCH_STDIN_VALUES = {"1": True, "0": False}
 
 
 @dataclass(frozen=True)
@@ -30,6 +32,7 @@ class LaunchSettings:
     database_path: str | None
     fpcalc_path: str | None
     log_directory: str | None
+    watch_stdin: bool
 
 
 def read_launch_settings(environ: Mapping[str, str]) -> LaunchSettings:
@@ -38,6 +41,7 @@ def read_launch_settings(environ: Mapping[str, str]) -> LaunchSettings:
     database_path = None
     fpcalc_path = None
     log_directory = None
+    watch_stdin = False
 
     # An absent variable and an empty one are different answers. Absent means
     # nobody launched us, so the browser on the other side is the Vite dev
@@ -104,10 +108,21 @@ def read_launch_settings(environ: Mapping[str, str]) -> LaunchSettings:
             raise ValueError(f"{LOG_DIRECTORY_VARIABLE} must be an absolute path")
         log_directory = os.path.normpath(log_directory)
 
+    if WATCH_STDIN_VARIABLE in environ:
+        requested = environ[WATCH_STDIN_VARIABLE].strip()
+        # Anything but "1" or "0" raises rather than counting as off. A
+        # launcher that sends "true" and is answered with silence has a bug
+        # whose only symptom is a server still running weeks later, long
+        # after the window that started it closed.
+        if requested not in WATCH_STDIN_VALUES:
+            raise ValueError(f"{WATCH_STDIN_VARIABLE} must be 1 or 0")
+        watch_stdin = WATCH_STDIN_VALUES[requested]
+
     return LaunchSettings(
         allowed_origins=tuple(allowed_origins),
         token=token,
         database_path=database_path,
         fpcalc_path=fpcalc_path,
         log_directory=log_directory,
+        watch_stdin=watch_stdin,
     )
