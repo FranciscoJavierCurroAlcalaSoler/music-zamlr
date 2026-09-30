@@ -6,6 +6,7 @@ import pytest
 from launch_settings import (
     ALLOWED_ORIGINS_VARIABLE,
     DATABASE_PATH_VARIABLE,
+    FPCALC_PATH_VARIABLE,
     TOKEN_VARIABLE,
     read_launch_settings,
 )
@@ -87,3 +88,24 @@ def test_an_empty_database_path_is_refused(value):
     # pass with its own rule deleted.
     with pytest.raises(ValueError, match="contains an empty path"):
         read_launch_settings({DATABASE_PATH_VARIABLE: value})
+
+
+def test_the_fpcalc_path_is_absent_by_default():
+    assert read_launch_settings({}).fpcalc_path is None
+
+
+def test_the_fpcalc_path_is_read_and_normalized(tmp_path):
+    path = os.path.join(str(tmp_path), "fpcalc", "..", "fpcalc")
+    expected = os.path.normpath(path)
+    assert read_launch_settings({FPCALC_PATH_VARIABLE: path}).fpcalc_path == expected
+
+
+def test_a_relative_fpcalc_path_is_refused():
+    with pytest.raises(ValueError, match="must be an absolute path"):
+        read_launch_settings({FPCALC_PATH_VARIABLE: os.path.join("bin", "fpcalc")})
+
+
+@pytest.mark.parametrize("value", ["", "   "], ids=["empty", "blank"])
+def test_an_empty_fpcalc_path_is_refused(value):
+    with pytest.raises(ValueError, match="contains an empty path"):
+        read_launch_settings({FPCALC_PATH_VARIABLE: value})

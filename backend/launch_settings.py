@@ -18,6 +18,7 @@ from dataclasses import dataclass
 ALLOWED_ORIGINS_VARIABLE = "ZAMLR_ALLOWED_ORIGINS"
 TOKEN_VARIABLE = "ZAMLR_TOKEN"
 DATABASE_PATH_VARIABLE = "ZAMLR_DATABASE_PATH"
+FPCALC_PATH_VARIABLE = "ZAMLR_FPCALC"
 DEFAULT_ALLOWED_ORIGINS = ("http://localhost:5173",)
 
 
@@ -26,12 +27,14 @@ class LaunchSettings:
     allowed_origins: tuple[str, ...]
     token: str | None
     database_path: str | None
+    fpcalc_path: str | None
 
 
 def read_launch_settings(environ: Mapping[str, str]) -> LaunchSettings:
     allowed_origins = []
     token = None
     database_path = None
+    fpcalc_path = None
 
     # An absent variable and an empty one are different answers. Absent means
     # nobody launched us, so the browser on the other side is the Vite dev
@@ -82,8 +85,17 @@ def read_launch_settings(environ: Mapping[str, str]) -> LaunchSettings:
             raise ValueError(f"{DATABASE_PATH_VARIABLE} must be an absolute path")
         database_path = os.path.normpath(db_path)
 
+    if FPCALC_PATH_VARIABLE in environ:
+        fpcalc_path = environ[FPCALC_PATH_VARIABLE].strip()
+        if not fpcalc_path:
+            raise ValueError(f"{FPCALC_PATH_VARIABLE} contains an empty path")
+        if not os.path.isabs(fpcalc_path):
+            raise ValueError(f"{FPCALC_PATH_VARIABLE} must be an absolute path")
+        fpcalc_path = os.path.normpath(fpcalc_path)
+
     return LaunchSettings(
         allowed_origins=tuple(allowed_origins),
         token=token,
         database_path=database_path,
+        fpcalc_path=fpcalc_path,
     )

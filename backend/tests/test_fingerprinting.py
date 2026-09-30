@@ -244,6 +244,28 @@ def test_fpcalc_is_unavailable_when_the_lookup_finds_nothing(stub_fpcalc):
     assert fpcalc_available() is False
 
 
+def test_the_configured_binary_is_used_when_it_exists(tmp_path, monkeypatch):
+    configured = tmp_path / "fpcalc"
+    configured.touch()
+    monkeypatch.setattr(fingerprinting, "CONFIGURED_FPCALC", str(configured))
+
+    assert fingerprinting._find_fpcalc() == str(configured)
+
+
+def test_a_configured_binary_that_is_missing_counts_as_absent(tmp_path, monkeypatch):
+    configured = tmp_path / "missing-fpcalc"
+    monkeypatch.setattr(fingerprinting, "CONFIGURED_FPCALC", str(configured))
+
+    assert fpcalc_available() is False
+
+
+def test_path_is_searched_when_nothing_is_configured(monkeypatch):
+    monkeypatch.setattr(fingerprinting, "CONFIGURED_FPCALC", None)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/fpcalc")
+
+    assert fingerprinting._find_fpcalc() == "/usr/bin/fpcalc"
+
+
 def test_a_failed_run_gives_none(stub_fpcalc):
     # Parseable output alongside the failure, deliberately. With empty stdout
     # this test passes even when the return-code guard is deleted, because the

@@ -26,9 +26,15 @@ matching.py imports this module, so the reverse would be an import cycle.
 """
 
 import logging
+import os
 import shutil
 import struct
 import subprocess
+
+from launch_settings import read_launch_settings
+
+launch_settings = read_launch_settings(os.environ)
+CONFIGURED_FPCALC = launch_settings.fpcalc_path
 
 FRAME_SECONDS = 0.1238
 
@@ -150,6 +156,11 @@ def fingerprints_match(a: list[int], b: list[int]) -> bool:
 
 
 def _find_fpcalc() -> str | None:
+    if CONFIGURED_FPCALC:
+        if os.path.isfile(CONFIGURED_FPCALC):
+            return CONFIGURED_FPCALC
+        else:
+            return None
     return shutil.which("fpcalc")
 
 

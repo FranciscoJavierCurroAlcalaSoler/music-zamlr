@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 import main
 from database import create_db_and_tables, engine
+from fingerprinting import _find_fpcalc
 from launch_settings import (
     ALLOWED_ORIGINS_VARIABLE,
     DATABASE_PATH_VARIABLE,
@@ -71,6 +72,7 @@ def main_child():
                 # built. The parent compares it with the path it set, so the
                 # expected value never travels through this file.
                 "engine_database_path": engine.url.database,
+                "fpcalc_path": _find_fpcalc(),
             }
         )
     )

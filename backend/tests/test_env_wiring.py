@@ -7,6 +7,13 @@ from typing import NamedTuple
 
 import pytest
 
+from launch_settings import (
+    ALLOWED_ORIGINS_VARIABLE,
+    DATABASE_PATH_VARIABLE,
+    FPCALC_PATH_VARIABLE,
+    TOKEN_VARIABLE,
+)
+
 BACKEND_DIRECTORY = Path(__file__).resolve().parents[1]
 CHILD_SCRIPT = Path(__file__).with_name("env_wiring_child.py")
 TOKEN = "test-token-123"
@@ -23,6 +30,7 @@ class ChildRun(NamedTuple):
 
     answers: dict
     database_path: str
+    fpcalc_path: str
 
 
 @pytest.fixture(scope="module")
@@ -41,8 +49,12 @@ def child_run(tmp_path_factory):
     # A script started by its path gets its own folder as sys.path[0], and
     # this one lives in tests/, so `import main` needs the directory above it.
     environment["PYTHONPATH"] = str(BACKEND_DIRECTORY)
-    environment["ZAMLR_TOKEN"] = TOKEN
-    environment["ZAMLR_ALLOWED_ORIGINS"] = CONFIGURED_ORIGIN
+    # The names come from launch_settings, never spelled out here. A name
+    # typed by hand and misspelled leaves the variable unset, and every
+    # reader then falls back to the behaviour it has without a launcher —
+    # which looks like a working test right up to the assertion.
+    environment[TOKEN_VARIABLE] = TOKEN
+    environment[ALLOWED_ORIGINS_VARIABLE] = CONFIGURED_ORIGIN
     # Under tmp_path_factory, not tmp_path, which has function scope and
     # cannot reach a fixture that runs once for the module. The child creates
     # the tables here, so nothing it does touches backend/db.
@@ -54,7 +66,12 @@ def child_run(tmp_path_factory):
     database_path = os.path.normpath(
         str(tmp_path_factory.mktemp("database") / "zamlr" / "test.db")
     )
-    environment["ZAMLR_DATABASE_PATH"] = database_path
+    environment[DATABASE_PATH_VARIABLE] = database_path
+    # An empty file is enough: nothing here runs it, and what is under test
+    # is whether fingerprinting.py read the variable at import.
+    fpcalc_path = os.path.normpath(str(tmp_path_factory.mktemp("fpcalc") / "fpcalc"))
+    Path(fpcalc_path).touch()
+    environment[FPCALC_PATH_VARIABLE] = fpcalc_path
 
     child = subprocess.run(
         [sys.executable, str(CHILD_SCRIPT)],
@@ -71,7 +88,9 @@ def child_run(tmp_path_factory):
     # The last line only. Anything that writes to stdout before the answer
     # would otherwise break the parse and look like the same failure.
     answers = json.loads(child.stdout.strip().splitlines()[-1])
-    return ChildRun(answers=answers, database_path=database_path)
+    return ChildRun(
+        answers=answers, database_path=database_path, fpcalc_path=fpcalc_path
+    )
 
 
 def test_main_reads_the_token_from_the_environment(child_run):
@@ -94,3 +113,7 @@ def test_the_database_path_comes_from_the_environment(child_run):
     # named, and the app would then fail on the first query rather than here.
     assert child_run.answers["engine_database_path"] == child_run.database_path
     assert Path(child_run.database_path).exists()
+
+
+def test_the_fpcalc_path_comes_from_the_environment(child_run):
+    assert child_run.answers["fpcalc_path"] == child_run.fpcalc_path
