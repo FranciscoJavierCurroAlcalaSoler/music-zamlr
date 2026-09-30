@@ -9,13 +9,64 @@ follows imports and cannot see a module inside a string, so the string form
 builds a binary that starts and then fails to find its own application.
 """
 
+import logging
+import os
 import socket
+from logging.handlers import RotatingFileHandler
 
 from uvicorn import Config, Server
 
+from database import DB_PATH
+from launch_settings import read_launch_settings
 from main import app
 
 PORT_LINE_PREFIX = "ZAMLR_PORT="
+LOG_LINE_PREFIX = "ZAMLR_LOG="
+LOG_FILE_NAME = "music-zamlr.log"
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
+MAX_LOG_BYTES = 1024 * 1024
+LOG_FILES_KEPT = 3
+
+
+def configure_file_logging(log_directory: str) -> str:
+    """Send every log record to a file in log_directory, and say where.
+
+    The argument is a directory, not a file: the name inside it is this
+    application's to choose, and the shell only knows where app-data is.
+
+    Rotation is here because nobody visits the machine this runs on. A diff
+    over a large collection can write a warning per unreadable file.
+    """
+    os.makedirs(log_directory, exist_ok=True)
+    log_path = os.path.join(log_directory, LOG_FILE_NAME)
+    handler = RotatingFileHandler(
+        log_path,
+        maxBytes=MAX_LOG_BYTES,
+        backupCount=LOG_FILES_KEPT,
+        # utf-8, or the file is written in the machine's code page and a
+        # record naming a Japanese or Cyrillic path raises inside the
+        # logging call. A music library is full of such paths.
+        encoding="utf-8",
+    )
+    handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    root_logger = logging.getLogger()
+    # The file replaces every other handler rather than joining them.
+    # scanner.py calls logging.basicConfig at import, which leaves a handler
+    # writing to the console, and this process has no console: its stdout is
+    # a pipe the shell reads for the announcements above. A running server
+    # logs a line per request, and a pipe nobody drains fills and then
+    # blocks the process that writes to it.
+    for existing in list(root_logger.handlers):
+        root_logger.removeHandler(existing)
+    root_logger.addHandler(handler)
+    # The root logger starts at WARNING, and a record is dropped by the
+    # level of the logger it was made on before any handler sees it. Without
+    # this, every INFO line made on a logger of our own would be lost.
+    # scanner.py's basicConfig happens to raise the root level already, so
+    # this looks redundant today and is not: it states what this function
+    # needs rather than inheriting it from another module's import.
+    root_logger.setLevel(logging.INFO)
+    return log_path
 
 
 def bind_local_socket():
@@ -39,7 +90,18 @@ def port_line(port):
     return f"{PORT_LINE_PREFIX}{port}"
 
 
+def log_line(log_path):
+    return f"{LOG_LINE_PREFIX}{log_path}"
+
+
 def main():
+    # Through the settings rather than os.environ directly, so that the
+    # directory is held to the same rules as every other configured path.
+    launch_settings = read_launch_settings(os.environ)
+    log_path = None
+    if launch_settings.log_directory:
+        log_path = configure_file_logging(launch_settings.log_directory)
+
     server_socket = bind_local_socket()
     port = server_socket.getsockname()[1]
     # flush, because Python writes to a pipe in blocks rather than in lines.
@@ -47,8 +109,21 @@ def main():
     # kilobytes have built up, and the shell waits for a port that is sitting
     # in a buffer while a perfectly healthy backend serves nobody.
     print(port_line(port), flush=True)
+    # After the port, never before it, so that a reader which takes the first
+    # line still finds what it came for. The shell needs this to show the
+    # user their log, and taking it from here rather than composing it from
+    # LOG_FILE_NAME keeps the name this application's own business.
+    if log_path is not None:
+        print(log_line(log_path), flush=True)
 
-    config = Config(app=app, host="127.0.0.1", port=port, reload=False)
+    # DB_PATH rather than the variable, because it is the path actually in
+    # use: the variable is absent whenever the fallback applies. The token is
+    # never logged — this file is what a user will be asked to send on.
+    logging.getLogger(__name__).info(
+        "Backend starting on port %s with database %s", port, DB_PATH
+    )
+
+    config = Config(app=app, host="127.0.0.1", port=port, reload=False, log_config=None)
     Server(config).run(sockets=[server_socket])
 
 

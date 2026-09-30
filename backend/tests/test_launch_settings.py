@@ -7,6 +7,7 @@ from launch_settings import (
     ALLOWED_ORIGINS_VARIABLE,
     DATABASE_PATH_VARIABLE,
     FPCALC_PATH_VARIABLE,
+    LOG_DIRECTORY_VARIABLE,
     TOKEN_VARIABLE,
     read_launch_settings,
 )
@@ -109,3 +110,28 @@ def test_a_relative_fpcalc_path_is_refused():
 def test_an_empty_fpcalc_path_is_refused(value):
     with pytest.raises(ValueError, match="contains an empty path"):
         read_launch_settings({FPCALC_PATH_VARIABLE: value})
+
+
+def test_the_log_directory_is_absent_by_default():
+    assert read_launch_settings({}).log_directory is None
+
+
+def test_the_log_directory_is_read_and_normalized(tmp_path):
+    path = os.path.join(str(tmp_path), "music", "..", "zamlr.log")
+    expected = os.path.normpath(path)
+    assert (
+        read_launch_settings({LOG_DIRECTORY_VARIABLE: path}).log_directory == expected
+    )
+
+
+def test_a_relative_log_directory_is_refused():
+    with pytest.raises(ValueError, match="must be an absolute path"):
+        read_launch_settings(
+            {LOG_DIRECTORY_VARIABLE: os.path.join("music", "zamlr.log")}
+        )
+
+
+@pytest.mark.parametrize("value", ["", "   "], ids=["empty", "blank"])
+def test_an_empty_log_directory_is_refused(value):
+    with pytest.raises(ValueError, match="contains an empty path"):
+        read_launch_settings({LOG_DIRECTORY_VARIABLE: value})
