@@ -11,11 +11,13 @@ environment of the whole pytest process. It is the same rule the planner
 follows with path_exists.
 """
 
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 
 ALLOWED_ORIGINS_VARIABLE = "ZAMLR_ALLOWED_ORIGINS"
 TOKEN_VARIABLE = "ZAMLR_TOKEN"
+DATABASE_PATH_VARIABLE = "ZAMLR_DATABASE_PATH"
 DEFAULT_ALLOWED_ORIGINS = ("http://localhost:5173",)
 
 
@@ -23,11 +25,13 @@ DEFAULT_ALLOWED_ORIGINS = ("http://localhost:5173",)
 class LaunchSettings:
     allowed_origins: tuple[str, ...]
     token: str | None
+    database_path: str | None
 
 
 def read_launch_settings(environ: Mapping[str, str]) -> LaunchSettings:
     allowed_origins = []
     token = None
+    database_path = None
 
     # An absent variable and an empty one are different answers. Absent means
     # nobody launched us, so the browser on the other side is the Vite dev
@@ -66,4 +70,20 @@ def read_launch_settings(environ: Mapping[str, str]) -> LaunchSettings:
         if not token:
             raise ValueError(f"{TOKEN_VARIABLE} contains an empty token")
 
-    return LaunchSettings(allowed_origins=tuple(allowed_origins), token=token)
+    if DATABASE_PATH_VARIABLE in environ:
+        db_path = environ[DATABASE_PATH_VARIABLE].strip()
+        if not db_path:
+            raise ValueError(f"{DATABASE_PATH_VARIABLE} contains an empty path")
+        # Refused before the directory is worked out, because a relative path
+        # resolves against a working directory the shell chooses, and SQLite
+        # answers a path that points nowhere useful by making an empty file
+        # there and reporting nothing. The catalog then looks lost.
+        if not os.path.isabs(db_path):
+            raise ValueError(f"{DATABASE_PATH_VARIABLE} must be an absolute path")
+        database_path = os.path.normpath(db_path)
+
+    return LaunchSettings(
+        allowed_origins=tuple(allowed_origins),
+        token=token,
+        database_path=database_path,
+    )

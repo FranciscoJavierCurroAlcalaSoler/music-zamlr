@@ -13,7 +13,12 @@ import os
 from fastapi.testclient import TestClient
 
 import main
-from launch_settings import ALLOWED_ORIGINS_VARIABLE, TOKEN_VARIABLE
+from database import create_db_and_tables, engine
+from launch_settings import (
+    ALLOWED_ORIGINS_VARIABLE,
+    DATABASE_PATH_VARIABLE,
+    TOKEN_VARIABLE,
+)
 
 DEFAULT_ORIGIN = "http://localhost:5173"
 
@@ -23,11 +28,18 @@ def main_child():
     # so this file cannot drift out of step with whatever the parent chose.
     token = os.environ[TOKEN_VARIABLE]
     origin = os.environ[ALLOWED_ORIGINS_VARIABLE]
+    # .get, not [], so the guard below is a real guard: run without the
+    # variable, this file must not reach create_db_and_tables() and write
+    # into the developer's own database.
+    database_path = os.environ.get(DATABASE_PATH_VARIABLE)
 
     # Not `with TestClient(...)`: the context manager runs the lifespan, which
     # calls create_db_and_tables() and would write into the real backend/db.
     # A middleware is built for the first request, so none of this needs it.
     client = TestClient(main.app)
+
+    if database_path:
+        create_db_and_tables()
 
     no_token = client.get("/api/health")
     with_token = client.get("/api/health", headers={"X-Zamlr-Token": token})
@@ -55,6 +67,10 @@ def main_child():
                 "with_token": with_token.status_code,
                 "configured_origin": configured_origin.status_code,
                 "default_origin": default_origin.status_code,
+                # The engine's own path, read back from the engine database.py
+                # built. The parent compares it with the path it set, so the
+                # expected value never travels through this file.
+                "engine_database_path": engine.url.database,
             }
         )
     )

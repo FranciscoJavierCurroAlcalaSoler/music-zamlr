@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -12,9 +13,21 @@ TOKEN = "test-token-123"
 CONFIGURED_ORIGIN = "http://tauri.localhost"
 
 
+class ChildRun(NamedTuple):
+    """One run of the child, kept apart from what this file asked for.
+
+    answers comes out of the child. database_path is what this file put into
+    the environment. Keeping the two in separate fields is what stops a test
+    from comparing the child's own output with itself, which proves nothing.
+    """
+
+    answers: dict
+    database_path: str
+
+
 @pytest.fixture(scope="module")
-def child_results():
-    """Run main.py once in a child process and return the four answers.
+def child_run(tmp_path_factory):
+    """Run main.py once in a child process and return what it answered.
 
     Module scope because a fresh interpreter has to import FastAPI, SQLModel
     and the whole app, which costs about two seconds. Both tests read this
@@ -30,6 +43,18 @@ def child_results():
     environment["PYTHONPATH"] = str(BACKEND_DIRECTORY)
     environment["ZAMLR_TOKEN"] = TOKEN
     environment["ZAMLR_ALLOWED_ORIGINS"] = CONFIGURED_ORIGIN
+    # Under tmp_path_factory, not tmp_path, which has function scope and
+    # cannot reach a fixture that runs once for the module. The child creates
+    # the tables here, so nothing it does touches backend/db.
+    #
+    # One level deeper than mktemp goes, because mktemp makes its directory
+    # and the packaged app will not: the shell names a folder in app-data
+    # that has never existed. Without a missing directory here, nothing in
+    # this test would notice create_db_and_tables losing its makedirs call.
+    database_path = os.path.normpath(
+        str(tmp_path_factory.mktemp("database") / "zamlr" / "test.db")
+    )
+    environment["ZAMLR_DATABASE_PATH"] = database_path
 
     child = subprocess.run(
         [sys.executable, str(CHILD_SCRIPT)],
@@ -45,18 +70,27 @@ def child_results():
     assert child.returncode == 0, child.stderr
     # The last line only. Anything that writes to stdout before the answer
     # would otherwise break the parse and look like the same failure.
-    return json.loads(child.stdout.strip().splitlines()[-1])
+    answers = json.loads(child.stdout.strip().splitlines()[-1])
+    return ChildRun(answers=answers, database_path=database_path)
 
 
-def test_main_reads_the_token_from_the_environment(child_results):
-    assert child_results["no_token"] == 401
-    assert child_results["with_token"] == 200
+def test_main_reads_the_token_from_the_environment(child_run):
+    assert child_run.answers["no_token"] == 401
+    assert child_run.answers["with_token"] == 200
 
 
-def test_main_reads_the_origins_from_the_environment(child_results):
+def test_main_reads_the_origins_from_the_environment(child_run):
     # Status codes rather than the value of launch_settings, deliberately:
     # reading the settings out of the child would pass against a main.py that
     # reads them correctly and then hands the middleware something else.
     # These two answers can only come from the middleware the file built.
-    assert child_results["configured_origin"] == 200
-    assert child_results["default_origin"] == 400
+    assert child_run.answers["configured_origin"] == 200
+    assert child_run.answers["default_origin"] == 400
+
+
+def test_the_database_path_comes_from_the_environment(child_run):
+    # Two claims, and the second one is not spare. The engine can carry the
+    # right path while create_db_and_tables never makes the folder the shell
+    # named, and the app would then fail on the first query rather than here.
+    assert child_run.answers["engine_database_path"] == child_run.database_path
+    assert Path(child_run.database_path).exists()
