@@ -11,7 +11,7 @@ import type {
   FormatOrder,
 } from "./types";
 
-export const API_BASE = "http://localhost:8000";
+import { apiBase, authHeaders } from "./connection";
 
 /**
  * Plain async functions: no hooks, no setState. Components call these and
@@ -83,7 +83,9 @@ async function throwForResponse(response: Response): Promise<never> {
 }
 
 export async function fetchCollections(): Promise<Collection[]> {
-  const response = await fetch(`${API_BASE}/api/collections`);
+  const response = await fetch(`${apiBase()}/api/collections`, {
+    headers: authHeaders(),
+  });
   if (!response.ok) {
     await throwForResponse(response);
   }
@@ -165,9 +167,10 @@ export async function createCollection(
   rootPath: string,
   onProgress?: ScanProgressCallback,
 ): Promise<ScanResult> {
-  const response = await fetch(`${API_BASE}/api/collections/scan`, {
+  const response = await fetch(`${apiBase()}/api/collections/scan`, {
     method: "POST",
     headers: {
+      ...authHeaders(),
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ name, root_path: rootPath }),
@@ -183,9 +186,10 @@ export async function rescanCollection(
   onProgress?: ScanProgressCallback,
 ): Promise<ScanResult> {
   const response = await fetch(
-    `${API_BASE}/api/collections/${collectionId}/rescan`,
+    `${apiBase()}/api/collections/${collectionId}/rescan`,
     {
       method: "POST",
+      headers: authHeaders(),
     },
   );
   if (!response.ok) {
@@ -201,7 +205,7 @@ export function describeFetchError(error: unknown): string {
   // it. That is by far the most common failure while developing, and the
   // raw "Failed to fetch" tells the user nothing about what to do.
   if (error instanceof TypeError) {
-    return `Could not reach the server at ${API_BASE}. Is the backend running?`;
+    return `Could not reach the server at ${apiBase()}. Is the backend running?`;
   }
   // Anything we threw ourselves already describes a real HTTP response.
   if (error instanceof Error) {
@@ -216,7 +220,8 @@ export async function fetchDiff(
   onProgress?: DiffProgressCallback,
 ): Promise<DiffResult> {
   const response = await fetch(
-    `${API_BASE}/api/diff?mine=${mineId}&theirs=${theirsId}`,
+    `${apiBase()}/api/diff?mine=${mineId}&theirs=${theirsId}`,
+    { headers: authHeaders() },
   );
   if (!response.ok) {
     await throwForResponse(response);
@@ -232,9 +237,10 @@ export async function previewImport(
   request: ImportRequestBody,
   onProgress?: ImportProgressCallback,
 ): Promise<ImportPreview> {
-  const response = await fetch(`${API_BASE}/api/import/preview`, {
+  const response = await fetch(`${apiBase()}/api/import/preview`, {
     method: "POST",
     headers: {
+      ...authHeaders(),
       "Content-Type": "application/json",
     },
     body: JSON.stringify(request),
@@ -253,9 +259,10 @@ export async function executeImport(
   request: ImportRequestBody,
   onProgress?: ImportProgressCallback,
 ): Promise<ImportResult> {
-  const response = await fetch(`${API_BASE}/api/import/execute`, {
+  const response = await fetch(`${apiBase()}/api/import/execute`, {
     method: "POST",
     headers: {
+      ...authHeaders(),
       "Content-Type": "application/json",
     },
     body: JSON.stringify(request),
@@ -271,7 +278,9 @@ export async function executeImport(
 }
 
 export async function fetchFormatOrder(): Promise<FormatOrder> {
-  const response = await fetch(`${API_BASE}/api/settings/format-order`);
+  const response = await fetch(`${apiBase()}/api/settings/format-order`, {
+    headers: authHeaders(),
+  });
   if (!response.ok) {
     await throwForResponse(response);
   }
@@ -279,9 +288,10 @@ export async function fetchFormatOrder(): Promise<FormatOrder> {
 }
 
 export async function saveFormatOrder(tiers: string[][]): Promise<FormatOrder> {
-  const response = await fetch(`${API_BASE}/api/settings/format-order`, {
+  const response = await fetch(`${apiBase()}/api/settings/format-order`, {
     method: "PUT",
     headers: {
+      ...authHeaders(),
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ tiers: tiers }),

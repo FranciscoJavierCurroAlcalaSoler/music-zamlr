@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createCollection,
+  fetchCollections,
   fetchDiff,
   fetchFormatOrder,
   rescanCollection,
@@ -197,12 +198,14 @@ function streamOf(text: string, chunkSize: number): ReadableStream<Uint8Array> {
   });
 }
 
+const STREAM_RESPONSE: ResponseInit = {
+  status: 200,
+  headers: { "content-type": "text/event-stream" },
+};
+
 function serverSends(
   body: BodyInit | null,
-  init: ResponseInit = {
-    status: 200,
-    headers: { "content-type": "text/event-stream" },
-  },
+  init: ResponseInit = STREAM_RESPONSE,
 ) {
   vi.stubGlobal("fetch", () => Promise.resolve(new Response(body, init)));
 }
@@ -489,5 +492,89 @@ describe("the format order", () => {
     await expect(saveFormatOrder([["FLAC", "MP3"]])).rejects.toThrow(
       "mixed lossy and non-lossy formats: FLAC, MP3",
     );
+  });
+});
+
+/**
+ * Every request function, because each one builds its own headers and a
+ * spread goes missing in one place at a time. With a single function under
+ * test, the token could vanish from the other seven and nothing would say
+ * so — which is what the mutations showed before this table existed.
+ */
+describe("the token header", () => {
+  const JSON_RESPONSE = {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  };
+
+  function recordingServer(body: string, init: ResponseInit = STREAM_RESPONSE) {
+    const calls: RequestInit[] = [];
+    vi.stubGlobal("fetch", (_url: string, requestInit: RequestInit = {}) => {
+      calls.push(requestInit);
+      // Built inside the stub, so each call gets a body of its own rather
+      // than a stream another call has already drained.
+      return Promise.resolve(new Response(body, init));
+    });
+    return calls;
+  }
+
+  const cases: [string, () => RequestInit[], () => Promise<unknown>][] = [
+    [
+      "fetchCollections",
+      () => recordingServer("[]", JSON_RESPONSE),
+      () => fetchCollections(),
+    ],
+    [
+      "fetchFormatOrder",
+      () => recordingServer("{}", JSON_RESPONSE),
+      () => fetchFormatOrder(),
+    ],
+    [
+      "saveFormatOrder",
+      () => recordingServer("{}", JSON_RESPONSE),
+      () => saveFormatOrder([["FLAC"], ["MP3"]]),
+    ],
+    [
+      "createCollection",
+      () => recordingServer(wholeBodyScan),
+      () => createCollection("Theirs", `D:${B}Music`),
+    ],
+    [
+      "rescanCollection",
+      () => recordingServer(wholeBodyScan),
+      () => rescanCollection(1),
+    ],
+    ["fetchDiff", () => recordingServer(wholeBodyDiff), () => fetchDiff(1, 2)],
+    [
+      "previewImport",
+      () => recordingServer(wholeBodyPreview),
+      () => previewImport(importRequest),
+    ],
+    [
+      "executeImport",
+      () => recordingServer(wholeBodyImport),
+      () => executeImport(importRequest),
+    ],
+  ];
+
+  it.each(cases)("%s sends the injected token", async (_name, server, call) => {
+    vi.stubGlobal("__ZAMLR__", { token: "test-token" });
+    const calls = server();
+
+    await call();
+
+    // The value, not expect.any(String): a header hard-coded to anything at
+    // all would satisfy a looser assertion.
+    expect(calls[0].headers).toEqual(
+      expect.objectContaining({ "X-Zamlr-Token": "test-token" }),
+    );
+  });
+
+  it("sends no token header when nothing is injected", async () => {
+    const calls = recordingServer("[]", JSON_RESPONSE);
+
+    await fetchCollections();
+
+    expect(calls[0].headers).not.toHaveProperty("X-Zamlr-Token");
   });
 });
