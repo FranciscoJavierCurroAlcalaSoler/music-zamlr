@@ -1,5 +1,6 @@
 declare global {
-  var __ZAMLR__: { apiBase?: string; token?: string } | undefined;
+  var __ZAMLR__:
+    { apiBase?: string; token?: string; logPath?: string } | undefined;
 }
 
 export const TOKEN_HEADER = "X-Zamlr-Token";
@@ -15,4 +16,8 @@ export function apiBase(): string {
 export function authHeaders(): Record<string, string> {
   const token = globalThis.__ZAMLR__?.token;
   return token ? { [TOKEN_HEADER]: token } : {};
+}
+
+export function logPath(): string | null {
+  return globalThis.__ZAMLR__?.logPath ?? null;
 }

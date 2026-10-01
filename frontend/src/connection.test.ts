@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { apiBase, authHeaders } from "./connection";
+import { apiBase, authHeaders, logPath } from "./connection";
 
 // No declare global here: connection.ts declares the field, and a global
 // declaration in any module covers the whole project.
@@ -31,5 +31,15 @@ describe("connection", () => {
     expect(authHeaders()).toMatchObject({
       "X-Zamlr-Token": "test-token",
     });
+  });
+
+  it("answers null when no log file was injected", () => {
+    expect(logPath()).toBeNull();
+  });
+
+  it("answers the injected log file", () => {
+    globalThis.__ZAMLR__ = { logPath: String.raw`C:\Users\x\music-zamlr.log` };
+
+    expect(logPath()).toBe(String.raw`C:\Users\x\music-zamlr.log`);
   });
 });

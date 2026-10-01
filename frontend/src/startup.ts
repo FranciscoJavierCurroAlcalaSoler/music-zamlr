@@ -1,5 +1,5 @@
 import { fetchHealth } from "./api";
-import { apiBase } from "./connection";
+import { apiBase, logPath } from "./connection";
 
 /**
  * Waiting for the backend to come up, kept out of the component.
@@ -22,12 +22,18 @@ export const DELAY_MS = 500;
 // takes. One attempt that hangs must not consume the whole of it.
 export const ATTEMPT_TIMEOUT_MS = 2000;
 
-export function startupFailureMessage(address: string): string {
+export function startupFailureMessage(
+  address: string,
+  logFile: string | null,
+): string {
   const seconds = Math.round((ATTEMPTS * DELAY_MS) / 1000);
   return (
     `The backend did not answer at ${address} within ${seconds} seconds. ` +
-    `Close the app and open it again. If this keeps happening, the log file ` +
-    `holds the reason.`
+    // The space that joins the sentences belongs to the optional one, not to
+    // this one. Put it here and the message ends in a space whenever no log
+    // file is known, which is every run outside the packaged app.
+    `Close the app and open it again.` +
+    (logFile === null ? "" : ` The log file at ${logFile} holds the reason.`)
   );
 }
 
@@ -87,7 +93,9 @@ export async function waitForBackend({
         // cause carries the last failure, which is what the lint rule
         // asks for and what a reader in the console needs: the sentence
         // here says what to do, the cause says what actually happened.
-        throw new Error(startupFailureMessage(apiBase()), { cause: error });
+        throw new Error(startupFailureMessage(apiBase(), logPath()), {
+          cause: error,
+        });
       }
       await wait(delayMs);
     }

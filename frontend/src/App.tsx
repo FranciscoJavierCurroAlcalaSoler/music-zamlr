@@ -11,9 +11,11 @@ import {
 } from "@mui/material";
 import { describeFetchError, fetchCollections, fetchFormatOrder } from "./api";
 import { waitForBackend } from "./startup";
+import { logPath } from "./connection";
 import { DiffView } from "./components/DiffView";
 import { CollectionsView } from "./components/CollectionsView";
 import { FormatOrderView } from "./components/FormatOrderView";
+import { LogFileNote } from "./components/LogFileNote";
 
 type Startup = "waiting" | "ready" | "failed";
 
@@ -103,6 +105,7 @@ function App() {
     return (
       <Box sx={{ margin: 2 }}>
         <Alert severity="error">{startupError}</Alert>
+        <LogFileNote path={logPath()} />
       </Box>
     );
   }
@@ -133,6 +136,7 @@ function App() {
       </Box>
       <Box sx={{ display: tab === 2 ? "block" : "none" }}>
         <FormatOrderView onSaved={refreshFormatOrder} />
+        <LogFileNote path={logPath()} />
       </Box>
     </Box>
   );

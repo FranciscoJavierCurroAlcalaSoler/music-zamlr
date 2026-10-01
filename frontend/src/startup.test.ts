@@ -102,14 +102,49 @@ describe("waitForBackend", () => {
       waitForBackend({ check: unreachable, wait: noWait, attempts: 1 }),
     ).rejects.toThrow("http://127.0.0.1:54321");
   });
+
+  it("names the log file in the message it rejects with", async () => {
+    const logPath = String.raw`C:\logs\music-zamlr.log`;
+    globalThis.__ZAMLR__ = {
+      apiBase: "http://127.0.0.1:54321",
+      logPath,
+    };
+
+    await expect(
+      waitForBackend({ check: unreachable, wait: noWait, attempts: 1 }),
+    ).rejects.toThrow(logPath);
+  });
 });
 
 describe("startupFailureMessage", () => {
   it("names the address and the time it waited", () => {
-    const message = startupFailureMessage("http://127.0.0.1:54321");
+    const message = startupFailureMessage("http://127.0.0.1:54321", null);
 
     expect(message).toContain("http://127.0.0.1:54321");
     expect(message).toContain("15 seconds");
+  });
+
+  it("names the log file when one is known", () => {
+    const logPath = String.raw`C:\logs\music-zamlr.log`;
+    const message = startupFailureMessage("http://127.0.0.1:54321", logPath);
+
+    expect(message).toContain(logPath);
+    // The join itself. Every other assertion here reads a substring that
+    // sits inside one sentence, so none of them can see two sentences run
+    // together, which is how "again.The log file" shipped past them once.
+    expect(message).toContain("again. The log file");
+  });
+
+  it("does not end in a space when no log file is known", () => {
+    const message = startupFailureMessage("http://127.0.0.1:54321", null);
+
+    expect(message).toBe(message.trimEnd());
+  });
+
+  it("says nothing about a log file when none is known", () => {
+    const message = startupFailureMessage("http://127.0.0.1:54321", null);
+
+    expect(message).not.toContain("log");
   });
 
   it("is built from the budget rather than from a written number", () => {
