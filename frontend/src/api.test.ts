@@ -3,6 +3,7 @@ import {
   createCollection,
   fetchCollections,
   fetchDiff,
+  fetchHealth,
   fetchFormatOrder,
   rescanCollection,
   previewImport,
@@ -520,6 +521,11 @@ describe("the token header", () => {
 
   const cases: [string, () => RequestInit[], () => Promise<unknown>][] = [
     [
+      "fetchHealth",
+      () => recordingServer("", JSON_RESPONSE),
+      () => fetchHealth(),
+    ],
+    [
       "fetchCollections",
       () => recordingServer("[]", JSON_RESPONSE),
       () => fetchCollections(),
@@ -568,6 +574,18 @@ describe("the token header", () => {
     expect(calls[0].headers).toEqual(
       expect.objectContaining({ "X-Zamlr-Token": "test-token" }),
     );
+  });
+
+  it("fetchHealth refuses a server that answers with an error", async () => {
+    // The reason the poll carries a token at all. Without this, a wrong
+    // token answers 401, fetchHealth resolves, and the app starts into a
+    // backend that will refuse every request it makes afterwards.
+    recordingServer('{"detail": "Invalid or missing token"}', {
+      status: 401,
+      headers: { "content-type": "application/json" },
+    });
+
+    await expect(fetchHealth()).rejects.toThrow("Invalid or missing token");
   });
 
   it("sends no token header when nothing is injected", async () => {

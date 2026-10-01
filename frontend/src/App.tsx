@@ -1,10 +1,21 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Collection } from "./types";
-import { Alert, Box, Tab, Tabs } from "@mui/material";
+import {
+  Alert,
+  Box,
+  CircularProgress,
+  Stack,
+  Tab,
+  Tabs,
+  Typography,
+} from "@mui/material";
 import { describeFetchError, fetchCollections, fetchFormatOrder } from "./api";
+import { waitForBackend } from "./startup";
 import { DiffView } from "./components/DiffView";
 import { CollectionsView } from "./components/CollectionsView";
 import { FormatOrderView } from "./components/FormatOrderView";
+
+type Startup = "waiting" | "ready" | "failed";
 
 function App() {
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -12,6 +23,8 @@ function App() {
   const [collectionsError, setCollectionsError] = useState<string | null>(null);
   const [tab, setTab] = useState(0);
   const [formatUpdatedAt, setFormatUpdatedAt] = useState<string | null>(null);
+  const [startup, setStartup] = useState<Startup>("waiting");
+  const [startupError, setStartupError] = useState<string | null>(null);
 
   // Promise callbacks rather than async/await, deliberately. This runs from
   // an effect, and react-hooks/set-state-in-effect rejects a setState that an
@@ -58,10 +71,41 @@ function App() {
       });
   }, []);
 
+  // The shell opens its window before the backend exists, so nothing may ask
+  // it anything until it answers. The two refreshes below are gated on that,
+  // rather than racing it: a view that fetches behind the splash would
+  // produce a second error message for one cause.
+  //
+  // Promise callbacks, not async/await, for the reason the comment above
+  // refreshCollections gives.
   useEffect(() => {
-    refreshCollections();
-    refreshFormatOrder();
+    waitForBackend()
+      .then(() => {
+        setStartup("ready");
+        return Promise.all([refreshCollections(), refreshFormatOrder()]);
+      })
+      .catch((error: unknown) => {
+        setStartup("failed");
+        setStartupError(describeFetchError(error));
+      });
   }, [refreshCollections, refreshFormatOrder]);
+
+  if (startup === "waiting") {
+    return (
+      <Stack spacing={2} sx={{ alignItems: "center", marginTop: 8 }}>
+        <CircularProgress />
+        <Typography>Starting the backend…</Typography>
+      </Stack>
+    );
+  }
+
+  if (startup === "failed") {
+    return (
+      <Box sx={{ margin: 2 }}>
+        <Alert severity="error">{startupError}</Alert>
+      </Box>
+    );
+  }
 
   return (
     <Box>

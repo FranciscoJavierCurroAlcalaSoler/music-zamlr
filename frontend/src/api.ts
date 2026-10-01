@@ -82,6 +82,27 @@ async function throwForResponse(response: Response): Promise<never> {
   throw new Error(`Server responded with ${response.status}`);
 }
 
+/**
+ * Ask whether the backend is up, and say nothing about what it answered.
+ *
+ * The body is ignored on purpose: the question is whether this address
+ * answers at all, and with the right token. A caller that wanted more would
+ * be reading a contract nothing else maintains.
+ *
+ * `signal` is how a single attempt is bounded. The backend's socket listens
+ * before uvicorn accepts, so a request made while it starts waits rather
+ * than failing, and an unbounded attempt would use the whole retry budget.
+ */
+export async function fetchHealth(signal?: AbortSignal): Promise<void> {
+  const response = await fetch(`${apiBase()}/api/health`, {
+    headers: authHeaders(),
+    signal,
+  });
+  if (!response.ok) {
+    await throwForResponse(response);
+  }
+}
+
 export async function fetchCollections(): Promise<Collection[]> {
   const response = await fetch(`${apiBase()}/api/collections`, {
     headers: authHeaders(),
