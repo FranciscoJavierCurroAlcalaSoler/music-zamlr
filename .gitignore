@@ -27,3 +27,4 @@ dist/
 # Editor / OS
 .DS_Store
 Thumbs.db
+frontend/src-tauri/binaries/
