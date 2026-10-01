@@ -5,6 +5,7 @@ CLAUDE.md
 .claude/
 backend/build/
 backend/dist/
+frontend/src-tauri/gen/
 
 # Python
 .venv/

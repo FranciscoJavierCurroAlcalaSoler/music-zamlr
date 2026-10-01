@@ -2,7 +2,7 @@
 
 Reproducible inventory of the dev/runtime setup. Update whenever something is installed, upgraded, or reconfigured. Language-level packages are tracked by their lockfiles, not here — see "Not tracked here" at the bottom.
 
-Last updated: 2026-09-15
+Last updated: 2026-10-01
 
 ## Machine
 | | |
@@ -15,6 +15,7 @@ Last updated: 2026-09-15
 |---|---|---|
 | Python | 3.14.6 | Python Install Manager (`py install 3.14`) |
 | Node.js | 24.18.0 (Active LTS) | Official LTS installer (bundles npm) |
+| Rust | rustc 1.99.0, rustup 1.29.1 | Added 2026-10-01, `winget install --id Rustlang.Rustup --exact`. Default toolchain `stable-x86_64-pc-windows-msvc`. For the desktop shell; nothing in the backend or the frontend needs it. `cargo` reaches PATH only in shells started after the install, the same trap fpcalc has. **This machine needs an antivirus exclusion to link at all** — see "Building the shell" below. |
 
 ## Tools
 | Item | Version | Notes |
@@ -24,7 +25,36 @@ Last updated: 2026-09-15
 | GitHub CLI (`gh`) | 2.100.0 | Added 2026-09-04, `winget install --id GitHub.cli`. Reads Actions run logs without a browser: `gh run view --log-failed`. Authenticated over HTTPS. **Not** set as Git's credential helper — `gh auth login` offers to take that role and was declined, so Git Credential Manager keeps it. |
 | Chromaprint (`fpcalc`) | 1.6.1 (FFmpeg Lavc62.11.100) | Added 2026-09-05, `winget install --id AcoustID.Chromaprint --exact`. The fingerprinting binary for Phase 5. No lockfile covers it, which is why it is here. Installed as a winget *portable* package: the exe lands under `%LOCALAPPDATA%\Microsoft\WinGet\Packages\AcoustID.Chromaprint_.../chromaprint-fpcalc-1.6.1-windows-x86_64\` and is reachable on PATH only in shells started after the install. Locate it in code with `shutil.which("fpcalc")`, the only form that honours `PATHEXT` and so finds `fpcalc.exe`. This is the **x86_64** build. **CI pins this same 1.6.1 and installs it from the project's own GitHub release on all three runners** rather than from a package manager, so every leg tests the version this machine has — see `FPCALC_VERSION` in `.github/workflows/ci.yml`, and move the two together or neither. Package managers were rejected for that reason: apt's `libchromaprint-tools` and Homebrew's `chromaprint` each ship whatever their distribution froze, and Chocolatey's `chromaprint` is stuck at **1.1**, over a decade old. |
 | ffmpeg | 8.1.2 (Gyan full build) | Not installed for the app — it generates the manual test collections (the two `make_fixtures*.sh` scripts) and the synthetic fixtures under `backend/tests/fixtures/`. Recorded 2026-09-05 because nothing else names it and a clone cannot rebuild those collections without it. The app itself shells out to `fpcalc`, never to ffmpeg; see the spec's Phase 5 entry for why that choice was made. |
+| Visual Studio 2022 Build Tools | MSVC 14.44.35207, Windows SDK 10.0.26100.0 | Added 2026-10-01, `winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`. Several gigabytes, and it needs administrator rights. Rust on Windows links through `link.exe` from these tools: without them `rustc` stops with "linker `link.exe` not found" and says plainly that VS Code is not sufficient. **The MSVC toolset lands before the Windows SDK, and linking fails until both are there** — a build that fails halfway through this install is not a broken toolchain. |
 | Monkey's Audio | 13.26 (x64) | Added 2026-09-15, from the official installer `MAC_1326_x64.exe` at monkeysaudio.com (no published checksum; Authenticode signature checked as Valid, signer Matthew Ashland). Default folder `C:\Program Files\Monkey's Audio x64\`, **not on PATH** — call `MAC.exe` by its full path. Not installed for the app: `MAC.exe` encodes the fixture `backend/tests/fixtures/test_track.ape`, which ffmpeg cannot encode. The installer also added the GUI `Monkey's Audio.exe` and an `uninstall.exe`. |
+
+## Building the shell: an antivirus exclusion is required
+
+`frontend/src-tauri/target` is excluded in **FortiClient AntiVirus** (added
+2026-10-01). Without it no Rust build on this machine can link:
+
+```
+LINK : fatal error LNK1105: cannot close file ...dll.exp. error code 1224
+```
+
+Error 1224 is `ERROR_USER_MAPPED_FILE` — another process holds the import
+library the linker has just written. Rust creates and deletes thousands of
+short-lived files in `target/`, and an on-access scanner that opens each one
+collides with the linker.
+
+**Four runs established which process it was**, before anything was changed:
+the default target directory, a target directory outside the indexed Desktop
+tree (which rules out the Windows search indexer), and a serialised `-j 1`
+build (which rules out two linker runs colliding). All four failed on a
+different crate each time. With the exclusion in place the build finished in
+1 minute 49 seconds with no link errors.
+
+Windows Defender is also installed and needed **no** exclusion. Nothing in
+`target/` is downloaded or executed from the internet; it is build output,
+regenerated from source.
+
+CI never meets this, because no such scanner runs there — which also means CI
+cannot warn anybody about it.
 
 ## VS Code extensions
 Verified against `code --list-extensions` on 2026-09-07. Check with that
