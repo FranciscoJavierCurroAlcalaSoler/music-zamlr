@@ -1,5 +1,4 @@
 import logging
-import os
 import subprocess
 import sys
 import threading
@@ -10,6 +9,7 @@ from typing import NamedTuple
 import httpx
 import pytest
 
+import serve
 from launch_settings import (
     DATABASE_PATH_VARIABLE,
     LOG_DIRECTORY_VARIABLE,
@@ -22,6 +22,7 @@ from serve import (
     PORT_LINE_PREFIX,
     bind_local_socket,
     configure_file_logging,
+    database_path_is_required,
     port_line,
 )
 
@@ -42,6 +43,20 @@ def test_the_port_line_carries_the_port():
     # The literal, not an f-string over PORT_LINE_PREFIX, which would agree
     # with whatever the prefix became. The shell parses this exact text.
     assert port_line(12345) == "ZAMLR_PORT=12345"
+
+
+def test_a_frozen_build_needs_a_database_path():
+    assert database_path_is_required(frozen=True, database_path=None) is True
+
+
+def test_a_frozen_build_with_a_path_is_allowed():
+    assert (
+        database_path_is_required(frozen=True, database_path=r"C:\x\music.db") is False
+    )
+
+
+def test_a_source_run_needs_no_database_path():
+    assert database_path_is_required(frozen=False, database_path=None) is False
 
 
 def test_the_socket_listens_on_the_loopback_address():
@@ -100,10 +115,9 @@ def restore_root_logger():
 
 
 @pytest.fixture(scope="module")
-def running_server(tmp_path_factory):
+def running_server(tmp_path_factory, launch_environment):
     tmp_path = tmp_path_factory.mktemp("running-server")
-    environment = {k: v for k, v in os.environ.items() if not k.startswith("ZAMLR_")}
-    environment[TOKEN_VARIABLE] = TOKEN
+    environment = launch_environment(**{TOKEN_VARIABLE: TOKEN})
     # Or the real server writes into backend/db: the lifespan runs here, and
     # it calls create_db_and_tables.
     database_path = tmp_path / "serve-test.db"
@@ -237,11 +251,11 @@ def _read_announcements(process: subprocess.Popen) -> tuple[int, str]:
     )
 
 
-def _start_server(tmp_path, **variables) -> subprocess.Popen:
+def _start_server(launch_environment, tmp_path, **variables) -> subprocess.Popen:
     """Start serve.py with its own database and whatever else is asked."""
-    environment = {k: v for k, v in os.environ.items() if not k.startswith("ZAMLR_")}
-    environment[DATABASE_PATH_VARIABLE] = str(tmp_path / "watch-test.db")
-    environment.update(variables)
+    environment = launch_environment(
+        **{DATABASE_PATH_VARIABLE: str(tmp_path / "watch-test.db")}, **variables
+    )
     return subprocess.Popen(
         [sys.executable, str(SERVE_SCRIPT)],
         stdin=subprocess.PIPE,
@@ -252,12 +266,14 @@ def _start_server(tmp_path, **variables) -> subprocess.Popen:
     )
 
 
-def test_the_server_exits_when_its_input_closes(tmp_path):
-    process = _start_server(tmp_path, **{WATCH_STDIN_VARIABLE: "1"})
+def test_the_server_exits_when_its_input_closes(
+    tmp_path, launch_environment, read_port_line
+):
+    process = _start_server(launch_environment, tmp_path, **{WATCH_STDIN_VARIABLE: "1"})
     killer = threading.Timer(START_TIMEOUT_SECONDS, process.kill)
     killer.start()
     try:
-        _read_port_only(process)
+        read_port_line(process)
         # Disarmed the moment the read it guards is over, and before the
         # assertion below. A killer still armed for the same number of
         # seconds as the wait rescues it: the process dies of the timer just
@@ -276,17 +292,19 @@ def test_the_server_exits_when_its_input_closes(tmp_path):
         process.wait(timeout=START_TIMEOUT_SECONDS)
 
 
-def test_the_server_exits_when_it_is_terminated(tmp_path):
+def test_the_server_exits_when_it_is_terminated(
+    tmp_path, launch_environment, read_port_line
+):
     # The ordinary case: the shell stops a child it is finished with. The
     # watcher thread is still blocked on a read that will never return, and
     # a plain thread in that state keeps the interpreter alive after the
     # server has stopped. On Windows terminate() ends the process outright,
     # so this only reaches that fault on the Linux and macOS runners.
-    process = _start_server(tmp_path, **{WATCH_STDIN_VARIABLE: "1"})
+    process = _start_server(launch_environment, tmp_path, **{WATCH_STDIN_VARIABLE: "1"})
     killer = threading.Timer(START_TIMEOUT_SECONDS, process.kill)
     killer.start()
     try:
-        _read_port_only(process)
+        read_port_line(process)
         killer.cancel()
 
         process.terminate()
@@ -298,12 +316,14 @@ def test_the_server_exits_when_it_is_terminated(tmp_path):
         process.wait(timeout=START_TIMEOUT_SECONDS)
 
 
-def test_the_server_stays_when_the_watch_is_off(tmp_path):
-    process = _start_server(tmp_path)
+def test_the_server_stays_when_the_watch_is_off(
+    tmp_path, launch_environment, read_port_line
+):
+    process = _start_server(launch_environment, tmp_path)
     killer = threading.Timer(START_TIMEOUT_SECONDS, process.kill)
     killer.start()
     try:
-        _read_port_only(process)
+        read_port_line(process)
         killer.cancel()
 
         process.stdin.close()
@@ -329,3 +349,29 @@ def _read_port_only(process: subprocess.Popen) -> int:
     raise AssertionError(
         "The server never announced a port. Its output was:\n" + "".join(seen)
     )
+
+
+def test_a_keyboard_interrupt_is_not_a_crash(tmp_path, monkeypatch):
+    # The one path that a packaged binary meets and the suite otherwise
+    # cannot: Ctrl+C reaches the main thread, uvicorn finishes its shutdown,
+    # and the interrupt then propagates out of asyncio.run. Sending a real
+    # Ctrl+C to a child on Windows needs GenerateConsoleCtrlEvent against a
+    # process group, and terminate(), which the tests above use, raises
+    # nothing at all. So the server is replaced rather than the signal sent.
+    class InterruptedServer:
+        def __init__(self, config):
+            self.config = config
+
+        def run(self, sockets=None):
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(serve, "Server", InterruptedServer)
+    monkeypatch.setenv(DATABASE_PATH_VARIABLE, str(tmp_path / "interrupt.db"))
+
+    # Caught here, or there is no test at all: pytest treats an escaping
+    # KeyboardInterrupt as a request to abandon the whole session, so it ends
+    # the run without ever reporting this one as a failure.
+    try:
+        serve.main()
+    except KeyboardInterrupt:
+        pytest.fail("main() let the interrupt escape, so a clean stop reads as a crash")

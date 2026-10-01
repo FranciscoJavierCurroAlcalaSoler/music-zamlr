@@ -1,6 +1,8 @@
 import json
+import os
 import random
 import struct
+import subprocess
 from itertools import count
 from pathlib import Path
 from typing import NamedTuple
@@ -21,6 +23,7 @@ import scanner
 from database import get_session
 from main import app
 from models import Collection, Track
+from serve import PORT_LINE_PREFIX
 
 
 @pytest.fixture
@@ -482,3 +485,53 @@ def make_ambiguity(session, tmp_path, make_track, collections):
         return Ambiguity(theirs=their_tracks, candidates=candidates)
 
     return _make_ambiguity
+
+
+@pytest.fixture(scope="session")
+def launch_environment():
+    """Build the environment for a child process that reads ZAMLR_ names.
+
+    Session scope because it holds no state and because a module-scoped
+    fixture cannot depend on a narrower one: test_env_wiring's child runs
+    once per module and still has to reach this.
+
+    The copy is what matters. env= replaces the whole environment rather
+    than adding to it, and a child on Windows with nothing in its
+    environment cannot start. Every ZAMLR_ name is dropped first, so a
+    variable left set in the terminal that runs pytest cannot decide what
+    a test proves.
+    """
+
+    def build(**variables: str) -> dict[str, str]:
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("ZAMLR_")
+        }
+        environment.update(variables)
+        return environment
+
+    return build
+
+
+@pytest.fixture(scope="session")
+def read_port_line():
+    """Read a child's output until it announces its port.
+
+    The announcement is found by its prefix rather than by its position,
+    because uvicorn writes its own startup lines. Everything read on the
+    way is kept for the failure message, which is the only place a child's
+    own traceback appears.
+    """
+
+    def read(process: subprocess.Popen) -> int:
+        seen = []
+        for line in process.stdout:
+            if line.startswith(PORT_LINE_PREFIX):
+                return int(line.removeprefix(PORT_LINE_PREFIX).strip())
+            seen.append(line)
+        raise AssertionError(
+            "The server never announced a port. Its output was:\n" + "".join(seen)
+        )
+
+    return read

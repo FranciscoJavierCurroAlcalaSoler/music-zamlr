@@ -3,6 +3,8 @@ backend/db/*.db
 music-zamlr-spec.md
 CLAUDE.md
 .claude/
+backend/build/
+backend/dist/
 
 # Python
 .venv/

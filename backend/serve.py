@@ -127,10 +127,19 @@ def log_line(log_path):
     return f"{LOG_LINE_PREFIX}{log_path}"
 
 
+def database_path_is_required(frozen: bool, database_path: str | None) -> bool:
+    return frozen and database_path is None
+
+
 def main():
     # Through the settings rather than os.environ directly, so that the
     # directory is held to the same rules as every other configured path.
     launch_settings = read_launch_settings(os.environ)
+    if database_path_is_required(
+        getattr(sys, "frozen", False), launch_settings.database_path
+    ):
+        raise RuntimeError("ZAMLR_DATABASE_PATH is required")
+
     log_path = None
     if launch_settings.log_directory:
         log_path = configure_file_logging(launch_settings.log_directory)
@@ -163,6 +172,7 @@ def main():
         reload=False,
         log_config=None,
         timeout_graceful_shutdown=SHUTDOWN_TIMEOUT_SECONDS,
+        ws="none",
     )
     server = Server(config)
     # Only when the shell asks. A process started with no input at all sees
@@ -171,7 +181,19 @@ def main():
     # pipe on the other side.
     if launch_settings.watch_stdin:
         exit_when_input_closes(server)
-    server.run(sockets=[server_socket])
+    try:
+        server.run(sockets=[server_socket])
+    except KeyboardInterrupt:
+        # Ctrl+C has already been handled by the time this runs: uvicorn's own
+        # signal handler set should_exit and the whole graceful shutdown ran.
+        # What arrives here is the interrupt propagating out of asyncio.run
+        # once the loop is torn down, and left alone it ends a clean stop with
+        # a traceback and a non-zero exit — which anything watching this
+        # process reads as a crash.
+        #
+        # KeyboardInterrupt alone, never a bare except: this is the last place
+        # a real fault could still be reported.
+        logging.getLogger(__name__).info("Stopped by the user.")
 
 
 if __name__ == "__main__":
