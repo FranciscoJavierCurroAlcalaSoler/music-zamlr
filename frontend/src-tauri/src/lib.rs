@@ -29,31 +29,32 @@ fn allowed_origins() -> String {
     }
 }
 const BACKEND_EXE: &str = "music-zamlr-backend.exe";
+const FPCALC_EXE: &str = "fpcalc.exe";
 // Where the bundler puts the folder named in tauri.conf.json's resources.
 const BACKEND_RESOURCE_DIR: &str = "backend";
 
-/// Find the packaged backend among this application's resources.
+/// Find a program this application ships, among its own resources.
 ///
-/// It is a bundle resource rather than an `externalBin` sidecar, and that is
-/// forced: `externalBin` copies a single file, while PyInstaller's one-folder
-/// build is an executable beside an `_internal` directory holding the Python
-/// runtime. Copied alone, the program starts and dies on a missing
-/// python3xx.dll.
+/// They are bundle resources rather than `externalBin` sidecars, and for the
+/// backend that is forced: `externalBin` copies a single file, while
+/// PyInstaller's one-folder build is an executable beside an `_internal`
+/// directory holding the Python runtime. Copied alone, the program starts
+/// and dies on a missing python3xx.dll.
 ///
 /// `tauri dev` copies resources into the build directory as well, so one
 /// path serves both a development run and an installed app.
-fn backend_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+fn resource_path(app: &tauri::AppHandle, file_name: &str) -> Result<std::path::PathBuf, String> {
     let path = app
         .path()
         .resource_dir()
         .map_err(|error| format!("no resource directory: {error}"))?
         .join(BACKEND_RESOURCE_DIR)
-        .join(BACKEND_EXE);
+        .join(file_name);
     if !path.exists() {
         // Named here rather than left to the spawn, which reports only that
         // a program could not be started, without saying which one or where
         // it was looked for.
-        return Err(format!("the backend is missing at {}", path.display()));
+        return Err(format!("{file_name} is missing at {}", path.display()));
     }
     Ok(path)
 }
@@ -152,11 +153,23 @@ pub fn run() {
             let database_path = data_dir.join("music.db");
 
             let token = launch_token();
-            let backend = backend_path(app.handle())?;
+            let backend = resource_path(app.handle(), BACKEND_EXE)?;
             log::info!("starting the backend at {}", backend.display());
-            let (mut events, child) = app
-                .shell()
-                .command(backend)
+
+            // Not with `?`. A missing backend is fatal; a missing fpcalc is
+            // a mode the app already has: fpcalc_available answers false,
+            // the comparison falls back to tags, and the window says so.
+            // Leaving the variable unset lets the backend look on PATH,
+            // which is how a run from source finds it.
+            let mut command = app.shell().command(backend);
+            match resource_path(app.handle(), FPCALC_EXE) {
+                Ok(fpcalc) => {
+                    command = command.env("ZAMLR_FPCALC", fpcalc.to_string_lossy().to_string());
+                }
+                Err(error) => log::warn!("fingerprinting will be unavailable: {error}"),
+            }
+
+            let (mut events, child) = command
                 .env(
                     "ZAMLR_DATABASE_PATH",
                     database_path.to_string_lossy().to_string(),

@@ -551,8 +551,9 @@ export function DiffView({
                 <Alert severity="warning" sx={{ mt: 1 }}>
                   fpcalc was not found, so this comparison did not check the
                   audio. Tracks were matched by their tags only, and an upgrade
-                  can be a different recording of the song. The README says how
-                  to install fpcalc.
+                  can be a different recording of the song. The app ships
+                  fpcalc, so a missing one means this installation is damaged:
+                  install the app again.
                 </Alert>
               )}
               {/* The paths sit in <details> because this warning stays above

@@ -19,6 +19,7 @@ import pytest
 
 from launch_settings import (
     DATABASE_PATH_VARIABLE,
+    FPCALC_PATH_VARIABLE,
     TOKEN_VARIABLE,
     WATCH_STDIN_VARIABLE,
 )
@@ -148,3 +149,39 @@ def test_the_packaged_backend_starts_within_the_budget(
 
     print(f"\npackaged backend announced its port after {elapsed:.2f}s")
     assert elapsed < START_BUDGET_SECONDS
+
+
+def test_the_packaged_backend_accepts_a_configured_fpcalc(
+    tmp_path, launch_environment, read_port_line
+):
+    # The shell points this at the copy it ships. The assertion is that the
+    # process starts and serves at all: fingerprinting.py reads the variable
+    # when it is imported, so a value it rejects stops the binary before it
+    # can announce a port, and the failure would arrive as a window that
+    # never leaves its splash.
+    #
+    # An empty file is enough, because nothing here runs it. Whether fpcalc
+    # truly fingerprints inside the bundle is test_fpcalc_reads_a_real_file's
+    # question, and it needs real audio and the real program.
+    fpcalc = tmp_path / "fpcalc.exe"
+    fpcalc.touch()
+    process = start_binary(
+        launch_environment,
+        **{
+            DATABASE_PATH_VARIABLE: str(tmp_path / "fpcalc-test.db"),
+            FPCALC_PATH_VARIABLE: str(fpcalc),
+        },
+    )
+    killer = threading.Timer(START_TIMEOUT_SECONDS, process.kill)
+    killer.start()
+    try:
+        port = read_port_line(process)
+        killer.cancel()
+
+        response = httpx.get(f"http://127.0.0.1:{port}/api/health")
+
+        assert response.status_code == 200
+    finally:
+        killer.cancel()
+        process.kill()
+        process.wait(timeout=EXIT_TIMEOUT_SECONDS)
