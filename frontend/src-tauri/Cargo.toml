@@ -1,10 +1,10 @@
 [package]
 name = "app"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
-license = ""
-repository = ""
+description = "Music Zamlr desktop shell"
+authors = ["Francisco Javier Alcalá Soler <254643964+FranciscoJavierCurroAlcalaSoler@users.noreply.github.com>"]
+license = "MIT"
+repository = "https://github.com/FranciscoJavierCurroAlcalaSoler/music-zamlr"
 edition = "2024"
 rust-version = "1.90"
 

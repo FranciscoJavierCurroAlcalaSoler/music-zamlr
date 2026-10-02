@@ -1,0 +1,29 @@
+# What cargo-about accepts without being asked, and for which target.
+#
+# A crate whose licence is not on this list fails `cargo about generate` and
+# names itself. That is the point of the list: a new dependency arriving with
+# an unexpected licence stops the run rather than appearing quietly in a
+# notices file nobody reads line by line.
+#
+# targets matters as much as accepted. Without it cargo-about walks every
+# platform's dependency tree, so the run asks about crates that only ever
+# build on Linux or macOS and never reach this binary. D8 ships Windows.
+targets = ["x86_64-pc-windows-msvc"]
+
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "CC0-1.0",
+    "Unlicense",
+    "MPL-2.0",
+    # Carried by the character-table crates underneath Tauri. Permissive, and
+    # worth having seen before a release rather than after one.
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "BSL-1.0",
+    "OpenSSL",
+]
