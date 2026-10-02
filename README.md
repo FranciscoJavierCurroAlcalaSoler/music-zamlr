@@ -319,9 +319,12 @@ identifier generation, and an expiry policy. Nothing else here needs those.
 name get a numbered suffix, in the way Windows Explorer does it. A file is
 deleted only after its replacement is written. An uncertain match goes to you.
 
-**The preview warns before an import that cannot fit.** It compares the total
-size of the files to copy against the free space on the destination drive. It
-warns and lets you continue, because you can clear space before you confirm.
+**The preview warns before an import that cannot fit.** It compares the free
+space on the destination drive against the total size of the files to copy,
+plus every file that moves into `_superseded` from a different drive. Such a
+move copies the file, so the destination drive holds both your old file and
+the better one. The tool warns and lets you continue, because you can clear
+space before you confirm.
 
 ## Known limits
 
@@ -331,9 +334,10 @@ warns and lets you continue, because you can clear space before you confirm.
   tool forgets its stored hash and fingerprint, and the next comparison reads
   the file again. On Windows, this also occurs when only the letter case of a
   name changes.
-- The free-space warning in the preview does not count a file that moves into
-  `_superseded` on a different drive. That move copies the file, so the
-  destination drive can need more space than the preview shows.
+- The free-space warning in the preview reads the drive letter of a path, not
+  the volume behind it. If your destination folder is a mount point for
+  another disk, the warning can count a move into `_superseded` as free when
+  it is not.
 - Do not scan one collection from two browser tabs at the same time. The tool
   does not prevent it, and one of the scans can fail.
 - A TrueAudio (`.tta`) file reports no bit depth. The tool then cannot compare

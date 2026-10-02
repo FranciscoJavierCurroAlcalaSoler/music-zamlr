@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import ntpath
 import os
 import shutil
 from collections.abc import Callable, Mapping
@@ -357,6 +358,25 @@ def _count_operations(operations: list[PlannedOperation]) -> dict[str, int]:
     }
 
 
+def _same_drive(one: str, other: str) -> bool:
+    """Say whether two paths name the same drive, by their spelling alone.
+
+    `ntpath` rather than `os.path`, which is the same function on Windows
+    and `posixpath` everywhere else. The paths this compares come out of a
+    Windows user's database whatever machine is reading them, and
+    `posixpath.splitdrive` finds no drive in any of them: every path would
+    answer "same drive" and the caller would stop counting. A test written
+    with drive letters would then assert nothing under Linux CI.
+
+    Spelling is all it looks at, because the caller's whole value is that it
+    touches no disk. A folder on C: that is really a mount point for another
+    volume reads as C: here, and a move into it is not counted.
+    """
+    return (
+        ntpath.splitdrive(one)[0].casefold() == ntpath.splitdrive(other)[0].casefold()
+    )
+
+
 def _bytes_required(operations: list[PlannedOperation], tracks: list[Track]) -> int:
     bytes_required = 0
     tracks_by_file_path = {os.path.normpath(t.file_path): t for t in tracks}
@@ -367,6 +387,23 @@ def _bytes_required(operations: list[PlannedOperation], tracks: list[Track]) -> 
             # deliberate trade: a total a few megabytes out beats one that stats
             # several hundred files on a drive that may be slow, asleep, or
             # across a network.
+            bytes_required += tracks_by_file_path[
+                os.path.normpath(operation.source)
+            ].file_size
+        elif operation.action == ActionType.MOVE and not _same_drive(
+            operation.source, operation.destination
+        ):
+            # A move inside one drive renames and no bytes travel. Across
+            # drives it copies into _superseded and deletes the original, so
+            # the destination holds both the replacement and the file it
+            # replaced, and the destination is the only drive this total is
+            # about. Left uncounted, the one case where the warning errs
+            # toward silence.
+            #
+            # No guard for a destination of None, although the field allows
+            # it: plan_move always sets one, so a move without a destination
+            # is this code being wrong, and splitdrive raising TypeError
+            # says so where a default would quietly undercount.
             bytes_required += tracks_by_file_path[
                 os.path.normpath(operation.source)
             ].file_size
@@ -782,8 +819,20 @@ def _build_plan(
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
+    # Mine as well as theirs: a move's source is a track of mine, and a
+    # lookup that cannot find it raises rather than returning nothing. This
+    # runs on the import path too, where _build_plan's total is discarded —
+    # so a list short of one track fails an import instead of an estimate.
+    # Unconditional rather than only for the move action, since an extra
+    # entry in the map costs nothing and a condition is one more thing to
+    # keep in step with the planner.
     bytes_required = _bytes_required(
-        import_plan, [*missing, *(m.theirs for m in upgrade_available)]
+        import_plan,
+        [
+            *missing,
+            *(m.theirs for m in upgrade_available),
+            *(m.mine for m in upgrade_available),
+        ],
     )
     return BuiltPlan(
         operations=import_plan,

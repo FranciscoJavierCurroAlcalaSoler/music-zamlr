@@ -227,7 +227,7 @@ def test_preview_reports_bytes_required_and_free(
     assert body["bytes_free"] == 8_888_888
 
 
-def test_preview_counts_only_copies_toward_bytes_required(
+def test_preview_does_not_count_a_delete_toward_bytes_required(
     session, make_track, collections, destination, event_stream, tmp_path
 ):
     mine, theirs = collections
@@ -267,6 +267,61 @@ def test_preview_counts_only_copies_toward_bytes_required(
     assert body["bytes_required"] == 2_000_000
 
 
+def test_preview_counts_a_cross_drive_move(
+    session, make_track, collections, destination, event_stream, tmp_path
+):
+    # The unit tests below call _bytes_required directly and so cannot cover
+    # the track list _build_plan hands it. A move's source is a track of
+    # mine, and nothing else in the plan is, so a list built from theirs
+    # alone raises KeyError here rather than returning a wrong total. Only a
+    # cross-drive move reaches that lookup: the drive test short-circuits
+    # before it on every same-drive move, which is every other test.
+    #
+    # Mine sits on a drive that does not exist. A preview opens no file, and
+    # the pairing below is made from the tags, so the path is only a string.
+    # It also keeps the two sides on different drives under Linux CI, where
+    # tmp_path has no drive letter at all and a path under it would not.
+    mine, theirs = collections
+
+    my_track = make_track(
+        collection_id=mine.id,
+        format="MP3",
+        file_path=r"E:\mine\song.mp3",
+        file_size=1_000_000,
+        title="A Short Song",
+        artist="Johnny Singer",
+    )
+    their_track = make_track(
+        collection_id=theirs.id,
+        format="FLAC",
+        file_path=str(tmp_path / "theirs" / "song.flac"),
+        file_size=2_000_000,
+        title="A Short Song",
+        artist="Johnny Singer",
+    )
+    session.add(my_track)
+    session.add(their_track)
+    session.commit()
+
+    their_id = their_track.id
+
+    stream = event_stream(
+        "/api/import/preview",
+        "POST",
+        json={
+            "track_ids": [their_id],
+            "mine_collection_id": mine.id,
+            "theirs_collection_id": theirs.id,
+            "destination_root": str(destination),
+            "structure_mode": "flat",
+            "upgrade_action": "move",
+        },
+    )
+
+    body = stream.done
+    assert body["bytes_required"] == 3_000_000
+
+
 def test_bytes_required_normalizes_the_operation_source(make_track):
     # No session, no collections: the helper reads two attributes off a Track
     # and never touches the database. plan_copy carries file_path across to
@@ -287,6 +342,115 @@ def test_bytes_required_normalizes_the_operation_source(make_track):
     )
 
     assert main._bytes_required([planned_operation], [their_track]) == 2_222_222
+
+
+def test_bytes_required_counts_a_cross_drive_move(make_track):
+    their_track = make_track(
+        format="FLAC",
+        file_path=r"E:\theirs\song.flac",
+        file_size=2_000_000,
+    )
+    my_track = make_track(
+        format="MP3",
+        file_path=r"C:\mine\song.mp3",
+        file_size=1_000_000,
+    )
+    operations = [
+        PlannedOperation(
+            source=r"E:\theirs\song.flac",
+            destination=r"D:\Import\song.flac",
+            action=ActionType.COPY,
+            group_id=1,
+            overwrites=False,
+        ),
+        PlannedOperation(
+            source=r"C:\mine\song.mp3",
+            destination=r"D:\Import\_superseded\song.mp3",
+            action=ActionType.MOVE,
+            group_id=1,
+        ),
+    ]
+
+    assert main._bytes_required(operations, [their_track, my_track]) == 3_000_000
+
+
+def test_bytes_required_ignores_a_same_drive_move(make_track):
+    their_track = make_track(
+        format="FLAC",
+        file_path=r"E:\theirs\song.flac",
+        file_size=2_000_000,
+    )
+    my_track = make_track(
+        format="MP3",
+        file_path=r"D:\mine\song.mp3",
+        file_size=1_000_000,
+    )
+    operations = [
+        PlannedOperation(
+            source=r"E:\theirs\song.flac",
+            destination=r"D:\Import\song.flac",
+            action=ActionType.COPY,
+            group_id=1,
+            overwrites=False,
+        ),
+        PlannedOperation(
+            source=r"D:\mine\song.mp3",
+            destination=r"D:\Import\_superseded\song.mp3",
+            action=ActionType.MOVE,
+            group_id=1,
+        ),
+    ]
+
+    assert main._bytes_required(operations, [their_track, my_track]) == 2_000_000
+
+
+def test_bytes_required_compares_drives_without_case(make_track):
+    # Both orientations, because a casefold dropped from one side of the
+    # comparison still answers correctly for the other. With lowercase only
+    # ever on the source, `one.casefold() == other` reads c: against C:
+    # casefolded, agrees, and the test stays green while the comparison has
+    # become case-sensitive in one direction.
+    their_track = make_track(
+        format="FLAC",
+        file_path=r"E:\theirs\song.flac",
+        file_size=2_000_000,
+    )
+    my_track = make_track(
+        format="MP3",
+        file_path=r"c:\mine\song.mp3",
+        file_size=1_000_000,
+    )
+    my_other_track = make_track(
+        format="MP3",
+        file_path=r"C:\mine\other.mp3",
+        file_size=4_000_000,
+    )
+    operations = [
+        PlannedOperation(
+            source=r"E:\theirs\song.flac",
+            destination=r"D:\Import\song.flac",
+            action=ActionType.COPY,
+            group_id=1,
+            overwrites=False,
+        ),
+        PlannedOperation(
+            source=r"c:\mine\song.mp3",
+            destination=r"C:\Import\_superseded\song.mp3",
+            action=ActionType.MOVE,
+            group_id=1,
+        ),
+        PlannedOperation(
+            source=r"C:\mine\other.mp3",
+            destination=r"c:\Import\_superseded\other.mp3",
+            action=ActionType.MOVE,
+            group_id=2,
+        ),
+    ]
+
+    assert (
+        main._bytes_required(operations, [their_track, my_track, my_other_track])
+        == 2_000_000
+    )
 
 
 def test_bytes_required_is_zero_when_nothing_is_copied():
