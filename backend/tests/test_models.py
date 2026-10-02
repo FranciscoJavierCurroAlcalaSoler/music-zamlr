@@ -1,6 +1,6 @@
 # tests/test_models.py
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from models import Collection, Track
@@ -85,3 +85,29 @@ def test_collection_deletion_cascades_to_tracks(session, test_collection):
     remaining_collection = session.get(Collection, collection_id)
     assert len(remaining_tracks) == 0
     assert remaining_collection is None
+
+
+def test_a_bulk_delete_leaves_the_tracks_behind(session, make_track):
+    # The limit of test_collection_deletion_cascades_to_tracks above,
+    # pinned rather than described. It is ORM
+    # behaviour: session.delete loads the children and removes them one by
+    # one. A DELETE statement goes straight to SQLite, which enforces no
+    # foreign keys unless PRAGMA foreign_keys=ON is set on the connection,
+    # and nothing here sets it — so the tracks survive their collection.
+    #
+    # Named for what happens, not for what one might wish. If the pragma is
+    # ever turned on, this test fails and says exactly what changed.
+    collection = Collection(name="Bulk", root_path="/music/bulk")
+    collection.tracks = [
+        make_track(file_path="/music/bulk/one.mp3", collection_id=None)
+    ]
+    session.add(collection)
+    session.commit()
+    collection_id = collection.id
+
+    session.exec(delete(Collection).where(Collection.id == collection_id))
+    session.commit()
+
+    assert session.exec(select(Collection)).all() == []
+    orphans = session.exec(select(Track)).all()
+    assert len(orphans) == 1
