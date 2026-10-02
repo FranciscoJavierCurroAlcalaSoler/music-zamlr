@@ -3,7 +3,10 @@ import logging
 import os
 import shutil
 import struct
+import subprocess
+import sys
 import types
+from pathlib import Path
 
 import mutagen
 import pytest
@@ -1270,3 +1273,29 @@ def test_a_changed_file_clears_the_fingerprint(
     assert track.fingerprint is None
     assert track.fingerprint_length is None
     assert track.fingerprint_algorithm is None
+
+
+def test_importing_the_scanner_configures_no_logging():
+    # A child interpreter, because by the time any test runs this module is
+    # already imported and whatever it did at import has already happened.
+    # The question can only be asked of a process that has not imported it
+    # yet, which is the same reason test_env_wiring.py exists.
+    code = (
+        "import logging, scanner; "
+        "root = logging.getLogger(); print(len(root.handlers), root.level)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+    assert result.returncode == 0, result.stderr
+    # No handlers, and the root logger still at its own default of WARNING
+    # (30). Both halves matter: basicConfig installs a handler and lowers the
+    # level, and asserting only one of them would pass against a module that
+    # did the other. NOTSET is wrong here — the root logger starts at
+    # WARNING, unlike every other logger.
+    assert result.stdout.strip() == f"0 {logging.WARNING}"

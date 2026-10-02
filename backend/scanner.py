@@ -21,8 +21,6 @@ from database import create_collection, create_db_and_tables, engine
 from importing import SUPERSEDED_DIR_NAME
 from models import Collection, Track
 
-logging.basicConfig(level=logging.INFO)
-
 
 def get_tag(audio, keys: list[str]) -> str | None:
     for key in keys:
@@ -535,6 +533,14 @@ def scan_folder(
 
 
 def main():
+    # Here rather than at import, because importing this module must not
+    # decide how the whole process logs. main.py imports it, so a server
+    # started any way at all was getting a handler on the root logger and a
+    # level nobody asked for — in the packaged app, writing to a console
+    # that does not exist. A program run from a terminal may configure its
+    # own logging; a module a server imports may not.
+    logging.basicConfig(level=logging.INFO)
+
     if len(sys.argv) < 3:
         print("Usage: python scanner.py <folder_to_scan> <collection_name>")
         sys.exit(1)
