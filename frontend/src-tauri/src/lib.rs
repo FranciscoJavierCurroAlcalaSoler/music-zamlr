@@ -111,6 +111,25 @@ fn inject_connection(window: &tauri::WebviewWindow, port: u16, token: &str, log_
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // What stops a second launch from becoming a second backend: every
+        // plugin's own setup runs before the setup closure below, so the
+        // second process ends before it reaches the spawn. Two backends
+        // would bind two ports, open one database and append to one log,
+        // and the one left behind would outlive the window that started it.
+        //
+        // First in the list by convention rather than by necessity. Moving
+        // it below the shell plugin changes nothing here, because no other
+        // plugin does work of its own in setup; it would matter to one that
+        // did.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                // unminimize before set_focus: on Windows a minimized window
+                // cannot take focus, so a user who minimized the app and
+                // started it again would see nothing happen at all.
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
