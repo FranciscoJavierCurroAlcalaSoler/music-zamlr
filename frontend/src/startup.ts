@@ -1,5 +1,9 @@
 import { fetchHealth } from "./api";
-import { apiBase, logPath } from "./connection";
+import {
+  BackendNotAnnouncedError,
+  addressForMessage,
+  logPath,
+} from "./connection";
 
 /**
  * Waiting for the backend to come up, kept out of the component.
@@ -58,6 +62,11 @@ function meansNothingAnswered(error: unknown): boolean {
   if (error instanceof TypeError) {
     return true;
   }
+  // The shell has not injected the address yet, which is the same situation
+  // as a backend that has not opened its port: wait and ask again.
+  if (error instanceof BackendNotAnnouncedError) {
+    return true;
+  }
   return error instanceof Error && error.name === "TimeoutError";
 }
 
@@ -93,7 +102,7 @@ export async function waitForBackend({
         // cause carries the last failure, which is what the lint rule
         // asks for and what a reader in the console needs: the sentence
         // here says what to do, the cause says what actually happened.
-        throw new Error(startupFailureMessage(apiBase(), logPath()), {
+        throw new Error(startupFailureMessage(addressForMessage(), logPath()), {
           cause: error,
         });
       }

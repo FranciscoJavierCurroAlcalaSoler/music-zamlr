@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+
+import { isDesktop } from "../connection";
 import {
   Alert,
   Button,
@@ -35,15 +38,33 @@ export function ImportSettings({
   const [upgradeAction, setUpgradeAction] =
     useState<UpgradeAction>("keep_both");
 
+  async function handleBrowse() {
+    const picked = await open({
+      directory: true,
+      multiple: false,
+      title: "Choose the destination folder",
+    });
+    if (typeof picked === "string") {
+      setDestinationRoot(picked);
+    }
+  }
+
   return (
     <Stack spacing={2}>
-      <TextField
-        label="Destination folder"
-        value={destinationRoot}
-        onChange={(e) => setDestinationRoot(e.target.value)}
-        placeholder="D:\Music"
-        fullWidth
-      />
+      <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+        <TextField
+          label="Destination folder"
+          value={destinationRoot}
+          onChange={(e) => setDestinationRoot(e.target.value)}
+          placeholder="D:\Music"
+          fullWidth
+        />
+        {isDesktop() && (
+          <Button variant="outlined" onClick={handleBrowse}>
+            Browse…
+          </Button>
+        )}
+      </Stack>
       <FormControl>
         <FormLabel>Folder structure</FormLabel>
         <RadioGroup

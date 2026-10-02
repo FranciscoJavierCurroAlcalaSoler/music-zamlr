@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
+import { BackendNotAnnouncedError } from "./connection";
 import { ATTEMPTS, startupFailureMessage, waitForBackend } from "./startup";
 
 afterEach(() => {
@@ -76,6 +77,23 @@ describe("waitForBackend", () => {
     await waitForBackend({ check, wait: noWait });
 
     expect(calls).toBe(2);
+  });
+
+  it("waits while the shell has not announced the address yet", async () => {
+    // The first polls in the desktop app happen before the backend has
+    // announced its port, so apiBase throws this. Treated as an answer, the
+    // splash would give up a second after the window opened.
+    let calls = 0;
+    const check = () => {
+      calls += 1;
+      return calls < 3
+        ? Promise.reject(new BackendNotAnnouncedError("not yet"))
+        : Promise.resolve();
+    };
+
+    await waitForBackend({ check, wait: noWait });
+
+    expect(calls).toBe(3);
   });
 
   it("does not retry an answer from the server", async () => {

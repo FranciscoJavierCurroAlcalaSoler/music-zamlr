@@ -1,11 +1,19 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { apiBase, authHeaders, logPath } from "./connection";
+import {
+  BackendNotAnnouncedError,
+  addressForMessage,
+  apiBase,
+  authHeaders,
+  isDesktop,
+  logPath,
+} from "./connection";
 
 // No declare global here: connection.ts declares the field, and a global
 // declaration in any module covers the whole project.
 
 afterEach(() => {
   delete globalThis.__ZAMLR__;
+  delete globalThis.__TAURI_INTERNALS__;
 });
 
 describe("connection", () => {
@@ -41,5 +49,40 @@ describe("connection", () => {
     globalThis.__ZAMLR__ = { logPath: String.raw`C:\Users\x\music-zamlr.log` };
 
     expect(logPath()).toBe(String.raw`C:\Users\x\music-zamlr.log`);
+  });
+
+  it("is not the desktop app in a browser", () => {
+    expect(isDesktop()).toBe(false);
+  });
+
+  it("is the desktop app when Tauri's own global is there", () => {
+    // Tauri's global, which exists before any script of the page runs.
+    // Ours arrives a second later, when the backend announces its port,
+    // and a component asking for it renders "browser" and never changes.
+    globalThis.__TAURI_INTERNALS__ = {};
+
+    expect(isDesktop()).toBe(true);
+  });
+
+  it("refuses to guess an address inside the shell", () => {
+    globalThis.__TAURI_INTERNALS__ = {};
+
+    // Not the dev-server fallback: with anything listening on 8000 the
+    // window would quietly use it instead of the backend it started, and
+    // show that database's collections over its own.
+    expect(() => apiBase()).toThrow(BackendNotAnnouncedError);
+  });
+
+  it("uses the injected address inside the shell", () => {
+    globalThis.__TAURI_INTERNALS__ = {};
+    globalThis.__ZAMLR__ = { apiBase: "http://127.0.0.1:54321" };
+
+    expect(apiBase()).toBe("http://127.0.0.1:54321");
+  });
+
+  it("names the state rather than throwing while writing a message", () => {
+    globalThis.__TAURI_INTERNALS__ = {};
+
+    expect(addressForMessage()).toBe("the backend this app starts");
   });
 });

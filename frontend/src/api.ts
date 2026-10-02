@@ -11,7 +11,7 @@ import type {
   FormatOrder,
 } from "./types";
 
-import { apiBase, authHeaders } from "./connection";
+import { addressForMessage, apiBase, authHeaders } from "./connection";
 
 /**
  * Plain async functions: no hooks, no setState. Components call these and
@@ -226,7 +226,7 @@ export function describeFetchError(error: unknown): string {
   // it. That is by far the most common failure while developing, and the
   // raw "Failed to fetch" tells the user nothing about what to do.
   if (error instanceof TypeError) {
-    return `Could not reach the server at ${apiBase()}. Is the backend running?`;
+    return `Could not reach the server at ${addressForMessage()}. Is the backend running?`;
   }
   // Anything we threw ourselves already describes a real HTTP response.
   if (error instanceof Error) {
