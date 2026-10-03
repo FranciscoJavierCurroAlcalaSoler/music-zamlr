@@ -87,16 +87,16 @@ def test_collection_deletion_cascades_to_tracks(session, test_collection):
     assert remaining_collection is None
 
 
-def test_a_bulk_delete_leaves_the_tracks_behind(session, make_track):
-    # The limit of test_collection_deletion_cascades_to_tracks above,
-    # pinned rather than described. It is ORM
-    # behaviour: session.delete loads the children and removes them one by
-    # one. A DELETE statement goes straight to SQLite, which enforces no
-    # foreign keys unless PRAGMA foreign_keys=ON is set on the connection,
-    # and nothing here sets it — so the tracks survive their collection.
+def test_a_bulk_delete_is_refused_while_tracks_remain(session, make_track):
+    # The limit of test_collection_deletion_cascades_to_tracks above, pinned
+    # rather than described. That cascade is ORM behaviour: session.delete
+    # loads the children and removes them one at a time. A DELETE statement
+    # goes straight to SQLite and meets no ORM at all, so the only thing
+    # standing between it and a shelf of orphaned tracks is the foreign key
+    # the connection is told to apply.
     #
-    # Named for what happens, not for what one might wish. If the pragma is
-    # ever turned on, this test fails and says exactly what changed.
+    # The refusal arrives as sqlalchemy.exc.IntegrityError, which wraps the
+    # driver's own: catching sqlite3.IntegrityError here would not match.
     collection = Collection(name="Bulk", root_path="/music/bulk")
     collection.tracks = [
         make_track(file_path="/music/bulk/one.mp3", collection_id=None)
@@ -105,9 +105,24 @@ def test_a_bulk_delete_leaves_the_tracks_behind(session, make_track):
     session.commit()
     collection_id = collection.id
 
-    session.exec(delete(Collection).where(Collection.id == collection_id))
-    session.commit()
+    with pytest.raises(IntegrityError):
+        session.exec(delete(Collection).where(Collection.id == collection_id))
+        session.commit()
 
-    assert session.exec(select(Collection)).all() == []
-    orphans = session.exec(select(Track)).all()
-    assert len(orphans) == 1
+    # A failed commit leaves the session refusing every later statement with
+    # PendingRollbackError, so the assertions below need this to run at all.
+    session.rollback()
+
+    assert len(session.exec(select(Collection)).all()) == 1
+    assert len(session.exec(select(Track)).all()) == 1
+
+
+def test_a_track_cannot_name_a_collection_that_does_not_exist(session, make_track):
+    # The other direction from the test above: there the parent tries to
+    # leave, here the child arrives pointing at nothing. Both are the same
+    # setting, and a schema that declares a foreign key nobody applies says
+    # something about the data that is not true.
+    session.add(make_track(collection_id=9999))
+
+    with pytest.raises(IntegrityError):
+        session.commit()

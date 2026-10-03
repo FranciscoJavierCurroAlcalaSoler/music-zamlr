@@ -1,7 +1,9 @@
 import os
+import sqlite3
 
 from alembic.config import Config
-from sqlalchemy import URL, inspect
+from sqlalchemy import URL, event, inspect
+from sqlalchemy.engine import Engine
 from sqlmodel import Session, create_engine
 
 from alembic import command
@@ -36,6 +38,33 @@ engine = create_engine(URL.create("sqlite", database=DB_PATH))
 ALEMBIC_INI_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "alembic.ini"
 )
+
+
+@event.listens_for(Engine, "connect")
+def _enforce_foreign_keys(dbapi_connection, connection_record):
+    """Ask SQLite to apply the foreign keys the schema already declares.
+
+    SQLite reads this setting per connection and forgets it when the
+    connection closes, so it cannot be a statement run once at startup.
+    Off, `DELETE FROM collection` leaves that collection's tracks behind,
+    pointing at a row that no longer exists, and a track can name a
+    collection that never existed at all. The ORM cascade hides neither:
+    it only fires for `session.delete`, which loads the children and
+    removes them one at a time.
+
+    On the Engine class rather than on this module's engine, because the
+    tests build their own. A hook bound to one engine would leave the whole
+    suite running without the rule the shipped application runs with, which
+    is a suite that passes by testing something else.
+
+    The guard is not ceremony. This fires for every engine in the process,
+    including one a library makes, and a SQLite pragma sent elsewhere is a
+    statement the next reader cannot account for.
+    """
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 
 def get_session():
