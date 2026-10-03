@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "music-zamlr",
+  "productName": "Music Zamlr",
   "version": "0.1.0",
-  "identifier": "dev.curro.music-zamlr",
+  "identifier": "com.zamlr.music",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
