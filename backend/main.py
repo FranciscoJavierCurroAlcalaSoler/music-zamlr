@@ -885,24 +885,47 @@ class ImportResult:
     log_error: str | None = None
 
 
+# The shape of the file _write_import_log leaves in the destination folder.
+# Raise it whenever a key is added, removed or changes meaning: the file sits
+# in the user's music folder long after the version that wrote it has been
+# replaced, and this number is the only thing a later reader can go by.
+IMPORT_LOG_FORMAT_VERSION = 1
+
+
 def _write_import_log(
     destination_root: str, results: list[OperationResult]
 ) -> tuple[str | None, str | None]:
+    """Leave a record of an import beside the files it wrote.
+
+    An object at the top, not a bare list of operations. A list has no room
+    for a key, so a format that began as one could only ever gain a version
+    by turning into an object and teaching every reader both shapes.
+
+    written_at repeats the timestamp in the filename on purpose: the user may
+    rename the file, and its content should still say when it was made. One
+    clock reading serves both, so the two cannot straddle a second boundary
+    and disagree.
+    """
     log_path = None
     log_error = None
-    candidate_path = os.path.normpath(
-        os.path.join(
-            destination_root,
-            "import_log_" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".json",
-        )
-    )
     try:
-        log_entries = [
-            OperationResultRead.model_validate(r).model_dump(mode="json")
-            for r in results
-        ]
+        written_at = datetime.now()
+        candidate_path = os.path.normpath(
+            os.path.join(
+                destination_root,
+                "import_log_" + written_at.strftime("%Y%m%d-%H%M%S") + ".json",
+            )
+        )
+        payload = {
+            "format_version": IMPORT_LOG_FORMAT_VERSION,
+            "written_at": written_at.isoformat(timespec="seconds"),
+            "operations": [
+                OperationResultRead.model_validate(r).model_dump(mode="json")
+                for r in results
+            ],
+        }
         with open(candidate_path, "w", encoding="utf-8") as log_file:
-            json.dump(log_entries, log_file, indent=2, ensure_ascii=False)
+            json.dump(payload, log_file, indent=2, ensure_ascii=False)
         log_path = candidate_path
     except OSError as error:
         log_error = str(error)

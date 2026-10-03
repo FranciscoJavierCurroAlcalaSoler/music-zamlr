@@ -114,6 +114,9 @@ Then open `http://localhost:5173` in a browser. The backend answers on port
 6. Examine the preview. It lists every file operation before anything on disk
    changes.
 7. Select **Import**. The tool writes a log file into the destination folder.
+   The file is named `import_log_` followed by the date and time, and it
+   lists each file operation with its result. It is JSON, and its
+   `format_version` key tells a program which layout the file has.
 
 A scan and a comparison both report progress while they run. A large
 collection takes minutes.

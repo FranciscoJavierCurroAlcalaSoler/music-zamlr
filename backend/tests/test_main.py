@@ -3,6 +3,7 @@ import os
 import shutil
 import time
 import types
+from datetime import datetime
 
 import pytest
 from fastapi import HTTPException
@@ -1135,12 +1136,61 @@ def test_log_file_is_written_to_destination_root(
     logs = list(destination.glob("import_log_*.json"))
     assert len(logs) == 1
 
-    entries = json.loads(logs[0].read_text())
-    assert len(entries) == 1
-    assert entries[0]["status"] == "success"
-    assert entries[0]["operation"]["action"] == "copy"
+    document = json.loads(logs[0].read_text())
+    assert len(document["operations"]) == 1
+    assert document["operations"][0]["status"] == "success"
+    assert document["operations"][0]["operation"]["action"] == "copy"
 
     assert body["log_path"] == str(logs[0])
+
+
+def test_the_import_log_names_its_format(
+    session, tmp_path, make_track, collections, destination, event_stream
+):
+    mine, theirs = collections
+
+    their_dir = tmp_path / "theirs"
+    their_dir.mkdir()
+    source_file = their_dir / "song.mp3"
+    source_file.write_bytes(b"audio data")
+
+    their_track = make_track(
+        file_path=str(source_file),
+        collection_id=theirs.id,
+        file_size=1_000_000,
+        title="Only Theirs",
+    )
+    session.add(their_track)
+    session.commit()
+
+    stream = event_stream(
+        "/api/import/execute",
+        "POST",
+        json={
+            "track_ids": [their_track.id],
+            "mine_collection_id": mine.id,
+            "theirs_collection_id": theirs.id,
+            "destination_root": str(destination),
+            "structure_mode": "flat",
+            "upgrade_action": "keep_both",
+        },
+    )
+
+    assert stream.done["log_error"] is None
+    logs = list(destination.glob("import_log_*.json"))
+    assert len(logs) == 1
+
+    # The file outlives the version that wrote it, so this is a contract with
+    # a reader that does not exist yet. The whole key set, compared with ==,
+    # because a key added without a decision should fail here. The version as
+    # a literal, because the number on disk is what is being pinned, and a
+    # test that asks the constant what the constant says cannot fail.
+    document = json.loads(logs[0].read_text())
+    assert set(document) == {"format_version", "written_at", "operations"}
+    assert document["format_version"] == 1
+    # Present is not enough: a later reader will parse it, and a value that
+    # is not a timestamp passes the key set above untouched.
+    datetime.fromisoformat(document["written_at"])
 
 
 def test_execute_rejects_a_non_candidate_id(
