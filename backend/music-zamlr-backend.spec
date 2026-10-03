@@ -5,7 +5,14 @@ a = Analysis(
     ['serve.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    # The revisions are read from disk by path and never imported, so no
+    # import graph leads to them and nothing but this line puts them in the
+    # bundle. A build without it starts, finds a script directory with no
+    # revisions in it, and gives a new installation a database with no
+    # tables. The two entries have to land where alembic.ini's
+    # script_location expects them: the ini file at the top of _internal,
+    # the directory beside it, and %(here)s resolving between the two.
+    datas=[("alembic.ini", "."), ("alembic", "alembic")],
     # Empty, and that is a measured answer rather than an omission. Uvicorn
     # names its protocol, loop and lifespan classes in strings, and SQLAlchemy
     # resolves its dialect the same way, so neither can be followed by an

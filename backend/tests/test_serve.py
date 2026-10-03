@@ -119,7 +119,7 @@ def running_server(tmp_path_factory, launch_environment):
     tmp_path = tmp_path_factory.mktemp("running-server")
     environment = launch_environment(**{TOKEN_VARIABLE: TOKEN})
     # Or the real server writes into backend/db: the lifespan runs here, and
-    # it calls create_db_and_tables.
+    # it calls apply_migrations.
     database_path = tmp_path / "serve-test.db"
     # A directory. The file inside it is the application's to name, which is
     # why the test reads that name from serve.py instead of choosing one.

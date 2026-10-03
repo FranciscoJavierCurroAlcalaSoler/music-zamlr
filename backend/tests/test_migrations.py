@@ -3,11 +3,91 @@ from pathlib import Path
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
-from sqlalchemy import create_engine
+from alembic.script import ScriptDirectory
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel
+from sqlmodel import Session, SQLModel, select
 
+import database
 from alembic import command
+from models import Collection
+
+
+def _alembic_config():
+    return Config(Path(__file__).resolve().parents[1] / "alembic.ini")
+
+
+def _sqlite_file_engine(path):
+    # A file, not sqlite://. apply_migrations reaches the database through
+    # Alembic, which opens its own connection, and an in-memory database
+    # lives inside one connection and dies with it. A file is also what the
+    # code under test will meet.
+    return create_engine(f"sqlite:///{path}")
+
+
+def test_a_new_database_gets_every_table(tmp_path, monkeypatch):
+    engine = _sqlite_file_engine(tmp_path / "new.db")
+    monkeypatch.setattr(database, "engine", engine)
+    try:
+        database.apply_migrations()
+
+        assert {
+            "collection",
+            "track",
+            "formatorderrow",
+            "alembic_version",
+        } <= set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
+
+
+def test_a_database_from_before_alembic_is_stamped(tmp_path, monkeypatch):
+    # The row is the point of this test, not scenery. Stamping a database
+    # that already has the schema and rebuilding it from the baseline both
+    # end at head with the right tables, and only a row tells them apart.
+    # "The schema is out of step, so recreate it" is the obvious wrong fix,
+    # and on an installed copy it is the user's library.
+    #
+    # Not the test_collection fixture: that one writes through the session
+    # fixture, whose engine is the shared in-memory database, while this
+    # test migrates a file of its own that database.engine points at. The
+    # row would land somewhere this test never reads.
+    engine = _sqlite_file_engine(tmp_path / "existing.db")
+    monkeypatch.setattr(database, "engine", engine)
+    try:
+        SQLModel.metadata.create_all(engine)
+        with Session(engine) as session:
+            session.add(Collection(name="Existing collection", root_path="/fake/path"))
+            session.commit()
+
+        database.apply_migrations()
+
+        with Session(engine) as session:
+            collections = session.exec(select(Collection)).all()
+            assert any(item.name == "Existing collection" for item in collections)
+
+        head = ScriptDirectory.from_config(_alembic_config()).get_current_head()
+        with engine.connect() as connection:
+            version = connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar_one()
+        assert version == head
+    finally:
+        engine.dispose()
+
+
+def test_applying_migrations_twice_changes_nothing(tmp_path, monkeypatch):
+    engine = _sqlite_file_engine(tmp_path / "twice.db")
+    monkeypatch.setattr(database, "engine", engine)
+    try:
+        database.apply_migrations()
+        tables_after_first_run = set(inspect(engine).get_table_names())
+
+        database.apply_migrations()
+
+        assert set(inspect(engine).get_table_names()) == tables_after_first_run
+    finally:
+        engine.dispose()
 
 
 def test_the_migrations_match_the_models():

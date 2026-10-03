@@ -13,7 +13,7 @@ import os
 from fastapi.testclient import TestClient
 
 import main
-from database import create_db_and_tables, engine
+from database import apply_migrations, engine
 from fingerprinting import _find_fpcalc
 from launch_settings import (
     ALLOWED_ORIGINS_VARIABLE,
@@ -30,17 +30,17 @@ def main_child():
     token = os.environ[TOKEN_VARIABLE]
     origin = os.environ[ALLOWED_ORIGINS_VARIABLE]
     # .get, not [], so the guard below is a real guard: run without the
-    # variable, this file must not reach create_db_and_tables() and write
-    # into the developer's own database.
+    # variable, this file must not reach apply_migrations() and write into
+    # the developer's own database.
     database_path = os.environ.get(DATABASE_PATH_VARIABLE)
 
     # Not `with TestClient(...)`: the context manager runs the lifespan, which
-    # calls create_db_and_tables() and would write into the real backend/db.
-    # A middleware is built for the first request, so none of this needs it.
+    # calls apply_migrations() and would write into the real backend/db. A
+    # middleware is built for the first request, so none of this needs it.
     client = TestClient(main.app)
 
     if database_path:
-        create_db_and_tables()
+        apply_migrations()
 
     no_token = client.get("/api/health")
     with_token = client.get("/api/health", headers={"X-Zamlr-Token": token})

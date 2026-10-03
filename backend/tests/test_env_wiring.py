@@ -62,7 +62,7 @@ def child_run(tmp_path_factory):
     # One level deeper than mktemp goes, because mktemp makes its directory
     # and the packaged app will not: the shell names a folder in app-data
     # that has never existed. Without a missing directory here, nothing in
-    # this test would notice create_db_and_tables losing its makedirs call.
+    # this test would notice apply_migrations losing its makedirs call.
     database_path = os.path.normpath(
         str(tmp_path_factory.mktemp("database") / "zamlr" / "test.db")
     )
@@ -109,7 +109,7 @@ def test_main_reads_the_origins_from_the_environment(child_run):
 
 def test_the_database_path_comes_from_the_environment(child_run):
     # Two claims, and the second one is not spare. The engine can carry the
-    # right path while create_db_and_tables never makes the folder the shell
+    # right path while apply_migrations never makes the folder the shell
     # named, and the app would then fail on the first query rather than here.
     assert child_run.answers["engine_database_path"] == child_run.database_path
     assert Path(child_run.database_path).exists()

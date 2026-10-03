@@ -16,7 +16,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from database import create_collection, create_db_and_tables, get_session
+from database import apply_migrations, create_collection, get_session
 from enums import ActionType, Bucket, ImportPhase, OperationStatus
 from fingerprinting import fpcalc_available
 from format_order import default_tiers, effective_tiers, tiers_to_ranks, validate_tiers
@@ -60,13 +60,23 @@ from token_middleware import TokenMiddleware
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Make sure the schema exists before the first request.
+    """Bring the schema up to date before the first request.
 
     Until this existed, only scanner.py's CLI main() ever created the tables,
     so the server could not start from nothing: delete db/music.db and SQLite
     obligingly creates an empty file on the first connection, with no tables
-    in it, and every request then fails on "no such table". create_all only
-    adds what is missing, so running it on every start costs nothing.
+    in it, and every request then fails on "no such table". Running the
+    migrations on every start costs one query against alembic_version once
+    the database is at head.
+
+    Here rather than in serve.py, so that every way of starting the server
+    passes through it — `fastapi dev`, the packaged entry point, and the
+    tests that run the application in a child process. A migration step the
+    launcher owns is a migration step one launcher can skip.
+
+    An exception from here stops the application from starting, which is the
+    intent. A backend that could not bring the database to the schema its
+    queries assume has nothing safe to answer with.
 
     Note for the tests: conftest.py replaces database.engine with one that
     raises on connect, and this would reach it. It does not today, because
@@ -74,7 +84,7 @@ async def lifespan(app: FastAPI):
     manager, and TestClient only runs lifespan inside a `with`. Changing that
     means giving the fixture a real engine here too.
     """
-    create_db_and_tables()
+    apply_migrations()
     yield
 
 

@@ -17,7 +17,7 @@ from mutagen.oggopus import OggOpusInfo
 from mutagen.oggvorbis import OggVorbisInfo
 from sqlmodel import Session, select
 
-from database import create_collection, create_db_and_tables, engine
+from database import apply_migrations, create_collection, engine
 from importing import SUPERSEDED_DIR_NAME
 from models import Collection, Track
 
@@ -547,7 +547,7 @@ def main():
 
     folder_to_scan = sys.argv[1]
     collection_name = sys.argv[2]
-    create_db_and_tables()
+    apply_migrations()
 
     with Session(engine) as session:
         collection = create_collection(

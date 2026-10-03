@@ -1,8 +1,10 @@
 import os
 
-from sqlalchemy import URL
-from sqlmodel import Session, SQLModel, create_engine
+from alembic.config import Config
+from sqlalchemy import URL, inspect
+from sqlmodel import Session, create_engine
 
+from alembic import command
 from launch_settings import read_launch_settings
 from models import Collection
 
@@ -27,15 +29,47 @@ else:
 # where it is legal.
 engine = create_engine(URL.create("sqlite", database=DB_PATH))
 
+# Anchored to this file for the reason DB_DIR is: the working directory
+# belongs to whoever started the process, and the shell picks its own. In a
+# frozen build this directory is the one PyInstaller unpacks into, which is
+# where the spec file puts alembic.ini and the revisions beside it.
+ALEMBIC_INI_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "alembic.ini"
+)
+
 
 def get_session():
     with Session(engine) as session:
         yield session
 
 
-def create_db_and_tables():
+def apply_migrations() -> None:
+    """Bring the database at DB_PATH to the newest revision.
+
+    Three states arrive here. A database with tables and no version table
+    was built by an earlier version of this program, before there were any
+    revisions; it already matches the baseline, which was generated from
+    these same models, so it is stamped rather than upgraded. Upgrading it
+    would run the baseline's create_table against tables that exist and stop
+    on "table collection already exists". Everything else is upgraded: a
+    file with nothing in it, where the baseline creates the schema, and a
+    database already carrying a version, where whatever is newer runs.
+
+    `and table_names` is what separates the first state from an empty file.
+    Without it a new database is stamped at head while holding nothing,
+    Alembic believes it current for good, and every query afterwards fails
+    on a table that will now never be created.
+    """
+    # SQLite makes a database file but not the directory above it, and the
+    # shell names a folder in app-data that has never existed.
     os.makedirs(DB_DIR, exist_ok=True)
-    SQLModel.metadata.create_all(engine)
+    config = Config(ALEMBIC_INI_PATH)
+    table_names = inspect(engine).get_table_names()
+
+    if "alembic_version" not in table_names and table_names:
+        command.stamp(config, "head")
+    else:
+        command.upgrade(config, "head")
 
 
 def create_collection(collection: Collection, session: Session) -> Collection:
