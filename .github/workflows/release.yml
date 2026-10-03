@@ -1,0 +1,134 @@
+name: Release
+
+# Only a version tag builds an installer. This lives apart from ci.yml
+# because creating a release needs `contents: write`, and ci.yml runs on
+# every push to every branch, where that permission has no business.
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  # Kept equal to the same variable in ci.yml and to ENVIRONMENT.md. The
+  # fingerprints an installed app stores have to come from the version
+  # every test ran against.
+  FPCALC_VERSION: "1.6.1"
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    # A cold Rust release build plus PyInstaller takes a while, but a hung
+    # job otherwise bills until the six-hour default, at twice the Linux
+    # rate while the repository is private.
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    # No concurrency group with cancel-in-progress, unlike ci.yml: a release
+    # cancelled halfway can leave a draft behind with no installer on it.
+    steps:
+      - uses: actions/checkout@v7
+
+      # Tagging v0.2.0 without raising the version in tauri.conf.json would
+      # publish a release named 0.2.0 whose installer says 0.1.0 and
+      # installs as 0.1.0. The installer takes its version from that file
+      # alone; package.json's is never read.
+      - name: Check the tag against the app version
+        run: |
+          $tag = $env:GITHUB_REF_NAME.TrimStart("v")
+          $version = (Get-Content frontend/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ($tag -ne $version) {
+            throw "Tag $env:GITHUB_REF_NAME does not match version $version in tauri.conf.json"
+          }
+          Add-Content $env:GITHUB_ENV "VERSION=$version"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - run: pip install -r requirements.txt
+        working-directory: backend
+
+      # binaries/ is gitignored, so a checkout has no fpcalc in it. The shell
+      # starts without one, since a missing fpcalc is a mode the app already
+      # has, and the installer would ship an app that compares by tags alone
+      # with nothing anywhere saying so. Also put on PATH, for the packaged
+      # test that hands the backend a configured fpcalc.
+      - name: Install fpcalc into the shell's binaries
+        working-directory: ${{ runner.temp }}
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/acoustid/chromaprint/releases/download/v${{ env.FPCALC_VERSION }}/chromaprint-fpcalc-${{ env.FPCALC_VERSION }}-windows-x86_64.zip" -OutFile fpcalc.zip
+          Expand-Archive fpcalc.zip -DestinationPath .
+          $folder = "${{ runner.temp }}\chromaprint-fpcalc-${{ env.FPCALC_VERSION }}-windows-x86_64"
+          $binaries = "${{ github.workspace }}\frontend\src-tauri\binaries"
+          New-Item -ItemType Directory -Force $binaries | Out-Null
+          Copy-Item "$folder\fpcalc.exe" $binaries
+          Add-Content $env:GITHUB_PATH $folder
+
+      - run: fpcalc -version
+
+      - run: pyinstaller music-zamlr-backend.spec --noconfirm
+        working-directory: backend
+
+      # test_packaged_backend.py skips the whole module when no build
+      # exists, so a build that landed somewhere else would make the next
+      # step pass on four skips. The skip condition is exactly this file
+      # being missing, so asserting it is here makes the skip impossible.
+      - name: Check the backend build exists
+        working-directory: backend
+        run: |
+          if (-not (Test-Path dist/music-zamlr-backend/music-zamlr-backend.exe)) {
+            throw "PyInstaller produced no dist/music-zamlr-backend/music-zamlr-backend.exe"
+          }
+
+      # The only place outside the development machine where these run.
+      # python -m pytest for the sys.path reason given in ci.yml.
+      - run: python -m pytest tests/test_packaged_backend.py
+        working-directory: backend
+
+      - run: python stage_backend.py
+        working-directory: backend
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+        working-directory: frontend
+
+      # The runner image already carries stable Rust and the MSVC linker.
+      # Without the cache every release compiles the whole Tauri dependency
+      # tree from nothing.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri -> target
+
+      - run: npm run tauri build
+        working-directory: frontend
+
+      # GitHub turns spaces in an uploaded asset's name into dots, so the
+      # bundler's "Music Zamlr_<version>_x64-setup.exe" would be published
+      # as "Music.Zamlr_...". A name chosen here is also one the README can
+      # quote.
+      - name: Rename the installer
+        run: |
+          $built = "frontend/src-tauri/target/release/bundle/nsis/Music Zamlr_${env:VERSION}_x64-setup.exe"
+          Move-Item -LiteralPath $built "music-zamlr_${env:VERSION}_x64-setup.exe"
+
+      # A draft, and it has to stay one until the release also carries the
+      # complete source and the licence notices. The bundle contains
+      # mutagen, so the installer is GPL-3.0-or-later, and publishing it
+      # without its source breaches that licence on the first download.
+      # The draft is also where the owner downloads the installer to see
+      # the SmartScreen warning a user sees, and waits for this tag's CI
+      # run, which goes in parallel and which this job cannot wait for.
+      - name: Create a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME "music-zamlr_${env:VERSION}_x64-setup.exe" `
+            --draft `
+            --title "Music Zamlr ${env:VERSION}" `
+            --generate-notes
