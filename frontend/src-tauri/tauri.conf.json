@@ -24,7 +24,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": "nsis",
+    "publisher": "Francisco Javier Alcalá Soler (Curro)",
+    "copyright": "Copyright (c) 2026 Francisco Javier Alcalá Soler (Curro)",
+    "shortDescription": "Compare two music collections and import what you are missing.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
