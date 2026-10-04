@@ -194,25 +194,60 @@ jobs:
         with:
           workspaces: frontend/src-tauri -> target
 
-      - run: npm run tauri build
+      # Pinned to the version in ENVIRONMENT.md, so CI renders the template
+      # as a local preview does. --features cli is not optional: without it
+      # the install succeeds and builds no binary. rust-cache keeps
+      # ~/.cargo/bin, so only the first run pays for the compile.
+      - run: cargo install cargo-about --version 0.9.2 --locked --features cli
+
+      # Generated here rather than committed. A committed copy fell behind
+      # Cargo.lock once already and listed none of the dialog and opener
+      # crates; generated from the lockfile being built, it cannot.
+      - name: Generate the Rust notices
+        working-directory: frontend/src-tauri
+        run: cargo about generate about.hbs -o "${{ runner.temp }}/THIRD-PARTY-RUST.txt"
+
+      # After npm ci and after the fpcalc sources, because it reads both:
+      # the licence files in node_modules, and fpcalc's and FFmpeg's licence
+      # texts out of the source tarballs.
+      - name: Write the licence notices
+        working-directory: backend
+        run: >-
+          python write_notices.py
+          --output ../frontend/src-tauri/notices/THIRD-PARTY-NOTICES.txt
+          --fpcalc-sources "${{ runner.temp }}/fpcalc-sources"
+          --rust-notices "${{ runner.temp }}/THIRD-PARTY-RUST.txt"
+          --frontend ../frontend
+
+      # tauri.release.conf.json adds the notices to the bundle. It is merged
+      # in here rather than written into tauri.conf.json because Tauri copies
+      # resources during `tauri dev` as well, and a resource that exists only
+      # after this job has written it would break every development build.
+      - run: npm run tauri build -- --config src-tauri/tauri.release.conf.json
         working-directory: frontend
 
       # GitHub turns spaces in an uploaded asset's name into dots, so the
       # bundler's "Music Zamlr_<version>_x64-setup.exe" would be published
       # as "Music.Zamlr_...". A name chosen here is also one the README can
-      # quote.
-      - name: Rename the installer
+      # quote. The notices go on the release as well as into the installer,
+      # so they can be read before anything is installed.
+      - name: Name the release files
         run: |
           $built = "frontend/src-tauri/target/release/bundle/nsis/Music Zamlr_${env:VERSION}_x64-setup.exe"
           Move-Item -LiteralPath $built "music-zamlr_${env:VERSION}_x64-setup.exe"
+          Copy-Item frontend/src-tauri/notices/THIRD-PARTY-NOTICES.txt `
+            "music-zamlr_${env:VERSION}_THIRD-PARTY-NOTICES.txt"
 
-      # A draft, and it has to stay one until the release also carries the
-      # complete source and the licence notices. The bundle contains
-      # mutagen, so the installer is GPL-3.0-or-later, and publishing it
-      # without its source breaches that licence on the first download.
-      # The draft is also where the owner downloads the installer to see
-      # the SmartScreen warning a user sees, and waits for this tag's CI
-      # run, which goes in parallel and which this job cannot wait for.
+      # Every file the licences require travels together: the backend is
+      # GPL-3.0-or-later as a whole because it bundles mutagen, fpcalc is
+      # LGPL-2.1, and a release missing either source archive or the notices
+      # breaches them on the first download. GitHub adds the repository's
+      # own source archive at the tag by itself.
+      #
+      # Still a draft. The owner publishes it by hand, after this tag's CI
+      # run has passed — it goes in parallel and this job cannot wait for
+      # it — and after downloading the installer to see the SmartScreen
+      # warning a user sees.
       - name: Create a draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -221,6 +256,7 @@ jobs:
             "music-zamlr_${env:VERSION}_x64-setup.exe" `
             "music-zamlr_${env:VERSION}_python-sources.zip" `
             "music-zamlr_${env:VERSION}_fpcalc-sources.zip" `
+            "music-zamlr_${env:VERSION}_THIRD-PARTY-NOTICES.txt" `
             --draft `
             --title "Music Zamlr ${env:VERSION}" `
             --generate-notes
