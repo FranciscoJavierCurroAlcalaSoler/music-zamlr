@@ -1,176 +1,160 @@
 # Music Zamlr — Development Environment
 
-Reproducible inventory of the dev/runtime setup. Update whenever something is installed, upgraded, or reconfigured. Language-level packages are tracked by their lockfiles, not here — see "Not tracked here" at the bottom.
+The tools on the development machine, at the versions in use. Update this file
+when you install, upgrade, or reconfigure a tool. Python and npm packages are
+in their lockfiles, not here (see [Not tracked here](#not-tracked-here)).
+To run or build the project from a clone, read [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Last updated: 2026-10-01
+Last updated: 2026-10-04
 
 ## Machine
+
 | | |
 |---|---|
-| Device | Windows 10 notebook (dev + runtime) |
-| Role | Runs the FastAPI backend; music drives attach here. Also the coding machine. iPad Pro = optional browser client over the LAN. |
+| Device | Windows 10 notebook |
+| Role | The coding machine. It also runs the program, and the music drives connect to it. |
 
-## Languages & runtimes
-| Item | Version | Installed via |
+## Languages and runtimes
+
+| Item | Version | Installed with |
 |---|---|---|
 | Python | 3.14.6 | Python Install Manager (`py install 3.14`) |
-| Node.js | 24.18.0 (Active LTS) | Official LTS installer (bundles npm) |
-| Rust | rustc 1.99.0, rustup 1.29.1 | Added 2026-10-01, `winget install --id Rustlang.Rustup --exact`. Default toolchain `stable-x86_64-pc-windows-msvc`. For the desktop shell; nothing in the backend or the frontend needs it. `cargo` reaches PATH only in shells started after the install, the same trap fpcalc has. **This machine needs an antivirus exclusion to link at all** — see "Building the shell" below. |
+| Node.js | 24.18.0 (Active LTS) | The official LTS installer, which includes npm |
+| Rust | rustc 1.99.0, rustup 1.29.1 | `winget install --id Rustlang.Rustup --exact`. Default toolchain `stable-x86_64-pc-windows-msvc`. Only the desktop shell needs it. `cargo` is on `PATH` only in shells started after the installation. **The Rust build needs an antivirus exclusion on this machine**: see [Building the shell](#building-the-shell-an-antivirus-exclusion-is-necessary). |
 
 ## Tools
+
 | Item | Version | Notes |
 |---|---|---|
 | Git | 2.55.0 | Terminal: MinTTY. Credential helper: Git Credential Manager. |
-| VS Code | 1.127.0 | Display language pinned to English (`locale: en`). |
-| GitHub CLI (`gh`) | 2.100.0 | Added 2026-09-04, `winget install --id GitHub.cli`. Reads Actions run logs without a browser: `gh run view --log-failed`. Authenticated over HTTPS. **Not** set as Git's credential helper — `gh auth login` offers to take that role and was declined, so Git Credential Manager keeps it. |
-| Chromaprint (`fpcalc`) | 1.6.1 (FFmpeg Lavc62.11.100) | Added 2026-09-05, `winget install --id AcoustID.Chromaprint --exact`. The fingerprinting binary for Phase 5. No lockfile covers it, which is why it is here. Installed as a winget *portable* package: the exe lands under `%LOCALAPPDATA%\Microsoft\WinGet\Packages\AcoustID.Chromaprint_.../chromaprint-fpcalc-1.6.1-windows-x86_64\` and is reachable on PATH only in shells started after the install. Locate it in code with `shutil.which("fpcalc")`, the only form that honours `PATHEXT` and so finds `fpcalc.exe`. **The desktop app ships its own copy** under `frontend/src-tauri/binaries/fpcalc.exe`, passed to the backend as `ZAMLR_FPCALC`; this winget install is only for running from source, and the two must stay on the same version as CI pins. This is the **x86_64** build. **CI pins this same 1.6.1 and installs it from the project's own GitHub release on all three runners** rather than from a package manager, so every leg tests the version this machine has — see `FPCALC_VERSION` in `.github/workflows/ci.yml`, and move the two together or neither. Package managers were rejected for that reason: apt's `libchromaprint-tools` and Homebrew's `chromaprint` each ship whatever their distribution froze, and Chocolatey's `chromaprint` is stuck at **1.1**, over a decade old. |
-| ffmpeg | 8.1.2 (Gyan full build) | Not installed for the app — it generates the manual test collections (the two `make_fixtures*.sh` scripts) and the synthetic fixtures under `backend/tests/fixtures/`. Recorded 2026-09-05 because nothing else names it and a clone cannot rebuild those collections without it. The app itself shells out to `fpcalc`, never to ffmpeg; see the spec's Phase 5 entry for why that choice was made. |
-| Visual Studio 2022 Build Tools | MSVC 14.44.35207, Windows SDK 10.0.26100.0 | Added 2026-10-01, `winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`. Several gigabytes, and it needs administrator rights. Rust on Windows links through `link.exe` from these tools: without them `rustc` stops with "linker `link.exe` not found" and says plainly that VS Code is not sufficient. **The MSVC toolset lands before the Windows SDK, and linking fails until both are there** — a build that fails halfway through this install is not a broken toolchain. |
-| cargo-about | 0.9.2 | Added 2026-10-02, `cargo install cargo-about --features cli`. **The `cli` feature is required**: without it the install succeeds, builds no binary, and `cargo about` then reports "no such command". Reads `Cargo.lock` and renders the Rust crates' notices from `src-tauri/about.hbs`. A build-time tool, deliberately not a dependency in `Cargo.toml`, which would ship it with the app. **The release job installs the same version and generates the notices itself** (2026-10-04); here it is only for previewing them, into a gitignored `src-tauri/THIRD-PARTY-RUST.txt`. A committed copy was dropped after it fell behind `Cargo.lock`. |
-| Monkey's Audio | 13.26 (x64) | Added 2026-09-15, from the official installer `MAC_1326_x64.exe` at monkeysaudio.com (no published checksum; Authenticode signature checked as Valid, signer Matthew Ashland). Default folder `C:\Program Files\Monkey's Audio x64\`, **not on PATH** — call `MAC.exe` by its full path. Not installed for the app: `MAC.exe` encodes the fixture `backend/tests/fixtures/test_track.ape`, which ffmpeg cannot encode. The installer also added the GUI `Monkey's Audio.exe` and an `uninstall.exe`. |
+| VS Code | 1.127.0 | Display language set to English (`locale: en`). |
+| GitHub CLI (`gh`) | 2.100.0 | `winget install --id GitHub.cli`. Reads Actions logs without a browser: `gh run view --log-failed`. Authenticated over HTTPS. It is **not** Git's credential helper: Git Credential Manager has that role. |
+| Chromaprint (`fpcalc`) | 1.6.1 (FFmpeg Lavc62.11.100), x86_64 | `winget install --id AcoustID.Chromaprint --exact`. A winget *portable* package: the executable is under `%LOCALAPPDATA%\Microsoft\WinGet\Packages\AcoustID.Chromaprint_...\chromaprint-fpcalc-1.6.1-windows-x86_64\`, and it is on `PATH` only in shells started after the installation. Find it in code with `shutil.which("fpcalc")`, the only form that applies `PATHEXT` and so finds `fpcalc.exe`. This installation is for running from source. **The desktop program ships its own copy** in `frontend/src-tauri/binaries/fpcalc.exe` and passes it to the backend as `ZAMLR_FPCALC`. **All copies must be the version that `FPCALC_VERSION` names** in `.github/workflows/ci.yml` and `release.yml`. CI downloads that version from Chromaprint's own GitHub release on all three runners. Package managers do not pin it: apt and Homebrew ship whatever version their distribution holds, and Chocolatey's `chromaprint` is version 1.1. |
+| ffmpeg | 8.1.2 (Gyan full build) | Not used by the program, which calls `fpcalc` and never ffmpeg. It makes the manual test collections (the two `make_fixtures*.sh` scripts) and the synthetic fixtures under `backend/tests/fixtures/`. |
+| Visual Studio 2022 Build Tools | MSVC 14.44.35207, Windows SDK 10.0.26100.0 | `winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`. Several gigabytes, and it needs administrator rights. Rust on Windows links with `link.exe` from these tools. Without them, `rustc` stops with "linker `link.exe` not found". VS Code is not a replacement. **The MSVC toolset installs before the Windows SDK, and linking fails until both are present.** |
+| cargo-about | 0.9.2 | `cargo install cargo-about --features cli`. **The `cli` feature is necessary**: without it, the installation builds no binary, and `cargo about` reports "no such command". It reads `Cargo.lock` and writes the notices for the Rust crates from `src-tauri/about.hbs`. It is a build tool, so it is not a dependency in `Cargo.toml`, which would ship it with the program. **The release workflow installs the same version and generates the notices itself.** On this machine it is only for a preview, into the gitignored `src-tauri/THIRD-PARTY-RUST.txt`. |
+| Monkey's Audio | 13.26 (x64) | The official installer `MAC_1326_x64.exe` from monkeysaudio.com. No checksum is published. The Authenticode signature is valid, signer Matthew Ashland. Folder: `C:\Program Files\Monkey's Audio x64\`. **Not on `PATH`**, so call `MAC.exe` with its full path. Not used by the program: `MAC.exe` encodes the fixture `backend/tests/fixtures/test_track.ape`, which ffmpeg cannot encode. |
 
-## Building the shell: an antivirus exclusion is required
+## Building the shell: an antivirus exclusion is necessary
 
-`frontend/src-tauri/target` is excluded in **FortiClient AntiVirus** (added
-2026-10-01). Without it no Rust build on this machine can link:
+`frontend/src-tauri/target` is excluded in **FortiClient AntiVirus**. Without
+the exclusion, no Rust build on this machine can link:
 
 ```
 LINK : fatal error LNK1105: cannot close file ...dll.exp. error code 1224
 ```
 
-Error 1224 is `ERROR_USER_MAPPED_FILE` — another process holds the import
-library the linker has just written. Rust creates and deletes thousands of
-short-lived files in `target/`, and an on-access scanner that opens each one
-collides with the linker.
+Error 1224 is `ERROR_USER_MAPPED_FILE`: another process holds the import
+library that the linker wrote. Rust creates and deletes thousands of
+short-lived files in `target/`. An on-access scanner that opens each one
+collides with the linker. The Windows search indexer and parallel linking are
+not the cause.
 
-**Four runs established which process it was**, before anything was changed:
-the default target directory, a target directory outside the indexed Desktop
-tree (which rules out the Windows search indexer), and a serialised `-j 1`
-build (which rules out two linker runs colliding). All four failed on a
-different crate each time. With the exclusion in place the build finished in
-1 minute 49 seconds with no link errors.
+Windows Defender needs **no** exclusion. Everything in `target/` is build
+output, made again from source.
 
-Windows Defender is also installed and needed **no** exclusion. Nothing in
-`target/` is downloaded or executed from the internet; it is build output,
-regenerated from source.
-
-CI never meets this, because no such scanner runs there — which also means CI
-cannot warn anybody about it.
+CI has no such scanner, so CI cannot show this problem.
 
 ## VS Code extensions
-Verified against `code --list-extensions` on 2026-09-07. Check with that
-command rather than trusting this table — see the sync note below.
+
+Make sure that this table agrees with `code --list-extensions`. Settings Sync
+can remove extensions without a warning (see below).
 
 | Extension | Identifier | Purpose |
 |---|---|---|
-| Python | `ms-python.python` | Python support; pulls in Pylance, Debugpy and Python Environments |
+| Python | `ms-python.python` | Python support. It also installs Pylance, Debugpy and Python Environments. |
 | Ruff | `charliermarsh.ruff` | Python formatting and lint diagnostics in the editor |
-| ESLint | `dbaeumer.vscode-eslint` | JS/TS linting |
-| Prettier - Code formatter | `esbenp.prettier-vscode` | Auto-format on save |
+| ESLint | `dbaeumer.vscode-eslint` | JS/TS lint |
+| Prettier - Code formatter | `esbenp.prettier-vscode` | Format on save |
 | GitHub Actions | `github.vscode-github-actions` | Workflow syntax and run status |
-| Vim | `vscodevim.vim` | Vim keybindings inside VS Code |
+| Vim | `vscodevim.vim` | Vim keys in VS Code |
 
-Extension versions float on auto-update; pin one only if it ever matters.
+Extension versions update automatically. Pin one only if a version matters.
 
-**Three of these went missing once, and nothing said so** (2026-09-07). Ruff,
-ESLint and Prettier were all absent while `.vscode/settings.json` still named
-them as formatters. The suspected cause is Settings Sync: `code tunnel` was
-set up across the notebook and the tablet, and a sync from the device with
-the shorter extension list wins silently. **The failure is quiet by
-construction** — VS Code does not warn that a configured `defaultFormatter`
-is not installed, so format-on-save simply stops happening and every file
-looks fine until CI or a manual `ruff` run disagrees. If formatting ever
-seems not to run, check the extension list first and the settings second.
+**A missing formatter extension gives no warning.** VS Code does not report
+that a configured `defaultFormatter` is not installed. Format on save then
+stops, and the files look correct until CI or a manual `ruff` run disagrees.
+Settings Sync between devices can remove extensions this way, because the
+device with the shorter list wins. If formatting does not run, examine the
+extension list first and the settings second.
 
 **Ruff in the editor is not the same tool as `ruff` in CI.** The extension
-formats and shows diagnostics; the pinned `ruff` in `backend/requirements.txt`
-is what the workflow runs. They can drift apart in version, and only the
-second one can fail a build.
+formats and shows diagnostics. The pinned `ruff` in `backend/requirements.txt`
+is what CI runs. Their versions can differ, and only the second one can fail a
+build.
 
-Prettier is the exception, and is pinned as an exact devDependency in
-`frontend/package.json`. The extension bundles its own copy but prefers a
-workspace-local install, so pinning is what keeps the editor and `npx prettier`
-on the same version. Without it the two drifted and disagreed about formatting,
-so files reformatted themselves back and forth between a save and a CLI run.
+**Prettier is pinned** as an exact devDependency in `frontend/package.json`.
+The extension includes its own copy, but it prefers a copy in the workspace.
+The pin keeps the editor and `npx prettier` on the same version. With two
+versions, the editor and the command line format the same file differently.
 
-Format-on-save is configured per language in `.vscode/settings.json`: Prettier
-for TS/TSX/CSS/JSON, Ruff for Python. Markdown is deliberately excluded —
-Prettier realigns every table in these docs, which is diff noise rather than a
-fix.
+Format on save is set for each language in `.vscode/settings.json`: Prettier
+for TS, TSX, CSS and JSON, and Ruff for Python. Markdown is excluded, because
+Prettier aligns every table in these documents again, which makes diffs
+without a fix.
 
-**Format-on-save is not lint-on-save, and the difference matters.**
-`ruff format` handles whitespace and line breaks only. `ruff check` is a
-separate tool with separate rules, and `editor.codeActionsOnSave` is what
-brings any of it to a save. Even then it applies only the fixes ruff marks
-*safe*: `if x == None:` is left exactly as written, because rewriting a
-comparison changes behaviour in cases ruff will not decide for you. The
-editor squiggle is what catches that one, not the save. Both actions are
-named `source.fixAll.ruff` and `source.organizeImports.ruff` rather than the
-unsuffixed forms, because Pylance also answers `organizeImports` for Python
-and the plain name leaves the winner unspecified.
+**Format on save is not lint on save.** `ruff format` changes only spaces and
+line breaks. `ruff check` is a separate tool with its own rules, and
+`editor.codeActionsOnSave` brings it to a save. Even then, it applies only the
+fixes that ruff marks *safe*. `if x == None:` stays as written, because a
+change to a comparison can change behavior. The editor's underline shows that
+one, not the save. The two actions are `source.fixAll.ruff` and
+`source.organizeImports.ruff`, not the forms without `.ruff`. Pylance also
+answers `organizeImports` for Python, so the plain name does not say which
+tool runs.
 
-**Line endings are pinned to LF in two places, and both are needed** (added
-2026-08-13). Every text file in the repo is stored as LF, but Git's
-`core.autocrlf=true` rewrites them to CRLF on checkout, and Prettier's
-`endOfLine` defaults to `lf` — so a fresh clone failed
-`npx prettier --check src/` on files nobody had touched.
+**Line endings are LF, set in two places, and both are necessary.** The
+repository stores every text file with LF. Prettier's `endOfLine` is `lf`,
+and Git's `core.autocrlf=true` writes CRLF on checkout, so a fresh clone fails
+`npx prettier --check src/` without these two settings:
 
-- `.gitattributes` (`* text=auto eol=lf`) governs files **Git** writes. Being
-  committed, it applies on every machine whatever that machine's
-  `core.autocrlf` is set to, so no per-developer Git config is required.
-  `text=auto` still lets Git detect binaries, so the audio fixtures under
-  `backend/tests/fixtures/` are untouched.
-- `"files.eol": "\n"` in `.vscode/settings.json` governs files the **editor**
-  creates, which no checkout rule ever sees. VS Code on Windows creates new
-  files with `\r\n`, and format-on-save does not rescue them: Prettier
-  normalizes the content while the editor writes the endings. Two new
-  components failed the format check on their first save before this was set.
+- `.gitattributes` (`* text=auto eol=lf`) controls the files that **Git**
+  writes. It is committed, so it applies on every machine, whatever that
+  machine's `core.autocrlf` is. `text=auto` still lets Git find binary files,
+  so the audio fixtures under `backend/tests/fixtures/` do not change.
+- `"files.eol": "\n"` in `.vscode/settings.json` controls the files that the
+  **editor** creates, which no checkout rule sees. VS Code on Windows creates
+  new files with `\r\n`, and format on save does not correct them: Prettier
+  changes the content, and the editor writes the line endings.
 
 ## Git configuration (global)
+
 ```
 user.name          = Curro
 user.email         = 254643964+FranciscoJavierCurroAlcalaSoler@users.noreply.github.com
 init.defaultBranch = main
 core.editor        = code --wait
 ```
-Credential helper: Git Credential Manager (set by the installer).
+
+Credential helper: Git Credential Manager, set by the Git installer.
 
 ## Repository
+
 | | |
 |---|---|
-| Remote | github.com/<username>/music-zamlr (private) |
-| Contents | Phase 0 scaffold committed: `backend/` (FastAPI skeleton + venv, `requirements.txt`) and `frontend/` (Vite React+TS, `package.json`), combined root `.gitignore`, README, this file. No LICENSE yet (parked; MIT lean). |
+| Remote | https://github.com/FranciscoJavierCurroAlcalaSoler/music-zamlr |
 
-## Setup choices worth remembering
-- Node installer "Tools for Native Modules" left unchecked (not needed; revisit only on a native-build error).
-- Python 3.14 chosen; 3.13 was the conservative alternative. The whole stack supports both.
+## Setup choices
 
-## Not tracked here (by design)
-These are captured by their own files and should not be duplicated here:
-- Python packages → `backend/requirements.txt` (or `pyproject.toml`)
-- Node packages → `frontend/package.json` + `package-lock.json`
+- The Node installer option "Tools for Native Modules" is not selected.
+  Nothing in the project needs it. Install it only if a native build fails.
+- Python 3.14. The whole stack also supports 3.13.
 
-System binaries have no lockfile, so they live in the Tools table above:
-`fpcalc` and `ffmpeg` are both recorded there as of 2026-09-05, and Monkey's
-Audio as of 2026-09-15.
+## Not tracked here
 
-**Regenerating `requirements.txt` on Windows: mind the encoding.** The file
-was stored as UTF-16LE with a BOM until 2026-09-05, because `pip freeze >
-requirements.txt` under Windows PowerShell 5.1 writes UTF-16 for `>`
-redirection. pip itself copes — it sniffs the BOM — so nothing was visibly
-broken for months. What broke quietly: `.gitattributes`' `* text=auto eol=lf`
-classifies the file as **binary** on account of the interleaved NUL bytes, so
-it was excluded from line-ending normalization and rendered as an unreadable
-blob in every diff, and any consumer without pip's BOM sniffing (uv, a
-non-pip Docker build, some dependency scanners) would have failed on it. Now
-plain UTF-8. To keep it that way, redirect explicitly:
+Each of these has its own file. Do not copy their contents into this file:
+
+- Python packages: `backend/requirements.txt`
+- npm packages: `frontend/package.json` and `frontend/package-lock.json`
+
+System programs have no lockfile, so the [Tools](#tools) table above records
+them.
+
+**Write `requirements.txt` as UTF-8.** Under Windows PowerShell 5.1, the
+redirect in `pip freeze > requirements.txt` writes UTF-16. Git then classifies
+the file as binary: it shows no diff, and it skips the line-ending rule. Tools
+other than pip can also fail to read it. Redirect it like this:
 
 ```
 pip freeze | Out-File -Encoding utf8 requirements.txt
 ```
-
-## Rebuilding from a clone
-After `git clone`:
-- Backend: `cd backend`, `py -m venv .venv`, activate it, `pip install -r requirements.txt`.
-- Frontend: `cd frontend`, `npm install`.
-- Run (two terminals): backend `fastapi dev main.py` (serves `:8000`); frontend `npm run dev` (serves `:5173`).
