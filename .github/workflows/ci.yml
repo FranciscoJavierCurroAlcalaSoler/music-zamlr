@@ -3,16 +3,11 @@ name: CI
 # Every branch, so a deliberate-failure branch proves the workflow works
 # without opening a pull request first.
 #
-# workflow_dispatch and schedule exist for the macOS leg of the backend
-# matrix, which does not run on an ordinary push. See the strategy block
-# below for why.
+# workflow_dispatch runs the whole workflow on demand, without a push.
 on:
   push:
   pull_request:
   workflow_dispatch:
-  schedule:
-    # Mondays, 06:00 UTC. Only ever runs on the default branch.
-    - cron: "0 6 * * 1"
 
 # A second push while the first run is still going cancels it, so the result
 # you are looking at always belongs to the newest commit.
@@ -48,16 +43,10 @@ jobs:
       # a cancelled leg cannot tell them apart.
       fail-fast: false
       matrix:
-        # macOS bills at 10x the Linux rate against the 2,000 free minutes a
-        # private repo gets, and a job is rounded up to the whole minute — so
-        # one macOS leg costs more than every other job in this file put
-        # together. It runs weekly and on demand instead of on every push.
-        # A public repository runs on standard runners without metering, and
-        # there this expression can become a plain list of all three.
-        os: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest","windows-latest"]') }}
-    # A hung job otherwise bills until the 6-hour default. On macOS that is
-    # 3,600 billed minutes, which is the whole monthly allowance twice over,
-    # from a single stuck run.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    # A hung job otherwise runs until the 6-hour default and keeps one of the
+    # account's concurrent job slots, of which macOS has the fewest. Every
+    # leg finishes in a few minutes, so 15 is generous.
     timeout-minutes: 15
     defaults:
       run:
