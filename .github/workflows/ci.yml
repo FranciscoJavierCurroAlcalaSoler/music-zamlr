@@ -35,13 +35,11 @@ jobs:
   backend:
     # The path conventions in this codebase are cross-platform claims —
     # casefold where the question is "could these collide on disk", exact
-    # match where it is "which row is this file" — and until now they were
-    # only ever executed on the Windows dev machine and on Linux. macOS is
-    # the third case and not a redundant one: its default APFS is
-    # case-insensitive like Windows but case-preserving with POSIX path
-    # semantics like Linux, so it is the only runner that can disagree with
-    # both. Phase 5 adds fpcalc, a per-platform system binary, which widens
-    # the surface further.
+    # match where it is "which row is this file". macOS is the third case
+    # and not a redundant one: its default APFS is case-insensitive like
+    # Windows but case-preserving with POSIX path semantics like Linux, so
+    # it is the only runner that can disagree with both. fpcalc, a
+    # per-platform system binary, widens the surface further.
     runs-on: ${{ matrix.os }}
     strategy:
       # False, deliberately. The default cancels the sibling legs as soon as
@@ -54,8 +52,8 @@ jobs:
         # private repo gets, and a job is rounded up to the whole minute — so
         # one macOS leg costs more than every other job in this file put
         # together. It runs weekly and on demand instead of on every push.
-        # Drop this expression for a plain three-OS list once the repo is
-        # public (§12), where standard runners are unmetered.
+        # A public repository runs on standard runners without metering, and
+        # there this expression can become a plain list of all three.
         os: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest","windows-latest"]') }}
     # A hung job otherwise bills until the 6-hour default. On macOS that is
     # 3,600 billed minutes, which is the whole monthly allowance twice over,

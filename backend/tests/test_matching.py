@@ -559,9 +559,9 @@ def test_an_unreadable_file_is_not_fingerprinted_twice(
 
 
 def test_a_fingerprint_mismatch_beats_a_matching_tag(make_track, fake_fingerprint):
-    # The remaster case, and the one Phase 5 exists to stop. Same artist, same
-    # title, a length inside the tolerance: the tag tier would pair these
-    # confidently. The audio says they are different recordings.
+    # The remaster case, which only the fingerprint tier can stop. Same
+    # artist, same title, a length inside the tolerance: the tag tier would
+    # pair these confidently. The audio says they are different recordings.
     #
     # Theirs is FLAC against my MP3 on purpose. That makes the un-fixed
     # outcome upgrade_available, which with the delete action destroys my
@@ -1781,8 +1781,8 @@ def test_a_higher_sample_rate_is_an_upgrade(make_track):
 
 # Both directions, because a lexicographic order fails only one of them: bit
 # depth first gets the first case wrong, sample rate first gets the second.
-# Theirs carries the higher bitrate in both, so the old bitrate rule would
-# call either one an upgrade.
+# Theirs carries the higher bitrate in both, so a rule that let bitrate
+# decide between lossless files would call either one an upgrade.
 @pytest.mark.parametrize(
     "mine_bit_depth, mine_sample_rate, theirs_bit_depth, theirs_sample_rate",
     [

@@ -107,9 +107,9 @@ jobs:
       # from acoustid/ffmpeg-build's v8.0-1 release, and that repository's
       # common.sh at the same tag fetches ffmpeg-8.0.tar.gz from ffmpeg.org.
       #
-      # Pinned by hash. GitHub generates tag archives on demand and changed
-      # their bytes once before; a mismatch stops the release, which is the
-      # right direction for a file the release is obliged to carry.
+      # Pinned by hash. GitHub generates tag archives on demand and does not
+      # promise the same bytes every time. A mismatch stops the release,
+      # which is the right direction for a file the release must carry.
       - name: Collect the fpcalc sources
         run: |
           # The three files below belong to fpcalc 1.6.1 and to nothing
@@ -200,9 +200,9 @@ jobs:
       # ~/.cargo/bin, so only the first run pays for the compile.
       - run: cargo install cargo-about --version 0.9.2 --locked --features cli
 
-      # Generated here rather than committed. A committed copy fell behind
-      # Cargo.lock once already and listed none of the dialog and opener
-      # crates; generated from the lockfile being built, it cannot.
+      # Generated here rather than committed. A committed copy falls behind
+      # Cargo.lock without a sign whenever a crate is added; generated from
+      # the lockfile being built, it cannot.
       - name: Generate the Rust notices
         working-directory: frontend/src-tauri
         run: cargo about generate about.hbs -o "${{ runner.temp }}/THIRD-PARTY-RUST.txt"

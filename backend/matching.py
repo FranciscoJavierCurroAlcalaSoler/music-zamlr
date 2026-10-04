@@ -574,7 +574,7 @@ def attempt_fingerprint_match(
     #
     # And it declines with None when the shorter fingerprint is under
     # MIN_OVERLAP_FRAMES — about 12 seconds of audio. That is "I cannot tell",
-    # not "these differ", and the difference now decides whether the tag tier
+    # not "these differ", and the difference decides whether the tag tier
     # gets its turn. fingerprints_match returns a bool and so collapses the
     # two, which is why this reads the rate itself and applies
     # SAME_RECORDING_MAX_ERROR_RATE below rather than calling that predicate.
@@ -599,8 +599,7 @@ def attempt_fingerprint_match(
     # the tag tier below must not get a second opinion: its evidence is the
     # metadata, and the audio has already contradicted it. A remaster carrying
     # the original's tags and a length inside the tolerance is exactly this
-    # case, and it is the one §7's Phase 3.5 item 4 said only Phase 5 could
-    # settle.
+    # case, and only the audio can settle it.
     #
     # MISSING rather than NEEDS_REVIEW because there is nothing to ask. The
     # review dialog's only question is which of my files this supersedes, and

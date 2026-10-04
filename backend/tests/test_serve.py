@@ -193,14 +193,13 @@ def test_the_announced_log_path_is_the_file_that_was_written(running_server):
 
 
 def test_the_file_is_the_only_handler_left(tmp_path, restore_root_logger):
-    # Stated here rather than left to the process it runs in. scanner.py
-    # calls basicConfig at import, so a console handler and an INFO root
-    # level both arrive by accident; these two assertions are what make the
-    # function answerable for them.
+    # Stated here rather than left to the process it runs in. Any import can
+    # install a console handler or raise the root level, and these two
+    # assertions are what make the function answerable for both.
     root_logger = logging.getLogger()
     # Put back to the level a fresh interpreter starts at. Without this the
-    # assertion below reads scanner.py's basicConfig, not this function, and
-    # passes with the level line deleted.
+    # assertion below reads whatever level the process already had, not what
+    # this function set.
     root_logger.setLevel(logging.WARNING)
 
     configure_file_logging(str(tmp_path / "logs"))

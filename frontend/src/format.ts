@@ -26,9 +26,8 @@ export function formatCount(value: number): string {
  * rather than failing outright.
  *
  * Lives here, not in DiffProgressView, so the arithmetic can be tested
- * without a DOM. It shipped once returning 0 for 1240 of 3500, because the
- * multiplication by 100 was missing, and nothing but running a long
- * comparison could have noticed.
+ * without a DOM. A missing multiplication by 100 returns 0 for 1240 of 3500,
+ * and nothing short of a long comparison would show it on screen.
  */
 export function progressPercent(done: number, total: number): number {
   return total === 0 ? 0 : Math.round((done / total) * 100);

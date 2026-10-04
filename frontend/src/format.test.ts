@@ -61,11 +61,10 @@ describe("shortenPath", () => {
 });
 
 describe("progressPercent", () => {
-  // The regression. This shipped returning 0, because the multiplication by
-  // 100 was missing, and every other case below still looked plausible: 0 of
-  // anything is 0, and a finished run rounded to 1. Only a value in the
-  // middle of a run tells the two apart, which is why the bar sat empty
-  // through an entire comparison without anything failing.
+  // The case that matters. Without the multiplication by 100, every other
+  // case below still looks plausible: 0 of anything is 0, and a finished run
+  // rounds to 1. Only a value in the middle of a run tells the two apart,
+  // and without it the bar would sit empty through a whole comparison.
   it("scales to 100, not to 1", () => {
     expect(progressPercent(1240, 3500)).toBe(35);
   });

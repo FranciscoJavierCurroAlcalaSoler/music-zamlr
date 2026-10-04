@@ -56,10 +56,10 @@ def configure_file_logging(log_directory: str) -> str:
     )
     handler.setFormatter(logging.Formatter(LOG_FORMAT))
     root_logger = logging.getLogger()
-    # The file replaces every other handler rather than joining them.
-    # scanner.py calls logging.basicConfig at import, which leaves a handler
-    # writing to the console, and this process has no console: its stdout is
-    # a pipe the shell reads for the announcements above. A running server
+    # The file replaces every other handler rather than joining them. A
+    # handler that any imported module installs writes to the console, and
+    # this process has no console: its stdout is a pipe the shell reads for
+    # the announcements above. A running server
     # logs a line per request, and a pipe nobody drains fills and then
     # blocks the process that writes to it.
     for existing in list(root_logger.handlers):

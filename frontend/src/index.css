@@ -2,10 +2,9 @@
    the body margin and the type scale, so almost nothing belongs here —
    component styling goes in that component's `sx` prop.
 
-   This file previously held the Vite starter template's stylesheet, whose
-   `#root { text-align: center }` centred every label in the app and whose
-   `code { display: inline-flex; padding: 4px 8px; background: ... }` turned
-   inline code into a heavy chip. Both were fighting MUI. */
+   Global rules here fight MUI rather than help it: a `#root` with
+   `text-align: center` centres every label in the app, and a styled `code`
+   selector turns MUI's inline code into a heavy chip. */
 
 #root {
   max-width: 1280px;

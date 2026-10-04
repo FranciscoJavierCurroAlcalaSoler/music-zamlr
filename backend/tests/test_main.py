@@ -1876,7 +1876,7 @@ def test_resolution_deletes_the_chosen_file_only(
 
     body = stream.done
     # Copy first, then the destructive step: the order is the safety
-    # mechanism, not a formatting detail (§5b).
+    # mechanism, not a formatting detail.
     assert [op["action"] for op in body["operations"]] == ["copy", "delete"]
     assert body["operations"][0]["source"] == their_track.file_path
     assert body["operations"][1]["source"] == chosen.file_path
@@ -1920,9 +1920,10 @@ def test_resolution_naming_a_file_that_is_not_a_candidate_is_rejected(
         ),
     )
 
-    # The §5c guard: the server re-derives the candidate set, so a client can
-    # only ever pick a wrong candidate among genuine ones, never any file it
-    # likes. If this ever passes silently the protection is gone.
+    # The guard against trusting the client: the server re-derives the
+    # candidate set, so a client can only ever pick a wrong candidate among
+    # genuine ones, never any file it likes. If this ever passes silently the
+    # protection is gone.
     detail = stream.error["detail"]
     assert unrelated.file_name in detail
     assert their_track.file_name in detail

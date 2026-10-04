@@ -20,8 +20,8 @@ else:
     # Anchored to this file's own directory, not the working directory: a
     # relative "db/music.db" silently resolves to a different database when the
     # server is started from the repo root instead of backend/, and SQLite
-    # creates the empty file rather than failing. Tauri (Phase 7) picks the
-    # working directory itself, so this cannot stay caller-dependent.
+    # creates the empty file rather than failing. The desktop shell picks
+    # the working directory itself, so this cannot depend on the caller.
     DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "db")
     DB_PATH = os.path.join(DB_DIR, DB_FILE)
 
@@ -34,7 +34,7 @@ engine = create_engine(URL.create("sqlite", database=DB_PATH))
 # Anchored to this file for the reason DB_DIR is: the working directory
 # belongs to whoever started the process, and the shell picks its own. In a
 # frozen build this directory is the one PyInstaller unpacks into, which is
-# where the spec file puts alembic.ini and the revisions beside it.
+# where music-zamlr-backend.spec puts alembic.ini and the revisions.
 ALEMBIC_INI_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "alembic.ini"
 )

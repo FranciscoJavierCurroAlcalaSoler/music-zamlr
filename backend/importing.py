@@ -9,8 +9,9 @@ Two halves, deliberately kept apart:
 
 The plan is an *ordered* list, and the order is the safety mechanism rather
 than a formatting detail: a destructive operation is positioned so it only
-runs once its replacement is safely in place. See spec §5b for the full
-rationale, including why the in-place upgrade inverts the usual order.
+runs once its replacement is safely in place. An in-place upgrade with the
+move action reverses the usual order, and ``plan_import`` says why at the
+point where it does.
 """
 
 import os
@@ -146,8 +147,9 @@ def plan_import(
     without a filesystem, and so tests don't inherit the host OS's
     case-sensitivity, which differs between Windows and Linux CI.
 
-    Note this checks the disk at plan time, so a file appearing between
-    preview and execution is not caught (see spec §12).
+    Note this checks the disk at plan time. The import plans again just
+    before it runs, so the gap is only between that plan and each copy, but
+    a file that appears inside it is overwritten.
     """
     # Comparisons below use == / != rather than identity, so a raw string
     # ("delete") works as well as an UpgradeAction member. Don't switch to

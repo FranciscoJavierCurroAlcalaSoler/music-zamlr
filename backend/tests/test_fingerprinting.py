@@ -175,8 +175,7 @@ def stub_fpcalc(monkeypatch):
     `compute_fingerprint` asks `_find_fpcalc` first, so on a machine with no
     fpcalc installed it returns None and the stub is never consulted — the
     test then passes or fails according to what is on PATH, which is the one
-    property a stub exists to remove. Three tests failed exactly that way
-    before this fixture existed.
+    property a stub exists to remove.
 
     Pass `found=False` for the "fpcalc is not installed" path. The returned
     record still reports `params is None` afterwards, which is how a test

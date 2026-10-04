@@ -39,8 +39,8 @@ export function isDesktop(): boolean {
  * apply in the app would be worse than failing: with anything at all
  * listening on 8000 — a development backend, another copy of this tool —
  * the window would quietly talk to it instead of to the backend it started,
- * showing someone else's collections over its own empty database. That
- * happened before this guard existed and it took a log file to notice.
+ * showing someone else's collections over its own empty database, with
+ * nothing on screen to say so.
  *
  * Throwing is right because the splash already handles it: waitForBackend
  * retries, and a failure there is the loud one with the address and the log

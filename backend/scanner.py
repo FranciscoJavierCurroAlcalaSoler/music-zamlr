@@ -429,7 +429,7 @@ def scan_folder(
     # key on a case-sensitive filesystem, leaving the loser unreachable and
     # so never updated and never deleted. The trade is that a case-only
     # rename on Windows reads as a delete plus an insert, which costs that
-    # file's cached hash and nothing else. See spec §12.
+    # file's cached hash and nothing else.
     existing_by_path = {os.path.normpath(track.file_path): track for track in tracks}
     expected_keys = set(existing_by_path.keys())
     visited_keys = set()
@@ -451,8 +451,8 @@ def scan_folder(
             scanned_count += 1
             file_key = os.path.normpath(os.path.join(root, file))
             # Both conditions in one place, so there is exactly one branch that
-            # counts a file as not-audio. That counter now means "seen and not
-            # a track" rather than only "wrong extension".
+            # counts a file as not-audio. So the counter means "seen and not a
+            # track", not only "wrong extension".
             is_audio = file.lower().endswith(
                 tuple(ALLOWED_EXTENSIONS)
             ) and not file.startswith(APPLE_DOUBLE_PREFIX)

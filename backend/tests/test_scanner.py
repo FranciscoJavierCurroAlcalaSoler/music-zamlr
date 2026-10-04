@@ -902,8 +902,8 @@ def test_scan_clears_hash_when_file_changes(
 
     # Retag in place rather than swapping in a different file: file_path is
     # the row's identity, so a swap would have to keep the same path anyway,
-    # and retagging keeps the format honest (the old version copied a FLAC
-    # onto a .mp3 path, leaving format="MP3" describing FLAC audio).
+    # and retagging keeps the format honest (copying a FLAC onto a .mp3 path
+    # would leave format="MP3" describing FLAC audio).
     audio = mutagen.File(str(scanned_file), easy=True)
     audio["title"] = "Retagged Title"
     audio.save()
@@ -963,7 +963,7 @@ def test_scan_treats_case_only_rename_as_a_new_file(
     # Casefolding the key would make this an update instead, at the cost of
     # collapsing two genuinely distinct files into one row on a
     # case-sensitive filesystem. Pinning the delete-plus-insert here so the
-    # keying can't quietly revert. See spec §12.
+    # keying can't quietly revert.
     renamed_file = tmp_path / "TEST_TRACK.MP3"
     os.replace(scanned_file, renamed_file)
 
@@ -1129,9 +1129,9 @@ def test_scan_progress_runs_once_for_each_file(
     for name, fixture in copies.items():
         shutil.copy(fixtures_dir / fixture, tmp_path / name)
     # Cover art is what gives this test the power to fail. The reported path
-    # is computed once for every file, but only the audio branch used to
-    # compute it, so a folder whose first entry is not audio raised
-    # UnboundLocalError. Without a non-audio file here, that branch never runs.
+    # is computed once for every file. Computed in the audio branch alone, it
+    # would raise UnboundLocalError for a folder whose first entry is not
+    # audio. Without a non-audio file here, that branch never runs.
     (tmp_path / "cover.jpg").write_text("not audio")
 
     files_on_disk = {
@@ -1150,8 +1150,8 @@ def test_scan_progress_runs_once_for_each_file(
     paths = [e.current_path for e in events if e.current_path is not None]
 
     # scanned, not added: every file gets a report, audio or not. The two
-    # agree only while every file is both audio and new, which is exactly the
-    # fixture this test deliberately no longer has.
+    # agree only while every file is both audio and new, which is exactly
+    # what this fixture deliberately avoids.
     assert len(paths) == result.scanned
     assert set(paths) == files_on_disk
 
@@ -1221,9 +1221,9 @@ def test_scan_skips_apple_double_sidecars(
 
     result = scan_folder(str(tmp_path), collection_id=test_collection, session=session)
 
-    # Not on unreadable_files, which is the point. Before this guard, mutagen
-    # raised HeaderNotFoundError on every sidecar and the scan reported a
-    # warning naming thousands of files that were never broken.
+    # Not on unreadable_files, which is the point. Without the guard, mutagen
+    # raises HeaderNotFoundError on every sidecar and the scan reports a
+    # warning naming thousands of files that are not broken.
     assert result.unreadable_files == []
     assert result.scanned == 2
     assert result.skipped_non_audio == 1
@@ -1255,8 +1255,8 @@ def test_a_changed_file_clears_the_fingerprint(
 
     # Retag in place rather than swapping in a different file: file_path is
     # the row's identity, so a swap would have to keep the same path anyway,
-    # and retagging keeps the format honest (the old version copied a FLAC
-    # onto a .mp3 path, leaving format="MP3" describing FLAC audio).
+    # and retagging keeps the format honest (copying a FLAC onto a .mp3 path
+    # would leave format="MP3" describing FLAC audio).
     audio = mutagen.File(str(scanned_file), easy=True)
     audio["title"] = "Retagged Title"
     audio.save()

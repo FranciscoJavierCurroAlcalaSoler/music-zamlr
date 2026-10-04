@@ -28,8 +28,8 @@ target_metadata = SQLModel.metadata
 def run_migrations(connection) -> None:
     # render_as_batch because the database is SQLite, whose ALTER TABLE
     # cannot drop or alter a column. Batch mode copies the table into a new
-    # one instead. Set now rather than when a migration first needs it: a
-    # revision written without it was never tried under batch rules.
+    # one instead. Set for every revision, not only for the ones that need
+    # it: a revision written without it is never tried under batch rules.
     context.configure(
         connection=connection,
         target_metadata=target_metadata,

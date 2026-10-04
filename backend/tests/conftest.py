@@ -382,10 +382,10 @@ def parse_sse(body: str) -> StreamFrames:
 def event_stream(client, session):
     """Call a streaming endpoint, consume the stream, and return its frames.
 
-    The scan endpoints, /api/diff and both import endpoints no longer answer
-    with JSON. They stream Server-Sent Events, and the final frame carries
-    what the response body used to, so a test that read response.json() reads
-    .done instead.
+    The scan endpoints, /api/diff and both import endpoints stream
+    Server-Sent Events rather than answer with JSON. The final frame carries
+    the result, so a test reads .done where it would otherwise read
+    response.json().
 
     The method is a parameter because the scans and imports are POSTs while
     the diff is a GET: the diff's only write is caching hashes onto rows that
@@ -393,7 +393,7 @@ def event_stream(client, session):
 
     Success paths only. A request that fails validation never opens a stream,
     so those tests keep using client.get or client.post and a status code —
-    which is what makes them the regression test for "validate first".
+    which is what makes them the tests for "validate first".
     """
 
     def _event_stream(url, method="POST", **kwargs) -> StreamFrames:

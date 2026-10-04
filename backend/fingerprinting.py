@@ -64,8 +64,8 @@ MIN_OVERLAP_FRAMES = 80
 # At or under this rate, two fingerprints are the same recording. Not a
 # delicate number: the measured gap runs from 0.055 for a re-encode up to
 # 0.47 for an unrelated track, so anything from roughly 0.10 to 0.25 divides
-# them. Phase 6's configurable ranking is the one caller that should ever
-# need to move it.
+# them. No setting moves it: the format order decides which copy is better,
+# never whether two copies are the same recording.
 SAME_RECORDING_MAX_ERROR_RATE = 0.15
 
 FPCALC_LENGTH_SECONDS = 120

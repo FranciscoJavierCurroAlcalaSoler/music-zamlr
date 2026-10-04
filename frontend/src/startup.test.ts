@@ -149,7 +149,7 @@ describe("startupFailureMessage", () => {
     expect(message).toContain(logPath);
     // The join itself. Every other assertion here reads a substring that
     // sits inside one sentence, so none of them can see two sentences run
-    // together, which is how "again.The log file" shipped past them once.
+    // together, as in "again.The log file".
     expect(message).toContain("again. The log file");
   });
 

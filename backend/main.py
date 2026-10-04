@@ -425,7 +425,8 @@ def _preview_worker(
 ) -> tuple[str, dict]:
     """Plan an import without touching anything. Runs on a worker thread.
 
-    One phase only: the whole cost is the diff _build_plan recomputes (§5c).
+    One phase only: the whole cost is the diff _build_plan recomputes, because
+    the server never trusts a classification the client sends.
     It still reports a phase, so both import endpoints share one payload shape
     and one progress component on the frontend.
 
@@ -465,7 +466,7 @@ def _execute_worker(
 
     Two phases, one stream, one done frame. The plan is rebuilt here rather
     than carried over from a preview: the server recomputes rather than
-    trusting a client-supplied classification (§5c), and there is no preview
+    trusting a client-supplied classification, and there is no preview
     token, so an execute cannot assume a preview ever happened.
 
     The phases differ in more than duration. Nothing on disk changes during
