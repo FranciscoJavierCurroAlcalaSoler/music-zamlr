@@ -86,6 +86,20 @@ jobs:
       - run: python -m pytest tests/test_packaged_backend.py
         working-directory: backend
 
+      # The binary is a GPL work because it bundles mutagen, so the release
+      # carries the source of every Python package inside it. Here, straight
+      # after the build, because the list is read from PyInstaller's build
+      # tables and the versions from this job's Python, which is the one
+      # that produced the binary.
+      - name: Collect the Python sources
+        working-directory: backend
+        run: python collect_python_sources.py "${{ runner.temp }}/python-sources"
+
+      - name: Archive the Python sources
+        run: |
+          Compress-Archive -Path "${{ runner.temp }}/python-sources/*" `
+            -DestinationPath "music-zamlr_${env:VERSION}_python-sources.zip"
+
       - run: python stage_backend.py
         working-directory: backend
 
@@ -128,7 +142,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create $env:GITHUB_REF_NAME "music-zamlr_${env:VERSION}_x64-setup.exe" `
+          gh release create $env:GITHUB_REF_NAME `
+            "music-zamlr_${env:VERSION}_x64-setup.exe" `
+            "music-zamlr_${env:VERSION}_python-sources.zip" `
             --draft `
             --title "Music Zamlr ${env:VERSION}" `
             --generate-notes
