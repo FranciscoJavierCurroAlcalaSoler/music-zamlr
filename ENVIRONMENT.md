@@ -18,8 +18,8 @@ Last updated: 2026-10-04
 
 | Item | Version | Installed with |
 |---|---|---|
-| Python | 3.14.6 | Python Install Manager (`py install 3.14`) |
-| Node.js | 24.18.0 (Active LTS) | The official LTS installer, which includes npm |
+| Python | 3.14.8 | Python Install Manager (`py install 3.14`). Update with `py install --update 3.14`, then `py -m venv --upgrade backend\.venv`. |
+| Node.js | 24.21.0 (Active LTS), npm 11.19.0 | The official Windows Installer (`.msi`) from nodejs.org, which includes npm. Install a newer version over the old one with the same installer. |
 | Rust | rustc 1.99.0, rustup 1.29.1 | `winget install --id Rustlang.Rustup --exact`. Default toolchain `stable-x86_64-pc-windows-msvc`. Only the desktop shell needs it. `cargo` is on `PATH` only in shells started after the installation. **The Rust build needs an antivirus exclusion on this machine**: see [Building the shell](#building-the-shell-an-antivirus-exclusion-is-necessary). |
 
 ## Tools
@@ -136,8 +136,11 @@ Credential helper: Git Credential Manager, set by the Git installer.
 
 ## Setup choices
 
-- The Node installer option "Tools for Native Modules" is not selected.
-  Nothing in the project needs it. Install it only if a native build fails.
+- The Node installer option "Automatically install the necessary tools"
+  (Tools for Native Modules) is not selected. Nothing in the project needs
+  it. It runs a script that installs Chocolatey, a second Python, the legacy
+  Python Launcher and Visual Studio Build Tools, and the launcher in
+  `C:\Windows` then replaces the Python Install Manager's `py`.
 - Python 3.14. The whole stack also supports 3.13.
 
 ## Not tracked here
