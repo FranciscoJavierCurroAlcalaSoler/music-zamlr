@@ -10,26 +10,30 @@ received, and the tracks where the friend's copy is better than yours.
 
 ## How it works
 
-The backend runs on your own computer. A browser cannot read a local drive,
-and a remote server cannot reach one. The FastAPI backend therefore reads your
-drives directly with normal file operations. The React interface talks to it at
-`localhost`.
+Music Zamlr is a desktop program for Windows. It has two parts. The window
+shows the interface. A backend program reads your drives with normal file
+operations and keeps a database of your collections. The window starts the
+backend when it opens and stops it when it closes.
 
+Both parts run only on your computer. They send nothing over the network.
+
+The same program also runs on Linux and macOS, from its source code, in a
+browser. See [Linux and macOS](#linux-and-macos).
+
+- Window: Tauri
 - Backend: FastAPI, SQLModel, SQLite
-- Frontend: React, TypeScript, MUI, Vite
-- Acoustic fingerprints: `fpcalc` from Chromaprint
+- Interface: React, TypeScript, MUI, Vite
+- Acoustic fingerprints: `fpcalc` from Chromaprint, included in the installer
 
 ## Requirements
 
-- Python 3.14
-- Node.js 24
-- `fpcalc`, the command-line program of Chromaprint. The tool uses it to
-  compare the sound of two files. Without it, the tool compares tags only and
-  shows a warning.
-- Both collections must be folders on the computer that runs the backend. An
-  external USB drive is enough. Read
-  [A collection keeps its path](#a-collection-keeps-its-path) before you use
-  one.
+- Windows 10 or Windows 11, 64-bit.
+- Microsoft Edge WebView2. Windows 11 includes it, and most Windows 10
+  computers have it. If it is missing, the installer downloads it. The
+  installation then needs an internet connection.
+- Both collections must be folders on this computer. An external USB drive is
+  enough. Read [A collection keeps its path](#a-collection-keeps-its-path)
+  before you use one.
 - Audio files in the formats `.mp3`, `.flac`, `.wav`, `.aif` or `.aiff`,
   `.aac`, `.opus`, `.tta`, `.ape`, `.tak`, `.ofr`, `.mpc`, `.wv`, `.wma`,
   `.dsf`, `.dff`, `.m4a`, or `.ogg`. An `.m4a` file must hold ALAC or AAC
@@ -41,67 +45,84 @@ drives directly with normal file operations. The React interface talks to it at
 
 ## Install
 
-1. Clone the repository.
-2. Install the backend dependencies:
+1. Open the
+   [Releases page](https://github.com/FranciscoJavierCurroAlcalaSoler/music-zamlr/releases).
+   Download `music-zamlr_<version>_x64-setup.exe` from the newest release.
+2. Run the file. Windows can show a dialog with the title **Windows protected
+   your PC**. At first, the dialog has only the button **Don't run**. Select
+   **More info**. The dialog then shows **Publisher: Unknown publisher** and a
+   second button. Select **Run anyway**.
+3. Select **Next**. The installer puts the program in
+   `%LOCALAPPDATA%\Music Zamlr`. It installs for your user account only and
+   does not ask for administrator rights.
+4. On the last page, keep **Run Music Zamlr** selected to start the program.
+   Select **Create desktop shortcut** if you want an icon on the desktop.
 
-```
-cd backend
-py -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-```
+Windows shows the dialog in step 2 because the installer has no code
+signature. A code signature costs money every year, and this project is free.
 
-3. Install the frontend dependencies:
+Start the program from the Start menu. Only one copy of the program runs at a
+time. If you start it again, the open window comes to the front.
 
-```
-cd frontend
-npm install
-```
+## Update
 
-4. Install `fpcalc` with the package manager of your system:
+The program does not update itself. To update it, download the installer of
+the newer version from the Releases page and run it. The installer replaces
+the old version. Your collections and your settings stay.
 
-```
-winget install --id AcoustID.Chromaprint --exact    # Windows
-brew install chromaprint                            # macOS
-sudo apt install libchromaprint-tools               # Debian and Ubuntu
-```
+> **Note:** Only one version exists, so nobody has installed a newer version
+> over an older one yet. Your data is in a separate folder, which an
+> installation does not change (see [Where your data is](#where-your-data-is)).
+> To be safe, make a backup of that folder before you update.
 
-On Windows, do not use the Chocolatey package. It installs version 1.1, which
-is more than ten years old. The automated tests use the version that
-`FPCALC_VERSION` names in `.github/workflows/ci.yml`.
+## Where your data is
 
-5. Open a new terminal. Then make sure that this command shows a version:
+The program keeps its data in `%APPDATA%\com.zamlr.music`:
 
-```
-fpcalc -version
-```
+- `music.db` holds your collections, the scanned tracks, the stored hashes
+  and fingerprints, and the order of the formats.
+- `logs\music-zamlr.log` is the log of the backend program. Attach it to a
+  bug report.
 
-A terminal that was open before the installation does not find `fpcalc`. For
-the same reason, start the backend in a new terminal.
+When the program shows an error, the message gives the path of the log file.
+The **Open folder** button next to it opens that folder in Explorer.
 
-## Run
+To make a backup, close the program and copy the folder. To start again with
+no collections, close the program and delete the folder. The import logs are
+not in this folder. Each import writes its log into its destination folder.
 
-Open two terminals. Start the backend in the first one:
+## Uninstall
 
-```
-cd backend
-fastapi dev main.py
-```
+Open **Settings > Apps** in Windows, select **Music Zamlr**, and then select
+**Uninstall**. You can also run the installer again and select **Uninstall
+Music Zamlr**.
 
-Start the frontend in the second one:
+The uninstaller shows the option **Delete the application data**. It is not
+selected, so your data stays in `%APPDATA%\com.zamlr.music`. If you install
+the program again later, it finds your collections there. Select the option
+to delete that folder too.
 
-```
-cd frontend
-npm run dev
-```
+## Linux and macOS
 
-Then open `http://localhost:5173` in a browser. The backend answers on port
-8000. The frontend expects it there.
+Music Zamlr has no installer for Linux or macOS yet. The program runs on both
+from its source code, in a browser, and it does the same scans, comparisons,
+and imports. The automated tests of the backend run on Linux, macOS, and
+Windows.
+
+To install and start it, obey
+[Running from source](CONTRIBUTING.md#running-from-source) in CONTRIBUTING.md.
+Two things are different from the Windows program:
+
+- You start the backend and the interface in two terminals, and you open the
+  interface in a browser.
+- The **Browse…** buttons are only in the desktop window. In a browser, type
+  the path of each folder.
 
 ## Use
 
-1. Add a collection. Give it a name and the path to its root folder. The
-   scanner reads every audio file and stores the tags and the technical data.
+1. Add a collection. Give it a name and the path to its root folder. Select
+   **Browse…** to choose the folder. The scanner reads every audio file and
+   stores the tags and the technical data.
 2. Add the second collection in the same way.
 3. Select both collections and start a comparison. The first comparison is the
    slow one, because it reads files to compare them. The tool stores hashes and
@@ -161,9 +182,9 @@ files.
 
 ### Your selection is not saved
 
-A browser refresh clears the tracks that you selected and your answers in the
-review dialog. A new comparison clears them too. Do a review and its import in
-one session.
+If you close the program or reload the window, the program clears the tracks
+that you selected and your answers in the review dialog. A new comparison
+clears them too. Do a review and its import in one session.
 
 ## How the tool decides that two tracks are the same
 
@@ -314,9 +335,13 @@ select the wrong row, but it cannot delete the wrong file. The server holds
 its own answer and compares the request against it.
 
 **Progress arrives over Server-Sent Events.** A scan, a comparison, and an
-import each stream their progress to the browser and end with one result. A
-job registry can survive a lost connection, but it also needs a job table,
-identifier generation, and an expiry policy. Nothing else here needs those.
+import each send their progress to the interface on one open connection, and
+the last message carries the result. Another common design starts the work in
+the background, gives it a number, and lets the interface ask about that
+number again and again. That design continues if the connection breaks. But
+it needs a table of the work that runs, a way to make the numbers, and a rule
+that deletes old work. Nothing else in the program needs these, so the program
+does not use that design.
 
 **Nothing is overwritten in silence.** Two files with the same destination
 name get a numbered suffix, in the way Windows Explorer does it. A file is
@@ -341,8 +366,9 @@ space before you confirm.
   the volume behind it. If your destination folder is a mount point for
   another disk, the warning can count a move into `_superseded` as free when
   it is not.
-- Do not scan one collection from two browser tabs at the same time. The tool
-  does not prevent it, and one of the scans can fail.
+- In a browser on Linux or macOS, do not scan one collection from two tabs at
+  the same time. The tool does not prevent it, and one of the scans can fail.
+  The Windows program cannot do this, because only one copy of it runs.
 - A TrueAudio (`.tta`) file reports no bit depth. The tool then cannot compare
   two TTA files of one recording, so you already have the track. The result
   table shows no bitrate for a TTA file.
@@ -364,13 +390,25 @@ space before you confirm.
 
 ## Status
 
-The scan, the comparison, and the import all work, and the browser shows live
-progress for each. The comparison uses file hashes, acoustic fingerprints, and
-tags. The **Settings** tab holds the order of the formats.
-
-A desktop package will come next. It will include `fpcalc`, and you will not
-install it yourself.
+Version 0.1.0 is the first release. The scan, the comparison, and the import
+all work, and each shows its progress. The comparison uses file hashes,
+acoustic fingerprints, and tags. The **Settings** tab holds the order of the
+formats.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+The source code in this repository is under the MIT license. See
+[LICENSE](LICENSE).
+
+The installed program contains parts under other licenses:
+
+- The backend program contains mutagen, which is under the GNU General Public
+  License, version 2 or later. The backend program is therefore distributed
+  as a whole under the GNU General Public License, version 3 or later. See
+  [licenses/GPL-3.0.txt](licenses/GPL-3.0.txt).
+- `fpcalc` contains FFmpeg. It is under the GNU Lesser General Public License,
+  version 2.1.
+
+Each release on the Releases page includes the complete source code of both,
+and the file `THIRD-PARTY-NOTICES.txt` with every license text. The installer
+also puts that file in the installation folder.
