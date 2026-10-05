@@ -1,4 +1,5 @@
 {
+  "mainBinaryName": "music-zamlr",
   "bundle": {
     "targets": ["deb"]
   }

@@ -105,18 +105,22 @@ jobs:
 
       # A package that dropped the execute permission installs without an
       # error, and the app then cannot start its backend. Nothing but the
-      # package's own file list shows that before an installation.
+      # package's own file list shows that before an installation. The
+      # shell's own name is checked too: without mainBinaryName in
+      # tauri.linux.conf.json it is installed as /usr/bin/app, after the
+      # Cargo package, where another package can claim the same name.
       - name: Check the programs can run inside the package
         run: |
           deb=$(ls frontend/src-tauri/target/release/bundle/deb/*.deb)
           listing=$(dpkg-deb -c "$deb")
-          for program in music-zamlr-backend fpcalc; do
-            if ! grep -qE "^-rwx.*/backend/${program}\$" <<< "$listing"; then
+          for program in usr/bin/music-zamlr backend/music-zamlr-backend backend/fpcalc; do
+            if ! grep -qE "^-rwx.*/${program}\$" <<< "$listing"; then
               echo "::error::$program is missing from $deb or cannot run"
               exit 1
             fi
           done
           dpkg-deb -I "$deb"
+          grep -v /_internal/ <<< "$listing"
 
       - uses: actions/upload-artifact@v7
         with:
