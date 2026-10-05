@@ -6,10 +6,17 @@ from pathlib import Path
 
 import pytest
 
+import write_notices
 from write_notices import (
     COLLECTED_TABLE,
+    GLIBC_TARBALL,
+    PLATFORMS,
+    current_platform,
+    fpcalc_runtime_section,
     licence_paths,
     npm_sections,
+    preamble,
+    python_licence,
     system_sections,
     tarball_text,
 )
@@ -161,3 +168,94 @@ def test_a_package_without_a_copyright_file_stops_the_release(tmp_path):
 
     with pytest.raises(LookupError, match="zlib1g"):
         system_sections(build_dir, find_package, _docs(tmp_path))
+
+
+def _unwrapped(text):
+    # Phrases are checked without the line breaks, which fall wherever the
+    # width puts them.
+    return " ".join(text.split())
+
+
+def test_the_windows_preamble_names_its_files_and_runtimes():
+    text = preamble("windows")
+
+    assert "backend/fpcalc.exe" in text
+    assert "MinGW-w64 runtime" in _unwrapped(text)
+    assert "MSVCP140.dll" in text
+    assert "GNU C Library" not in _unwrapped(text)
+
+
+def test_the_linux_preamble_names_its_files_and_runtimes():
+    # A Linux user reading ".exe" paths could not find a single file named.
+    # The paths are checked in the wrapped text on purpose: "Music Zamlr"
+    # holds a space, where a line break would split a path in two.
+    text = preamble("linux")
+
+    assert "/usr/lib/Music Zamlr/backend/fpcalc" in text
+    assert "/usr/lib/Music Zamlr/backend/music-zamlr-backend" in text
+    assert "GNU C Library" in _unwrapped(text)
+    assert "system libraries" in _unwrapped(text)
+    assert ".exe" not in text
+    assert "MinGW" not in text
+
+
+@pytest.mark.parametrize("platform", PLATFORMS)
+def test_the_preamble_fits_the_width_of_the_rest(platform):
+    assert max(len(line) for line in preamble(platform).splitlines()) <= 78
+
+
+def test_windows_takes_the_mingw_notice_from_the_repository(tmp_path):
+    (tmp_path / "licenses").mkdir()
+    (tmp_path / "licenses" / "MinGW-w64-runtime.txt").write_text("mingw notice")
+
+    heading, body = fpcalc_runtime_section("windows", tmp_path, tmp_path / "unused")
+
+    assert "MinGW-w64" in heading
+    assert body == "mingw notice"
+
+
+def test_linux_takes_glibcs_notices_from_its_source(tmp_path):
+    content = b"glibc notices"
+    with tarfile.open(tmp_path / GLIBC_TARBALL, "w:xz") as archive:
+        member = tarfile.TarInfo("glibc-2.35/LICENSES")
+        member.size = len(content)
+        archive.addfile(member, io.BytesIO(content))
+
+    heading, body = fpcalc_runtime_section("linux", tmp_path / "unused", tmp_path)
+
+    assert "GNU C Library" in heading
+    assert body == "glibc notices"
+
+
+def test_python_licence_is_found_where_each_platform_keeps_it(tmp_path):
+    windows_like = tmp_path / "windows"
+    windows_like.mkdir()
+    (windows_like / "LICENSE.txt").write_text("at the top")
+    linux_like = tmp_path / "linux"
+    (linux_like / "lib" / "python3.14").mkdir(parents=True)
+    (linux_like / "lib" / "python3.14" / "LICENSE.txt").write_text("in the stdlib")
+
+    assert python_licence(windows_like, windows_like / "Lib") == "at the top"
+    assert python_licence(linux_like, linux_like / "lib" / "python3.14") == (
+        "in the stdlib"
+    )
+    with pytest.raises(LookupError):
+        python_licence(tmp_path, tmp_path / "Lib")
+
+
+@pytest.mark.parametrize(
+    ("system", "expected"), [("win32", "windows"), ("linux", "linux")]
+)
+def test_the_notices_describe_the_platform_the_job_runs_on(
+    monkeypatch, system, expected
+):
+    monkeypatch.setattr(write_notices.sys, "platform", system)
+
+    assert current_platform() == expected
+
+
+def test_no_notices_for_a_platform_with_no_release(monkeypatch):
+    monkeypatch.setattr(write_notices.sys, "platform", "darwin")
+
+    with pytest.raises(ValueError):
+        current_platform()

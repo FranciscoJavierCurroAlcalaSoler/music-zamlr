@@ -76,17 +76,6 @@ jobs:
             exit 1
           fi
 
-      # The release's notices name every system library the backend
-      # bundles, and stop when one has no package or no copyright file.
-      # Building those sections here, on the real build, finds that before a
-      # release does, and prints what they will contain.
-      - name: Check the system libraries have notices
-        working-directory: backend
-        run: >-
-          python -c "from pathlib import Path; import write_notices;
-          [print(heading) for heading, _ in
-          write_notices.system_sections(Path(write_notices.BUILD_DIR))]"
-
       # The release will carry these beside the package. Collected here as
       # well, so a pin that no longer matches its download fails a test
       # build before it can fail a release.
@@ -114,15 +103,37 @@ jobs:
         with:
           workspaces: frontend/src-tauri -> target
 
-      # Without --config src-tauri/tauri.release.conf.json, which adds the
-      # licence notices to the bundle. Nothing here writes them yet, and
-      # Tauri stops on a resource that does not exist. So this package is
-      # for testing, not for release.
-      - run: npm run tauri build
+      # The same version and features as release.yml. rust-cache keeps
+      # ~/.cargo/bin, so only the first run pays for the compile.
+      - run: cargo install cargo-about --version 0.9.2 --locked --features cli
+
+      # Linux's crates differ from Windows' (GTK and WebKitGTK bindings in
+      # place of WebView2), so the notices come from this build's lockfile
+      # resolution, not from the Windows job's.
+      - name: Generate the Rust notices
+        working-directory: frontend/src-tauri
+        run: cargo about generate about.hbs -o "${{ runner.temp }}/THIRD-PARTY-RUST.txt"
+
+      # Fails on any library without a notice: a system library no package
+      # installed, a package without a copyright file, a Python or npm
+      # package without a licence file.
+      - name: Write the licence notices
+        working-directory: backend
+        run: >-
+          python write_notices.py
+          --output ../frontend/src-tauri/notices/THIRD-PARTY-NOTICES.txt
+          --fpcalc-sources "${{ runner.temp }}/fpcalc-sources"
+          --rust-notices "${{ runner.temp }}/THIRD-PARTY-RUST.txt"
+          --frontend ../frontend
+
+      # tauri.release.conf.json adds the notices to the bundle, as it does
+      # for the Windows installer.
+      - run: npm run tauri build -- --config src-tauri/tauri.release.conf.json
         working-directory: frontend
 
       # A package that dropped the execute permission installs without an
-      # error, and the app then cannot start its backend. Nothing but the
+      # error, and the app then cannot start its backend. The notices must be
+      # inside it too, where the licences require them. Nothing but the
       # package's own file list shows that before an installation. The
       # shell's own name is checked too: without mainBinaryName in
       # tauri.linux.conf.json it is installed as /usr/bin/app, after the
@@ -144,11 +155,18 @@ jobs:
               exit 1
             fi
           done
+          if ! grep -qE " (\./)?usr/lib/Music Zamlr/THIRD-PARTY-NOTICES\.txt\$" <<< "$listing"; then
+            echo "::error::The licence notices are missing from $deb"
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
           name: music-zamlr-deb
-          path: frontend/src-tauri/target/release/bundle/deb/*.deb
+          # The notices as well, so they can be read without installing.
+          path: |
+            frontend/src-tauri/target/release/bundle/deb/*.deb
+            frontend/src-tauri/notices/THIRD-PARTY-NOTICES.txt
           retention-days: 7
           # The default is warn, which ends a run that made no package green,
           # with nothing to download.

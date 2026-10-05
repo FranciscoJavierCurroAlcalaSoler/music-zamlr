@@ -3,8 +3,10 @@
 One file, installed beside the program and attached to the release, holding
 every licence text the installer's contents oblige it to carry: the project's
 own, the GPL that covers the backend binary as a whole, CPython's, the
-PyInstaller bootloader's, each bundled Python package's, fpcalc's, each Rust
-crate's in the shell, and each npm package's in the interface.
+PyInstaller bootloader's, each bundled Python package's, on Linux each
+system library's, fpcalc's with the C runtime linked into it, each Rust
+crate's in the shell, and each npm package's in the interface. The file
+describes the platform this job builds for.
 
 Run by the release job after the backend build, after `npm ci`, after the
 fpcalc sources are downloaded and after cargo-about has written the Rust
@@ -18,7 +20,9 @@ import json
 import re
 import subprocess
 import sys
+import sysconfig
 import tarfile
+import textwrap
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path, PurePosixPath
 
@@ -41,29 +45,43 @@ DOC_DIR = Path("/usr/share/doc")
 Section = tuple[str, str]
 PackageFinder = Callable[[str], tuple[str, str] | None]
 
-PREAMBLE = """\
-Music Zamlr: licences of the installed program and its parts
+PLATFORMS = ("windows", "linux")
+GLIBC_TARBALL = "glibc_2.35.orig.tar.xz"
 
-The installer puts three programs on the computer, and each is distributed
-under its own terms.
+PREAMBLE_TITLE = "Music Zamlr: licences of the installed program and its parts"
 
-* The desktop window and the interface inside it are Music Zamlr's own code,
-  under the MIT licence below. They also contain the Rust crates and the npm
-  packages listed further down, each under the licence shown with it.
-
-* The backend program (backend/music-zamlr-backend.exe and the files beside
-  it) is distributed as a whole under the GNU General Public License,
-  version 3 or any later version, whose text follows. It contains mutagen,
-  which is licensed under the GPL version 2 or later, together with the
-  Python runtime and the other Python packages listed below. Its complete
-  source is attached to the same GitHub release as the installer: the
-  repository's source archive and the archive of Python package sources.
-
-* fpcalc (backend/fpcalc.exe) is distributed under the GNU Lesser General
-  Public License, version 2.1, because it contains FFmpeg. Its source, with
-  the scripts that built it, is the fpcalc sources archive attached to the
-  same release.
-"""
+# Each bullet is a list of sentences, wrapped when the preamble is written,
+# so a platform's extra sentence cannot leave a ragged line or land between
+# a sentence and the one that refers back to it.
+PREAMBLE_TEXT = {
+    "windows": {
+        "installer": "installer",
+        "backend": "backend/music-zamlr-backend.exe",
+        "backend_extra": [
+            "The Microsoft Visual C++ runtime files beside it (VCRUNTIME140.dll,"
+            " VCRUNTIME140_1.dll and MSVCP140.dll) are not part of that work:"
+            " they are Microsoft's, redistributed under the terms of the Visual"
+            " C++ Redistributable.",
+        ],
+        "fpcalc": "backend/fpcalc.exe",
+        "fpcalc_extra": [
+            "It also contains the MinGW-w64 runtime, whose notice is below.",
+        ],
+    },
+    "linux": {
+        "installer": "package",
+        "backend": "/usr/lib/Music Zamlr/backend/music-zamlr-backend",
+        "backend_extra": [
+            "It also contains the system libraries listed below, each with the"
+            " notice of the Ubuntu package it came from.",
+        ],
+        "fpcalc": "/usr/lib/Music Zamlr/backend/fpcalc",
+        "fpcalc_extra": [
+            "It also contains the GNU C Library, under the same licence, version"
+            " 2.1 or later, whose notices are below.",
+        ],
+    },
+}
 
 
 def licence_paths(paths: Iterable[str]) -> list[str]:
@@ -203,6 +221,90 @@ def tarball_text(tarball: Path, name: str) -> str:
     raise LookupError(f"{tarball.name} has no {name}")
 
 
+def current_platform() -> str:
+    """The platform this job builds for, which is the one it runs on."""
+    if sys.platform == "win32":
+        return "windows"
+    if sys.platform.startswith("linux"):
+        return "linux"
+    raise ValueError(f"No release is built on {sys.platform}")
+
+
+def _bullet(sentences: list[str]) -> str:
+    return textwrap.fill(
+        " ".join(sentences), width=78, initial_indent="* ", subsequent_indent="  "
+    )
+
+
+def preamble(platform: str) -> str:
+    text = PREAMBLE_TEXT[platform]
+    installer = text["installer"]
+    bullets = [
+        [
+            "The desktop window and the interface inside it are Music Zamlr's own"
+            " code, under the MIT licence below. They also contain the Rust crates"
+            " and the npm packages listed further down, each under the licence"
+            " shown with it.",
+        ],
+        [
+            f"The backend program ({text['backend']} and the files beside it) is"
+            " distributed as a whole under the GNU General Public License, version"
+            " 3 or any later version, whose text follows. It contains mutagen,"
+            " which is licensed under the GPL version 2 or later, together with the"
+            " Python runtime and the other Python packages listed below. Its"
+            " complete source is attached to the same GitHub release as the"
+            f" {installer}: the repository's source archive and the archive of"
+            " Python package sources.",
+            *text["backend_extra"],
+        ],
+        [
+            f"fpcalc ({text['fpcalc']}) is distributed under the GNU Lesser General"
+            " Public License, version 2.1, because it contains FFmpeg. Its source,"
+            " with the scripts that built it, is the fpcalc sources archive"
+            " attached to the same release.",
+            *text["fpcalc_extra"],
+        ],
+    ]
+    opening = textwrap.fill(
+        f"The {installer} puts three programs on the computer, and each is"
+        " distributed under its own terms.",
+        width=78,
+    )
+    parts = [PREAMBLE_TITLE, opening, *(_bullet(bullet) for bullet in bullets)]
+    return "\n\n".join(parts) + "\n"
+
+
+def fpcalc_runtime_section(
+    platform: str, repository: Path, fpcalc_sources: Path
+) -> Section:
+    """The C runtime that fpcalc links statically, which differs by platform.
+
+    The Windows binary carries the MinGW-w64 runtime, whose notice the
+    project publishes as a file for this purpose. The Linux binary carries
+    glibc, whose LICENSES file asks to travel with every binary built from it.
+    """
+    if platform == "windows":
+        return (
+            "MinGW-w64 runtime (inside fpcalc)",
+            (repository / "licenses" / "MinGW-w64-runtime.txt").read_text(
+                encoding="utf-8"
+            ),
+        )
+    return (
+        "GNU C Library 2.35 (inside fpcalc)",
+        tarball_text(fpcalc_sources / GLIBC_TARBALL, "LICENSES"),
+    )
+
+
+def python_licence(base_prefix: Path, stdlib: Path) -> str:
+    # Windows installs LICENSE.txt at the top of the installation, and a
+    # Linux build of CPython keeps it in the standard library's folder.
+    for path in (base_prefix / "LICENSE.txt", stdlib / "LICENSE.txt"):
+        if path.is_file():
+            return path.read_text(encoding="utf-8")
+    raise LookupError(f"No LICENSE.txt in {base_prefix} or {stdlib}")
+
+
 def render(sections: list[Section]) -> str:
     parts = []
     for heading, body in sections:
@@ -229,6 +331,7 @@ def main() -> None:
 
     backend_dir = Path(__file__).resolve().parent
     repository = backend_dir.parent
+    platform = current_platform()
     chromaprint = args.fpcalc_sources / CHROMAPRINT_TARBALL
     ffmpeg = args.fpcalc_sources / FFMPEG_TARBALL
 
@@ -240,30 +343,27 @@ def main() -> None:
         ),
         (
             f"Python {sys.version.split()[0]} (the runtime inside the backend program)",
-            (Path(sys.base_prefix) / "LICENSE.txt").read_text(encoding="utf-8"),
+            python_licence(Path(sys.base_prefix), Path(sysconfig.get_path("stdlib"))),
         ),
         ("PyInstaller bootloader", _pyinstaller_bootloader()),
         *python_sections(backend_dir / BUILD_DIR),
         # Linux only. dpkg is what says where a library came from, and
         # Windows has none to ask.
-        *(
-            system_sections(backend_dir / BUILD_DIR)
-            if sys.platform.startswith("linux")
-            else []
-        ),
+        *(system_sections(backend_dir / BUILD_DIR) if platform == "linux" else []),
         ("Chromaprint 1.6.1 (fpcalc)", tarball_text(chromaprint, "LICENSE.md")),
         ("FFmpeg 8.0 (inside fpcalc)", tarball_text(ffmpeg, "LICENSE.md")),
         (
             "GNU Lesser General Public License, version 2.1 (fpcalc)",
             tarball_text(ffmpeg, "COPYING.LGPLv2.1"),
         ),
+        fpcalc_runtime_section(platform, repository, args.fpcalc_sources),
         ("Rust crates", args.rust_notices.read_text(encoding="utf-8")),
         *npm_sections(args.frontend),
     ]
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
-        PREAMBLE + "\n\n" + render(sections), encoding="utf-8", newline="\n"
+        preamble(platform) + "\n\n" + render(sections), encoding="utf-8", newline="\n"
     )
 
 
