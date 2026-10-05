@@ -8,9 +8,9 @@ on:
     tags: ["v*"]
 
 env:
-  # Kept equal to the same variable in ci.yml and to ENVIRONMENT.md. The
-  # fingerprints an installed app stores have to come from the version
-  # every test ran against.
+  # Kept equal to the same variable in ci.yml and linux-package.yml, and to
+  # ENVIRONMENT.md. The fingerprints an installed app stores have to come
+  # from the version every test ran against.
   FPCALC_VERSION: "1.6.1"
 
 jobs:
@@ -65,7 +65,11 @@ jobs:
           Copy-Item "$folder\fpcalc.exe" $binaries
           Add-Content $env:GITHUB_PATH $folder
 
-      - run: fpcalc -version
+      # A check, not a print: the version is otherwise only in the download
+      # URL. bash, so the line is the same as in the other workflows.
+      - name: Check the fpcalc version
+        shell: bash
+        run: fpcalc -version | grep -F "fpcalc version ${FPCALC_VERSION} "
 
       - run: pyinstaller music-zamlr-backend.spec --noconfirm
         working-directory: backend

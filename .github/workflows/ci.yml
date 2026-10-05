@@ -20,7 +20,8 @@ env:
   # stored rather than recomputed — so a runner on a different version would
   # compare stored values against values another release produced, which is
   # the one failure this project cannot detect. Keep this equal to the
-  # version in ENVIRONMENT.md, and move both together or neither.
+  # version in ENVIRONMENT.md, release.yml and linux-package.yml, and move
+  # them together or not at all.
   FPCALC_VERSION: "1.6.1"
 
 jobs:
@@ -108,10 +109,14 @@ jobs:
           Expand-Archive fpcalc.zip -DestinationPath .
           Add-Content $env:GITHUB_PATH "${{ runner.temp }}\chromaprint-fpcalc-${{ env.FPCALC_VERSION }}-windows-x86_64"
 
-      # Proves the PATH entry took, on every runner. Without this the
-      # fpcalc-dependent tests would skip themselves and the job would stay
-      # green while testing nothing.
-      - run: fpcalc -version
+      # Proves the PATH entry took, on every runner, and that it found the
+      # pinned version, which is otherwise only in the download URL. Without
+      # the first, the fpcalc-dependent tests would skip themselves and the
+      # job would stay green while testing nothing. bash on all three
+      # runners, so the check is one line here and in the other workflows.
+      - name: Check the fpcalc version
+        shell: bash
+        run: fpcalc -version | grep -F "fpcalc version ${FPCALC_VERSION} "
 
       - run: ruff check .
 

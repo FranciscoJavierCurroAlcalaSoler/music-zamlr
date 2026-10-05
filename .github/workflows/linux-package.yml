@@ -1,0 +1,128 @@
+name: Linux package
+
+# Builds the .deb and attaches it to the run as an artifact, for installing
+# by hand. It publishes nothing, so it runs on request only. The release
+# workflow is to call this file rather than repeat its steps, because two
+# copies of a build drift apart without a sign.
+on:
+  workflow_dispatch:
+
+env:
+  # Kept equal to the same variable in ci.yml and release.yml. A called
+  # workflow does not inherit its caller's env, so this copy cannot go.
+  FPCALC_VERSION: "1.6.1"
+
+jobs:
+  deb:
+    # 22.04 and not ubuntu-latest. A program built here needs the C library
+    # of this machine or a newer one, so the build machine sets the oldest
+    # system the package runs on. 22.04 matches the oldest that Tauri 2
+    # supports at all; 24.04 would lock out Ubuntu 22.04 and Debian 12.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      # Tauri's prerequisites for Debian and Ubuntu. The 4.1 WebKitGTK is the
+      # one Tauri 2 builds against; 4.0 belongs to Tauri 1.
+      - name: Install the Tauri build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - run: pip install -r requirements.txt
+        working-directory: backend
+
+      # binaries/ is gitignored, so without this the package ships an app
+      # that compares by tags alone. tar keeps the execute permission that
+      # the archive carries. Also put on PATH, for the packaged test that
+      # hands the backend a configured fpcalc.
+      - name: Install fpcalc into the shell's binaries
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -sSLf -o fpcalc.tar.gz "https://github.com/acoustid/chromaprint/releases/download/v${FPCALC_VERSION}/chromaprint-fpcalc-${FPCALC_VERSION}-linux-x86_64.tar.gz"
+          tar xzf fpcalc.tar.gz
+          folder="${{ runner.temp }}/chromaprint-fpcalc-${FPCALC_VERSION}-linux-x86_64"
+          mkdir -p "${{ github.workspace }}/frontend/src-tauri/binaries"
+          cp "$folder/fpcalc" "${{ github.workspace }}/frontend/src-tauri/binaries/"
+          echo "$folder" >> "$GITHUB_PATH"
+
+      # A check, not a print. The version is in the download URL only, and a
+      # fingerprint from another fpcalc version does not match the ones that
+      # users' databases already store.
+      - name: Check the fpcalc version
+        run: fpcalc -version | grep -F "fpcalc version ${FPCALC_VERSION} "
+
+      - run: pyinstaller music-zamlr-backend.spec --noconfirm
+        working-directory: backend
+
+      # test_packaged_backend.py skips the whole module when this file is
+      # missing, so a build under another name would let the next step pass
+      # on four skips. -x and not -f: a program without the execute
+      # permission fails here as well.
+      - name: Check the backend build exists
+        working-directory: backend
+        run: |
+          if [ ! -x dist/music-zamlr-backend/music-zamlr-backend ]; then
+            echo "::error::PyInstaller produced no runnable dist/music-zamlr-backend/music-zamlr-backend"
+            exit 1
+          fi
+
+      # python -m pytest for the sys.path reason given in ci.yml.
+      - run: python -m pytest tests/test_packaged_backend.py
+        working-directory: backend
+
+      - run: python stage_backend.py
+        working-directory: backend
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+        working-directory: frontend
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri -> target
+
+      # Without --config src-tauri/tauri.release.conf.json, which adds the
+      # licence notices to the bundle. Nothing here writes them yet, and
+      # Tauri stops on a resource that does not exist. So this package is
+      # for testing, not for release.
+      - run: npm run tauri build
+        working-directory: frontend
+
+      # A package that dropped the execute permission installs without an
+      # error, and the app then cannot start its backend. Nothing but the
+      # package's own file list shows that before an installation.
+      - name: Check the programs can run inside the package
+        run: |
+          deb=$(ls frontend/src-tauri/target/release/bundle/deb/*.deb)
+          listing=$(dpkg-deb -c "$deb")
+          for program in music-zamlr-backend fpcalc; do
+            if ! grep -qE "^-rwx.*/backend/${program}\$" <<< "$listing"; then
+              echo "::error::$program is missing from $deb or cannot run"
+              exit 1
+            fi
+          done
+          dpkg-deb -I "$deb"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: music-zamlr-deb
+          path: frontend/src-tauri/target/release/bundle/deb/*.deb
+          retention-days: 7
+          # The default is warn, which ends a run that made no package green,
+          # with nothing to download.
+          if-no-files-found: error
