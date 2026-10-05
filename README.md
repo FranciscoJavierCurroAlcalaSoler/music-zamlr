@@ -4,9 +4,22 @@ Music Zamlr compares two local music collections. It shows which tracks you do
 not have, which tracks exist in better quality in the other collection, and
 which tracks you already have. Then it copies only the files you select.
 
-The tool exists for one situation. A friend carries a music collection on an
-external drive. You have an old copy of it. You want the tracks you never
-received, and the tracks where the friend's copy is better than yours.
+![The Compare tab. Ten tracks in the Archive Drive collection are upgrades of tracks in the Laptop collection: FLAC files that replace MP3 files, and 24-bit FLAC files that replace 16-bit FLAC files.](docs/diff-view.png)
+
+A typical case: you keep your music in two places, for example on a laptop
+and on an archive drive. Over the years, the two copies became different. The
+archive has tracks that the laptop never received, and better copies of some
+tracks, such as FLAC files where the laptop has MP3 files. Music Zamlr finds
+those tracks and copies only them.
+
+## See it work
+
+https://github.com/user-attachments/assets/1972c370-2eff-484c-a1f4-564796d93ea8
+
+The video adds two collections, compares them, settles a track that matches
+two of your files, and imports nine tracks. The two collections are demo
+data: the audio is synthetic, and all artist and track names are invented.
+The typing and the waits play faster than real time.
 
 ## How it works
 
