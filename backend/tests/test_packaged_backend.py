@@ -8,7 +8,6 @@ The whole file is skipped where no build exists, which is every run in CI,
 because dist/ is not in the repository.
 """
 
-import os
 import subprocess
 import threading
 import time
@@ -23,15 +22,10 @@ from launch_settings import (
     TOKEN_VARIABLE,
     WATCH_STDIN_VARIABLE,
 )
+from stage_backend import BACKEND_NAME, BACKEND_PROGRAM
 
-BUILD_NAME = "music-zamlr-backend"
 BACKEND_DIRECTORY = Path(__file__).resolve().parents[1]
-BINARY = (
-    BACKEND_DIRECTORY
-    / "dist"
-    / BUILD_NAME
-    / (f"{BUILD_NAME}.exe" if os.name == "nt" else BUILD_NAME)
-)
+BINARY = BACKEND_DIRECTORY / "dist" / BACKEND_NAME / BACKEND_PROGRAM
 TOKEN = "packaged-token"
 START_TIMEOUT_SECONDS = 30
 # Shorter than the guard above, so that the guard cannot answer for an

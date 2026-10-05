@@ -10,11 +10,13 @@ Usage, from backend/ after `pyinstaller music-zamlr-backend.spec`:
     python stage_backend.py
 """
 
+import os
 import shutil
 from pathlib import Path
 
 BACKEND_NAME = "music-zamlr-backend"
-BACKEND_EXE = BACKEND_NAME + ".exe"
+# PyInstaller adds .exe on Windows only. The shell looks for the same name.
+BACKEND_PROGRAM = BACKEND_NAME + (".exe" if os.name == "nt" else "")
 INTERNAL_DIR = "_internal"
 
 
@@ -25,10 +27,10 @@ def stage_backend(dist_dir: Path, binaries_dir: Path) -> None:
             "Run `pyinstaller music-zamlr-backend.spec` in backend/ first."
         )
 
-    # Only the backend's own files go. fpcalc.exe shares this folder and
+    # Only the backend's own files go. fpcalc shares this folder and
     # nothing rebuilds it, so emptying the folder would ship an app that
     # falls back to tags on every comparison.
-    (binaries_dir / BACKEND_EXE).unlink(missing_ok=True)
+    (binaries_dir / BACKEND_PROGRAM).unlink(missing_ok=True)
     old_internal = binaries_dir / INTERNAL_DIR
     if old_internal.exists():
         shutil.rmtree(old_internal)
@@ -38,7 +40,7 @@ def stage_backend(dist_dir: Path, binaries_dir: Path) -> None:
     # one had. A module removed from the backend would ride along in every
     # installer after it.
     binaries_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(dist_dir / BACKEND_EXE, binaries_dir / BACKEND_EXE)
+    shutil.copy2(dist_dir / BACKEND_PROGRAM, binaries_dir / BACKEND_PROGRAM)
     shutil.copytree(dist_dir / INTERNAL_DIR, binaries_dir / INTERNAL_DIR)
 
 

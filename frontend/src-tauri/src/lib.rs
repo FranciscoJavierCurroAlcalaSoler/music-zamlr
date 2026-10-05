@@ -8,9 +8,15 @@ use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 
 const PORT_PREFIX: &str = "ZAMLR_PORT=";
 const LOG_PREFIX: &str = "ZAMLR_LOG=";
-// The origin the webview reports on Windows. The backend compares whole
-// strings against the Origin header, so this has to match it exactly.
-const WEBVIEW_ORIGIN: &str = "http://tauri.localhost";
+// The origin the webview reports. Tauri serves the page over http on Windows
+// and over its own tauri scheme on Linux and macOS. The backend compares
+// whole strings against the Origin header, so the other platform's value is
+// refused like any wrong one, and the splash gives up.
+const WEBVIEW_ORIGIN: &str = if cfg!(windows) {
+    "http://tauri.localhost"
+} else {
+    "tauri://localhost"
+};
 // Where the page comes from under `tauri dev`: Vite serves it, so the
 // window reports the dev server's origin instead of the webview's own.
 const DEV_SERVER_ORIGIN: &str = "http://localhost:5173";
@@ -28,8 +34,17 @@ fn allowed_origins() -> String {
         WEBVIEW_ORIGIN.to_string()
     }
 }
-const BACKEND_EXE: &str = "music-zamlr-backend.exe";
-const FPCALC_EXE: &str = "fpcalc.exe";
+const BACKEND_NAME: &str = "music-zamlr-backend";
+const FPCALC_NAME: &str = "fpcalc";
+
+/// The file name a program has on this platform.
+///
+/// The suffix comes from the standard library: `.exe` on Windows, nothing on
+/// Linux and macOS. The two programs are built under these names on each
+/// platform, so a fixed `.exe` finds neither of them outside Windows.
+fn program_file_name(name: &str) -> String {
+    format!("{name}{}", std::env::consts::EXE_SUFFIX)
+}
 // Where the bundler puts the folder named in tauri.conf.json's resources.
 const BACKEND_RESOURCE_DIR: &str = "backend";
 
@@ -153,7 +168,7 @@ pub fn run() {
             let database_path = data_dir.join("music.db");
 
             let token = launch_token();
-            let backend = resource_path(app.handle(), BACKEND_EXE)?;
+            let backend = resource_path(app.handle(), &program_file_name(BACKEND_NAME))?;
             log::info!("starting the backend at {}", backend.display());
 
             // Not with `?`. A missing backend is fatal; a missing fpcalc is
@@ -162,7 +177,7 @@ pub fn run() {
             // Leaving the variable unset lets the backend look on PATH,
             // which is how a run from source finds it.
             let mut command = app.shell().command(backend);
-            match resource_path(app.handle(), FPCALC_EXE) {
+            match resource_path(app.handle(), &program_file_name(FPCALC_NAME)) {
                 Ok(fpcalc) => {
                     command = command.env("ZAMLR_FPCALC", fpcalc.to_string_lossy().to_string());
                 }
