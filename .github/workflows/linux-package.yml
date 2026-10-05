@@ -87,6 +87,13 @@ jobs:
           [print(heading) for heading, _ in
           write_notices.system_sections(Path(write_notices.BUILD_DIR))]"
 
+      # The release will carry these beside the package. Collected here as
+      # well, so a pin that no longer matches its download fails a test
+      # build before it can fail a release.
+      - name: Collect the fpcalc sources
+        working-directory: backend
+        run: python collect_fpcalc_sources.py "${{ runner.temp }}/fpcalc-sources" --platform linux
+
       # python -m pytest for the sys.path reason given in ci.yml.
       - run: python -m pytest tests/test_packaged_backend.py
         working-directory: backend

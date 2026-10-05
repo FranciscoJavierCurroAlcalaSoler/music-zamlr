@@ -104,75 +104,12 @@ jobs:
           Compress-Archive -Path "${{ runner.temp }}/python-sources/*" `
             -DestinationPath "music-zamlr_${env:VERSION}_python-sources.zip"
 
-      # fpcalc is LGPL-2.1 as a whole, because it links FFmpeg statically,
-      # and the LGPL counts the scripts that control a library's
-      # compilation as part of its source. Traced from the source rather
-      # than assumed: Chromaprint 1.6.1's package/build.sh pins FFmpeg 8.0
-      # from acoustid/ffmpeg-build's v8.0-1 release, and that repository's
-      # common.sh at the same tag fetches ffmpeg-8.0.tar.gz from ffmpeg.org.
-      #
-      # Pinned by hash. GitHub generates tag archives on demand and does not
-      # promise the same bytes every time. A mismatch stops the release,
-      # which is the right direction for a file the release must carry.
+      # fpcalc is LGPL-2.1, so the release carries its complete source.
+      # The script holds the pinned files and the reason for each, so the
+      # Windows and Linux builds collect from one list.
       - name: Collect the fpcalc sources
-        run: |
-          # The three files below belong to fpcalc 1.6.1 and to nothing
-          # else. Raising FPCALC_VERSION without this guard would ship a
-          # binary next to source that is not its own, with every check
-          # green; with it, the bump forces the sources to be traced again.
-          if ($env:FPCALC_VERSION -ne "1.6.1") {
-            throw "Collect the fpcalc sources pins the sources of fpcalc 1.6.1, not $env:FPCALC_VERSION. Trace and re-pin them."
-          }
-          $folder = "${{ runner.temp }}/fpcalc-sources"
-          New-Item -ItemType Directory -Force $folder | Out-Null
-          $sources = @(
-            @{
-              url = "https://github.com/acoustid/chromaprint/releases/download/v1.6.1/chromaprint-1.6.1.tar.gz"
-              file = "chromaprint-1.6.1.tar.gz"
-              sha256 = "3368805af0ee47b9df74df10b5001a44569e01df2844dab520031720dde9ad23"
-            },
-            @{
-              url = "https://ffmpeg.org/releases/ffmpeg-8.0.tar.gz"
-              file = "ffmpeg-8.0.tar.gz"
-              sha256 = "cce1136d38c389e6baaa452d6babc384cb2d3a9406ebe48c36a48f3ee115d8df"
-            },
-            @{
-              url = "https://github.com/acoustid/ffmpeg-build/archive/refs/tags/v8.0-1.tar.gz"
-              file = "ffmpeg-build-v8.0-1.tar.gz"
-              sha256 = "2533f000cc9d4ea72e5108c95bf2cc59770fa076ad8d4147e66ff5c16e42de14"
-            }
-          )
-          foreach ($source in $sources) {
-            $path = Join-Path $folder $source.file
-            Invoke-WebRequest -Uri $source.url -OutFile $path
-            $actual = (Get-FileHash $path -Algorithm SHA256).Hash
-            if ($actual -ne $source.sha256) {
-              throw "$($source.file) has sha256 $actual, expected $($source.sha256)"
-            }
-          }
-          Set-Content -Encoding utf8 -Path (Join-Path $folder "README.txt") -Value @"
-          The source of fpcalc 1.6.1, the fingerprinting program shipped with
-          Music Zamlr. fpcalc is distributed under the GNU Lesser General Public
-          License, version 2.1, because it is linked statically with FFmpeg.
-
-          chromaprint-1.6.1.tar.gz
-              Chromaprint 1.6.1, which provides fpcalc. Its package/build.sh is
-              the script that built the Windows binary, and it names the FFmpeg
-              build below.
-
-          ffmpeg-build-v8.0-1.tar.gz
-              The scripts from acoustid/ffmpeg-build, release v8.0-1, that
-              configured and compiled the FFmpeg libraries fpcalc links with.
-              They configure FFmpeg without --enable-gpl and without
-              --enable-nonfree, so the libraries are under the LGPL.
-
-          ffmpeg-8.0.tar.gz
-              FFmpeg 8.0, as downloaded from ffmpeg.org by those scripts.
-
-          To rebuild fpcalc with a modified FFmpeg, build FFmpeg with the
-          scripts in ffmpeg-build-v8.0-1.tar.gz, then build Chromaprint against
-          it with package/build.sh.
-          "@
+        working-directory: backend
+        run: python collect_fpcalc_sources.py "${{ runner.temp }}/fpcalc-sources" --platform windows
 
       - name: Archive the fpcalc sources
         run: |
