@@ -32,7 +32,28 @@ a = Analysis(
     # modules such as pdb import it, and they carry on without it. On Linux
     # it brings libreadline, which is GPL-3, so shipping it would oblige the
     # release to carry readline's source as well.
-    excludes=["readline"],
+    #
+    # The others are never used by the running backend, and each one
+    # shipped is one more licence to name. uvloop and httptools are speedups
+    # uvicorn takes when present and replaces with asyncio and h11 when
+    # not; both compile in a C library their licence files do not mention,
+    # and uvloop arrives on Linux only, through uvicorn's optional extras,
+    # where nothing pins its version. watchfiles serves only --reload.
+    # pytest, rich, Pygments and setuptools reach the build through imports
+    # that never run in the app.
+    excludes=[
+        "readline",
+        "uvloop",
+        "httptools",
+        "watchfiles",
+        "pytest",
+        "_pytest",
+        "rich",
+        "pygments",
+        "setuptools",
+        "pkg_resources",
+        "_distutils_hack",
+    ],
     noarchive=False,
     optimize=0,
 )
