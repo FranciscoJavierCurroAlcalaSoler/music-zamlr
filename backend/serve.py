@@ -173,6 +173,13 @@ def main():
         log_config=None,
         timeout_graceful_shutdown=SHUTDOWN_TIMEOUT_SECONDS,
         ws="none",
+        # Named rather than left to "auto". The build excludes httptools and
+        # uvloop, and auto picks whichever imports. A folder that an earlier
+        # version left in the install imports as an empty package, so auto
+        # takes httptools and the first request fails on a parser that is
+        # not there.
+        http="h11",
+        loop="asyncio",
     )
     server = Server(config)
     # Only when the shell asks. A process started with no input at all sees
