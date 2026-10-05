@@ -76,87 +76,16 @@ jobs:
             exit 1
           fi
 
-      # A measurement, to be replaced by the notices that it informs.
-      # PyInstaller copies the shared libraries that Python's modules need
-      # from this machine into _internal, and on Linux those come from
-      # Ubuntu packages, each under its own licence. The build table is the
-      # only record of where each file came from, which is what dpkg -S
-      # needs; the files in _internal no longer say.
-      - name: List the system libraries in the backend
+      # The release's notices name every system library the backend
+      # bundles, and stop when one has no package or no copyright file.
+      # Building those sections here, on the real build, finds that before a
+      # release does, and prints what they will contain.
+      - name: Check the system libraries have notices
         working-directory: backend
-        run: |
-          python - <<'EOF'
-          import ast
-          import os
-          import subprocess
-          from pathlib import Path
-
-          table = ast.literal_eval(
-              Path("build/music-zamlr-backend/Analysis-00.toc").read_text(encoding="utf-8")
-          )
-          binaries = []
-
-
-          def walk(node):
-              if isinstance(node, (list, tuple)):
-                  if len(node) == 3 and all(isinstance(item, str) for item in node):
-                      if node[2] == "BINARY":
-                          binaries.append((node[0], node[1]))
-                  else:
-                      for item in node:
-                          walk(item)
-
-
-          def owner(path):
-              # Ubuntu registers some files under /lib and some under
-              # /usr/lib, so the path as found and the resolved path are
-              # both asked.
-              for candidate in (path, os.path.realpath(path)):
-                  result = subprocess.run(
-                      ["dpkg", "-S", candidate], capture_output=True, text=True
-                  )
-                  if result.returncode == 0:
-                      return result.stdout.splitlines()[0].split(":")[0]
-              return None
-
-
-          walk(table)
-          packages = {}
-          print(f"{len(binaries)} BINARY entries")
-          for name, source in sorted(binaries):
-              if "site-packages" in source:
-                  print(f"{name}  wheel  {source}")
-              elif source.startswith("/opt/hostedtoolcache"):
-                  print(f"{name}  CPython  {source}")
-              else:
-                  package = owner(source)
-                  if package is None:
-                      print(f"{name}  not found  {source}")
-                      continue
-                  version = subprocess.run(
-                      ["dpkg-query", "-W", "-f=${Version}", package],
-                      capture_output=True,
-                      text=True,
-                  ).stdout
-                  packages[package] = version
-                  print(f"{name}  {package} {version}  {source}")
-
-          print()
-          for package, version in sorted(packages.items()):
-              copyright_file = Path("/usr/share/doc") / package / "copyright"
-              if copyright_file.exists():
-                  text = copyright_file.read_text(encoding="utf-8", errors="replace")
-                  licences = sorted(
-                      {
-                          line.split(":", 1)[1].strip()
-                          for line in text.splitlines()
-                          if line.startswith("License:")
-                      }
-                  )
-              else:
-                  licences = ["no copyright file"]
-              print(f"{package} {version}: {'; '.join(licences) or 'no License: lines'}")
-          EOF
+        run: >-
+          python -c "from pathlib import Path; import write_notices;
+          [print(heading) for heading, _ in
+          write_notices.system_sections(Path(write_notices.BUILD_DIR))]"
 
       # python -m pytest for the sys.path reason given in ci.yml.
       - run: python -m pytest tests/test_packaged_backend.py

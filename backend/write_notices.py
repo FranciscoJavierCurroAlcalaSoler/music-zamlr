@@ -12,12 +12,14 @@ notices, because it reads all four.
 """
 
 import argparse
+import ast
 import importlib.metadata
 import json
 import re
+import subprocess
 import sys
 import tarfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path, PurePosixPath
 
 from collect_python_sources import BUILD_DIR, bundled_distributions
@@ -31,8 +33,13 @@ LICENCE_NAME = re.compile(r"(^|/)(LICEN[CS]E|COPYING|NOTICE)[^/]*$", re.IGNORECA
 CODE_SUFFIXES = {".py", ".pyc", ".pyi", ".pyd", ".so", ".js", ".mjs", ".cjs", ".ts"}
 CHROMAPRINT_TARBALL = "chromaprint-1.6.1.tar.gz"
 FFMPEG_TARBALL = "ffmpeg-8.0.tar.gz"
+# The table of what the build finally collected. Analysis-00.toc would also
+# list the libraries that the spec filters out after the analysis.
+COLLECTED_TABLE = "COLLECT-00.toc"
+DOC_DIR = Path("/usr/share/doc")
 
 Section = tuple[str, str]
+PackageFinder = Callable[[str], tuple[str, str] | None]
 
 PREAMBLE = """\
 Music Zamlr: licences of the installed program and its parts
@@ -120,6 +127,73 @@ def npm_sections(frontend_dir: Path) -> list[Section]:
     return sections
 
 
+def _binary_sources(table: object) -> Iterator[tuple[str, str]]:
+    # The same (name, path, kind) leaves that collect_python_sources.py walks
+    # for modules, here for the shared libraries.
+    if isinstance(table, (list, tuple)):
+        if len(table) == 3 and all(isinstance(item, str) for item in table):
+            if table[2] == "BINARY":
+                yield table[0], table[1]
+        else:
+            for item in table:
+                yield from _binary_sources(item)
+
+
+def dpkg_package(path: str) -> tuple[str, str] | None:
+    """Return the Debian package that installed a file, and its version."""
+    # Ubuntu registers some libraries under /lib and some under /usr/lib, so
+    # the resolved path is asked as well as the path PyInstaller recorded.
+    for candidate in dict.fromkeys([path, str(Path(path).resolve())]):
+        found = subprocess.run(
+            ["dpkg", "-S", candidate], capture_output=True, text=True
+        )
+        if found.returncode == 0:
+            package = found.stdout.splitlines()[0].split(":")[0]
+            version = subprocess.run(
+                ["dpkg-query", "-W", "-f=${Version}", package],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+            return package, version
+    return None
+
+
+def system_sections(
+    build_dir: Path,
+    find_package: PackageFinder = dpkg_package,
+    doc_dir: Path = DOC_DIR,
+) -> list[Section]:
+    """One section per system package whose libraries the backend bundles.
+
+    Linux only: there PyInstaller copies the libraries that Python's modules
+    need from the build machine, and each came from a package with its own
+    licence. CPython's own files are covered by CPython's licence, and a
+    wheel's by its package's, so neither is looked up.
+    """
+    table = ast.literal_eval((build_dir / COLLECTED_TABLE).read_text(encoding="utf-8"))
+    files_by_package: dict[tuple[str, str], list[str]] = {}
+    for name, source in _binary_sources(table):
+        path = Path(source)
+        if "site-packages" in path.parts or path.is_relative_to(sys.base_prefix):
+            continue
+        package = find_package(source)
+        if package is None:
+            raise LookupError(
+                f"No package installed {source}, so its licence is unknown"
+            )
+        files_by_package.setdefault(package, []).append(name)
+
+    sections = []
+    for (package, version), names in sorted(files_by_package.items()):
+        copyright_file = doc_dir / package / "copyright"
+        if not copyright_file.is_file():
+            raise LookupError(f"The package {package} has no {copyright_file}")
+        heading = f"{package} {version} ({', '.join(sorted(names))})"
+        sections.append((heading, copyright_file.read_text(encoding="utf-8")))
+    return sections
+
+
 def tarball_text(tarball: Path, name: str) -> str:
     """Return one file from a source tarball, wherever it sits inside."""
     with tarfile.open(tarball) as archive:
@@ -170,6 +244,13 @@ def main() -> None:
         ),
         ("PyInstaller bootloader", _pyinstaller_bootloader()),
         *python_sections(backend_dir / BUILD_DIR),
+        # Linux only. dpkg is what says where a library came from, and
+        # Windows has none to ask.
+        *(
+            system_sections(backend_dir / BUILD_DIR)
+            if sys.platform.startswith("linux")
+            else []
+        ),
         ("Chromaprint 1.6.1 (fpcalc)", tarball_text(chromaprint, "LICENSE.md")),
         ("FFmpeg 8.0 (inside fpcalc)", tarball_text(ffmpeg, "LICENSE.md")),
         (

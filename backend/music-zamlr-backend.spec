@@ -28,10 +28,23 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # The backend never reads from a terminal. readline arrives only because
+    # modules such as pdb import it, and they carry on without it. On Linux
+    # it brings libreadline, which is GPL-3, so shipping it would oblige the
+    # release to carry readline's source as well.
+    excludes=["readline"],
     noarchive=False,
     optimize=0,
 )
+# Left to the system. Every machine that can install the Linux package has
+# both, because WebKitGTK, a declared dependency, needs them. Bundled, they
+# are GPL-3 libraries whose runtime exception would have to be argued. No
+# Windows file has these names.
+a.binaries = [
+    entry
+    for entry in a.binaries
+    if not entry[0].startswith(("libstdc++.so", "libgcc_s.so"))
+]
 pyz = PYZ(a.pure)
 
 exe = EXE(
