@@ -1,7 +1,7 @@
 # Contributing to Music Zamlr
 
 This file is for people who run Music Zamlr from its source code, change it,
-or build a release. To install the Windows program, read the
+or build a release. To install the program on Windows or Linux, read the
 [README](README.md#install).
 
 ## Contributions
@@ -13,8 +13,8 @@ pull request.
 
 ## Running from source
 
-These steps work on Windows, Linux, and macOS. On Linux and macOS, this is the
-way to use the program.
+These steps work on Windows, Linux, and macOS. On macOS, this is the way to
+use the program.
 
 You need:
 
@@ -62,8 +62,9 @@ sudo apt install libchromaprint-tools               # Debian and Ubuntu
 ```
 
 On Windows, do not use the Chocolatey package. It installs version 1.1, which
-is more than ten years old. The automated tests and the Windows installer use
-the version that `FPCALC_VERSION` names in `.github/workflows/ci.yml`.
+is more than ten years old. The automated tests, the installer and the Linux
+package use the version that `FPCALC_VERSION` names in
+`.github/workflows/ci.yml`. apt and Homebrew can have a different version.
 
 Open a new terminal. Then make sure that this command shows a version:
 
@@ -99,8 +100,8 @@ cannot open a folder picker on the computer that runs the backend. Type the
 path of each folder.
 
 When you run from source, the database is `backend/db/music.db`. It is not the
-database of an installed Windows program, which is in
-`%APPDATA%\com.zamlr.music`.
+database of an installed program, which is in `%APPDATA%\com.zamlr.music` on
+Windows and in `~/.local/share/com.zamlr.music` on Linux.
 
 ## Building the Windows installer
 
@@ -142,6 +143,48 @@ If each Rust build fails with
 on-access virus scanner opens the files that the linker writes. Add
 `frontend/src-tauri/target` to the exclusions of that scanner. Windows Defender
 does not cause this error. The error occurred with FortiClient.
+
+## Building the Linux package
+
+A local package is for a test only, for the same reasons as a local
+installer. To get a package from the same steps as a release, run the Linux
+workflow on GitHub and download its artifact:
+
+```
+gh workflow run linux-package.yml
+```
+
+To build on your own computer, you need a Debian-based system and everything
+in [Running from source](#running-from-source), and also:
+
+- Rust, installed with rustup, on the stable toolchain.
+- The libraries that Tauri builds against:
+
+  ```
+  sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+  ```
+
+- `fpcalc` in `frontend/src-tauri/binaries/`, from the Linux archive of the
+  version that `FPCALC_VERSION` names. Copy it there one time, and keep its
+  execute permission.
+
+Then, from the repository:
+
+```
+cd backend
+pyinstaller music-zamlr-backend.spec --noconfirm
+python stage_backend.py
+cd ../frontend
+npm run tauri build
+```
+
+The package is in `frontend/src-tauri/target/release/bundle/deb/`.
+`tauri.linux.conf.json` makes the build produce a `.deb` and name the program
+`music-zamlr`.
+
+A program built on a system runs only on systems with the same C library or a
+newer one. The workflow builds on Ubuntu 22.04 for that reason. A package
+that you build on a newer system does not install on an older one.
 
 ## How the code is organized
 
@@ -255,8 +298,8 @@ transaction starts, and read it back to make sure that it changed.
 
 ## Making a release
 
-1. Change `version` in `frontend/src-tauri/tauri.conf.json`. The installer
-   gets its version only from this file. Commit and push.
+1. Change `version` in `frontend/src-tauri/tauri.conf.json`. The installer and
+   the package get their version only from this file. Commit and push.
 2. Push a tag with the same version:
 
    ```
@@ -264,24 +307,35 @@ transaction starts, and read it back to make sure that it changed.
    git push origin v0.2.0
    ```
 
-3. The release workflow builds the installer and makes a draft release. The
-   draft has four files: the installer, the Python source archive, the
-   `fpcalc` source archive, and `THIRD-PARTY-NOTICES.txt`. The workflow stops
-   if the tag and the version are different.
+3. The release workflow builds the Windows installer and the Linux package,
+   and then makes a draft release with eight files. For each system, these are
+   the program, the Python source archive, the `fpcalc` source archive, and
+   `THIRD-PARTY-NOTICES.txt`. The workflow makes no draft if either build
+   fails, and it stops if the tag and the version are different.
 4. Wait until the CI workflow for the same tag passes. The release workflow
    cannot wait for it.
-5. Download the installer from the draft with a browser, install it, and start
-   the program. A file that you download with a browser shows the SmartScreen
-   dialog that users see.
-6. Publish the draft.
+5. Download the installer from the draft with a browser. Install it over the
+   previous version, start the program, and make sure that your collections
+   are still there. A file that you download with a browser shows the
+   SmartScreen dialog that users see.
+6. Install the package from the draft on a Linux system, and start the
+   program from the applications menu.
+7. Publish the draft.
 
-Do not publish a draft that does not have all four files. The backend program
-is under the GPL, and `fpcalc` is under the LGPL. Both licenses need the source
-code and the license texts next to the program.
+Each backend program is under the GPL, and each `fpcalc` is under the LGPL.
+Both licenses need the source code and the license texts next to the program,
+so the workflow does not make a draft that has fewer than eight files.
+
+To test a change to the release workflow without a tag, run it by hand. Every
+job runs except the one that makes the draft:
+
+```
+gh workflow run release.yml
+```
 
 If you change `FPCALC_VERSION`, the workflow stops at the `fpcalc` sources. The
-source files and their hashes in `.github/workflows/release.yml` belong to one
-version. Find the sources of the new version and change them too.
+source files and their hashes in `backend/collect_fpcalc_sources.py` belong to
+one version. Find the sources of the new version and change them too.
 
 If a workflow run fails, delete the draft and the tag before you push the tag
 again:

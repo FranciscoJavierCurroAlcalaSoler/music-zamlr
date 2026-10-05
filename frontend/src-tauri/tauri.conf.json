@@ -28,6 +28,7 @@
     "publisher": "Francisco Javier Alcalá Soler (Curro)",
     "copyright": "Copyright (c) 2026 Francisco Javier Alcalá Soler (Curro)",
     "shortDescription": "Compare two music collections and import what you are missing.",
+    "longDescription": "Music Zamlr compares two local music collections. It shows which tracks you do not have, which tracks exist in better quality in the other collection, and which tracks you already have. Then it copies only the files you select. It matches tracks by file hash, by acoustic fingerprint and by tags, and it runs only on your computer.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

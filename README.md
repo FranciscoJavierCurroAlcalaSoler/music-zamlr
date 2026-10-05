@@ -23,27 +23,32 @@ The typing and the waits play faster than real time.
 
 ## How it works
 
-Music Zamlr is a desktop program for Windows. It has two parts. The window
-shows the interface. A backend program reads your drives with normal file
-operations and keeps a database of your collections. The window starts the
-backend when it opens and stops it when it closes.
+Music Zamlr is a desktop program for Windows and Linux. It has two parts. The
+window shows the interface. A backend program reads your drives with normal
+file operations and keeps a database of your collections. The window starts
+the backend when it opens and stops it when it closes.
 
 Both parts run only on your computer. They send nothing over the network.
 
-The same program also runs on Linux and macOS, from its source code, in a
-browser. See [Linux and macOS](#linux-and-macos).
+On macOS, the same program runs from its source code, in a browser. See
+[macOS](#macos).
 
 - Window: Tauri
 - Backend: FastAPI, SQLModel, SQLite
 - Interface: React, TypeScript, MUI, Vite
 - Acoustic fingerprints: `fpcalc` from Chromaprint, included in the installer
+  and in the Linux package
 
 ## Requirements
 
-- Windows 10 or Windows 11, 64-bit.
-- Microsoft Edge WebView2. Windows 11 includes it, and most Windows 10
-  computers have it. If it is missing, the installer downloads it. The
-  installation then needs an internet connection.
+- On Windows: Windows 10 or Windows 11, 64-bit, and Microsoft Edge WebView2.
+  Windows 11 includes WebView2, and most Windows 10 computers have it. If it
+  is missing, the installer downloads it. The installation then needs an
+  internet connection.
+- On Linux: a 64-bit (x86-64) system that installs `.deb` packages, with
+  WebKitGTK 4.1. Ubuntu 22.04 or later, Debian 12 or later, and the
+  distributions built on them have it. The installation gets WebKitGTK if it
+  is missing.
 - Both collections must be folders on this computer. An external USB drive is
   enough. Read [A collection keeps its path](#a-collection-keeps-its-path)
   before you use one.
@@ -57,6 +62,8 @@ browser. See [Linux and macOS](#linux-and-macos).
   audio**.
 
 ## Install
+
+### Windows
 
 1. Open the
    [Releases page](https://github.com/FranciscoJavierCurroAlcalaSoler/music-zamlr/releases).
@@ -74,37 +81,69 @@ browser. See [Linux and macOS](#linux-and-macos).
 Windows shows the dialog in step 2 because the installer has no code
 signature. A code signature costs money every year, and this project is free.
 
-Start the program from the Start menu. Only one copy of the program runs at a
-time. If you start it again, the open window comes to the front.
+Start the program from the Start menu.
+
+### Linux
+
+1. Open the
+   [Releases page](https://github.com/FranciscoJavierCurroAlcalaSoler/music-zamlr/releases).
+   Download `music-zamlr_<version>_amd64.deb` from the newest release.
+2. Open a terminal in the folder of the file, and install it:
+
+   ```
+   sudo apt install ./music-zamlr_<version>_amd64.deb
+   ```
+
+   Keep the `./` at the start. Without it, apt searches its online lists for a
+   package with that name and does not find one. apt also installs the
+   libraries that the program needs and that are missing.
+
+Start the program from the applications menu, or with the command
+`music-zamlr`.
+
+### On both systems
+
+Only one copy of the program runs at a time. If you start it again, the open
+window comes to the front.
 
 ## Update
 
-The program does not update itself. To update it, download the installer of
-the newer version from the Releases page and run it. The installer replaces
-the old version. Your collections and your settings stay.
+The program does not update itself. To update it, download the newer version
+from the Releases page and install it in the same way as the first one:
 
-> **Note:** Only one version exists, so nobody has installed a newer version
-> over an older one yet. Your data is in a separate folder, which an
-> installation does not change (see [Where your data is](#where-your-data-is)).
-> To be safe, make a backup of that folder before you update.
+- On Windows, run the newer installer. It replaces the old version.
+- On Linux, install the newer package with `sudo apt install`. It replaces the
+  old version.
+
+Your collections and your settings stay, because they are in a separate
+folder that an installation does not change (see
+[Where your data is](#where-your-data-is)). To be safe, make a backup of that
+folder before you update.
 
 ## Where your data is
 
-The program keeps its data in `%APPDATA%\com.zamlr.music`:
+The program keeps its data in one folder:
+
+- On Windows: `%APPDATA%\com.zamlr.music`
+- On Linux: `~/.local/share/com.zamlr.music`
+
+The folder contains two files:
 
 - `music.db` holds your collections, the scanned tracks, the stored hashes
   and fingerprints, and the order of the formats.
-- `logs\music-zamlr.log` is the log of the backend program. Attach it to a
-  bug report.
+- `music-zamlr.log`, in the `logs` folder, is the log of the backend program.
+  Attach it to a bug report.
 
 When the program shows an error, the message gives the path of the log file.
-The **Open folder** button next to it opens that folder in Explorer.
+The **Open folder** button next to it opens that folder in the file manager.
 
 To make a backup, close the program and copy the folder. To start again with
 no collections, close the program and delete the folder. The import logs are
 not in this folder. Each import writes its log into its destination folder.
 
 ## Uninstall
+
+### Windows
 
 Open **Settings > Apps** in Windows, select **Music Zamlr**, and then select
 **Uninstall**. You can also run the installer again and select **Uninstall
@@ -115,16 +154,29 @@ selected, so your data stays in `%APPDATA%\com.zamlr.music`. If you install
 the program again later, it finds your collections there. Select the option
 to delete that folder too.
 
-## Linux and macOS
+### Linux
 
-Music Zamlr has no installer for Linux or macOS yet. The program runs on both
-from its source code, in a browser, and it does the same scans, comparisons,
-and imports. The automated tests of the backend run on Linux, macOS, and
-Windows.
+```
+sudo apt remove music-zamlr
+```
+
+Your data stays in `~/.local/share/com.zamlr.music`. If you install the
+program again later, it finds your collections there. `apt purge` does not
+delete that folder either. To delete your data, delete the folder:
+
+```
+rm -r ~/.local/share/com.zamlr.music
+```
+
+## macOS
+
+Music Zamlr has no installer for macOS. The program runs on macOS from its
+source code, in a browser, and it does the same scans, comparisons, and
+imports. The automated tests of the backend run on macOS, Linux, and Windows.
 
 To install and start it, obey
 [Running from source](CONTRIBUTING.md#running-from-source) in CONTRIBUTING.md.
-Two things are different from the Windows program:
+Two things are different from the desktop program:
 
 - You start the backend and the interface in two terminals, and you open the
   interface in a browser.
@@ -159,10 +211,10 @@ collection takes minutes.
 
 A collection stores the path of its root folder when you add it. You cannot
 change that path later, and you cannot delete a collection. If Windows gives a
-USB drive a different drive letter, the tool cannot scan that collection
-again. The scan then fails with the message
-`Collection path not found. It may not be mounted.` Add the drive as a new
-collection, with a different name.
+USB drive a different drive letter, or if Linux mounts the drive at a
+different folder, the tool cannot scan that collection again. The scan then
+fails with the message `Collection path not found. It may not be mounted.`
+Add the drive as a new collection, with a different name.
 
 ### What happens to a replaced file
 
@@ -376,12 +428,16 @@ space before you confirm.
   the file again. On Windows, this also occurs when only the letter case of a
   name changes.
 - The free-space warning in the preview reads the drive letter of a path, not
-  the volume behind it. If your destination folder is a mount point for
-  another disk, the warning can count a move into `_superseded` as free when
-  it is not.
-- In a browser on Linux or macOS, do not scan one collection from two tabs at
-  the same time. The tool does not prevent it, and one of the scans can fail.
-  The Windows program cannot do this, because only one copy of it runs.
+  the disk behind it. A move into `_superseded` from a different disk needs
+  free space, but the warning can count it as free:
+  - On Windows, when your destination folder is a mount point for another
+    disk.
+  - On Linux, always. A Linux path has no drive letter, so the warning never
+    counts a move into `_superseded`. Every disk other than the system disk
+    is mounted at a folder.
+- In a browser on macOS, do not scan one collection from two tabs at the same
+  time. The tool does not prevent it, and one of the scans can fail. The
+  desktop program cannot do this, because only one copy of it runs.
 - A TrueAudio (`.tta`) file reports no bit depth. The tool then cannot compare
   two TTA files of one recording, so you already have the track. The result
   table shows no bitrate for a TTA file.
@@ -418,10 +474,15 @@ The installed program contains parts under other licenses:
 - The backend program contains mutagen, which is under the GNU General Public
   License, version 2 or later. The backend program is therefore distributed
   as a whole under the GNU General Public License, version 3 or later. See
-  [licenses/GPL-3.0.txt](licenses/GPL-3.0.txt).
+  [licenses/GPL-3.0.txt](licenses/GPL-3.0.txt). On Linux, it also contains
+  libraries from Ubuntu packages, under permissive licenses.
 - `fpcalc` contains FFmpeg. It is under the GNU Lesser General Public License,
-  version 2.1.
+  version 2.1. On Windows, it also contains the MinGW-w64 runtime. On Linux,
+  it also contains the GNU C Library, under the same license, version 2.1 or
+  later.
 
-Each release on the Releases page includes the complete source code of both,
-and the file `THIRD-PARTY-NOTICES.txt` with every license text. The installer
-also puts that file in the installation folder.
+Each release on the Releases page includes, for each system, the complete
+source code of the backend program and of `fpcalc`, and the file
+`THIRD-PARTY-NOTICES.txt` with every license text. The installer and the
+package also put that file next to the program: on Windows in the
+installation folder, on Linux in `/usr/lib/Music Zamlr/`.
