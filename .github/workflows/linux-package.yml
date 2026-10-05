@@ -117,9 +117,12 @@ jobs:
           # package holds instead of stopping before it.
           dpkg-deb -I "$deb"
           grep -v /_internal/ <<< "$listing"
-          for program in usr/bin/music-zamlr backend/music-zamlr-backend backend/fpcalc; do
-            if ! grep -qE "^-rwx.*/${program}\$" <<< "$listing"; then
-              echo "::error::$program is missing from $deb or cannot run"
+          # Whole paths from the package root, with the leading ./ optional:
+          # Tauri writes its archive without one, where dpkg-deb's own
+          # packages carry it.
+          for path in "usr/bin/music-zamlr" "usr/lib/Music Zamlr/backend/music-zamlr-backend" "usr/lib/Music Zamlr/backend/fpcalc"; do
+            if ! grep -qE "^-rwx.* (\./)?${path}\$" <<< "$listing"; then
+              echo "::error::$path is missing from $deb or cannot run"
               exit 1
             fi
           done
