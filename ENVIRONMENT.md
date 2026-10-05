@@ -5,7 +5,7 @@ when you install, upgrade, or reconfigure a tool. Python and npm packages are
 in their lockfiles, not here (see [Not tracked here](#not-tracked-here)).
 To run or build the project from a clone, read [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Last updated: 2026-10-04
+Last updated: 2026-10-05
 
 ## Machine
 
@@ -49,6 +49,17 @@ library that the linker wrote. Rust creates and deletes thousands of
 short-lived files in `target/`. An on-access scanner that opens each one
 collides with the linker. The Windows search indexer and parallel linking are
 not the cause.
+
+The linker also writes temporary files to `%TEMP%`, which the exclusion does
+not cover. If `LNK1105` names a file like `%TEMP%\lnk{...}.tmp`, set both
+variables to a folder inside `target/` for that shell, then build again:
+
+```
+New-Item -ItemType Directory -Force target\tmp
+$env:TMP = "$PWD\target\tmp"; $env:TEMP = "$PWD\target\tmp"
+```
+
+Run these commands in `frontend/src-tauri`.
 
 Windows Defender needs **no** exclusion. Everything in `target/` is build
 output, made again from source.
