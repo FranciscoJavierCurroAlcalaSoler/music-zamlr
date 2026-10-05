@@ -1,11 +1,19 @@
 name: Release
 
-# Only a version tag builds an installer. This lives apart from ci.yml
-# because creating a release needs `contents: write`, and ci.yml runs on
-# every push to every branch, where that permission has no business.
+# A version tag builds the Windows installer and the Linux package and puts
+# both in one draft release. This lives apart from ci.yml because creating a
+# release needs `contents: write`, and ci.yml runs on every push to every
+# branch, where that permission has no business.
 on:
   push:
     tags: ["v*"]
+  # A dry run on request: every job except the draft, so the whole build can
+  # be proved without a tag.
+  workflow_dispatch:
+
+# Read only, unless a job says otherwise. Only the draft job writes.
+permissions:
+  contents: read
 
 env:
   # Kept equal to the same variable in ci.yml and linux-package.yml, and to
@@ -14,31 +22,38 @@ env:
   FPCALC_VERSION: "1.6.1"
 
 jobs:
-  installer:
-    runs-on: windows-latest
-    # A cold Rust release build plus PyInstaller takes a while, but a hung
-    # job otherwise bills until the six-hour default, at twice the Linux
-    # rate while the repository is private.
-    timeout-minutes: 45
-    permissions:
-      contents: write
-    # No concurrency group with cancel-in-progress, unlike ci.yml: a release
-    # cancelled halfway can leave a draft behind with no installer on it.
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
 
       # Tagging v0.2.0 without raising the version in tauri.conf.json would
-      # publish a release named 0.2.0 whose installer says 0.1.0 and
-      # installs as 0.1.0. The installer takes its version from that file
-      # alone; package.json's is never read.
+      # publish a release named 0.2.0 whose files say 0.1.0 and install as
+      # 0.1.0. Both bundles take their version from that file alone;
+      # package.json's is never read. A dry run has no tag to compare.
       - name: Check the tag against the app version
+        id: version
         run: |
-          $tag = $env:GITHUB_REF_NAME.TrimStart("v")
-          $version = (Get-Content frontend/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
-          if ($tag -ne $version) {
-            throw "Tag $env:GITHUB_REF_NAME does not match version $version in tauri.conf.json"
-          }
-          Add-Content $env:GITHUB_ENV "VERSION=$version"
+          version=$(jq -r .version frontend/src-tauri/tauri.conf.json)
+          if [[ "$GITHUB_REF" == refs/tags/v* && "${GITHUB_REF_NAME#v}" != "$version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version $version in tauri.conf.json"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: check
+    runs-on: windows-latest
+    # A cold Rust release build plus PyInstaller takes a while, and a hung
+    # job otherwise runs until the six-hour default.
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7
         with:
@@ -102,7 +117,7 @@ jobs:
       - name: Archive the Python sources
         run: |
           Compress-Archive -Path "${{ runner.temp }}/python-sources/*" `
-            -DestinationPath "music-zamlr_${env:VERSION}_python-sources.zip"
+            -DestinationPath "music-zamlr_${env:VERSION}_windows_python-sources.zip"
 
       # fpcalc is LGPL-2.1, so the release carries its complete source.
       # The script holds the pinned files and the reason for each, so the
@@ -114,7 +129,7 @@ jobs:
       - name: Archive the fpcalc sources
         run: |
           Compress-Archive -Path "${{ runner.temp }}/fpcalc-sources/*" `
-            -DestinationPath "music-zamlr_${env:VERSION}_fpcalc-sources.zip"
+            -DestinationPath "music-zamlr_${env:VERSION}_windows_fpcalc-sources.zip"
 
       - run: python stage_backend.py
         working-directory: backend
@@ -146,7 +161,7 @@ jobs:
       # the lockfile being built, it cannot.
       - name: Generate the Rust notices
         working-directory: frontend/src-tauri
-        run: cargo about generate about.hbs -o "${{ runner.temp }}/THIRD-PARTY-RUST.txt"
+        run: cargo about generate --target x86_64-pc-windows-msvc about.hbs -o "${{ runner.temp }}/THIRD-PARTY-RUST.txt"
 
       # After npm ci and after the fpcalc sources, because it reads both:
       # the licence files in node_modules, and fpcalc's and FFmpeg's licence
@@ -177,27 +192,66 @@ jobs:
           $built = "frontend/src-tauri/target/release/bundle/nsis/Music Zamlr_${env:VERSION}_x64-setup.exe"
           Move-Item -LiteralPath $built "music-zamlr_${env:VERSION}_x64-setup.exe"
           Copy-Item frontend/src-tauri/notices/THIRD-PARTY-NOTICES.txt `
-            "music-zamlr_${env:VERSION}_THIRD-PARTY-NOTICES.txt"
+            "music-zamlr_${env:VERSION}_windows_THIRD-PARTY-NOTICES.txt"
 
-      # Every file the licences require travels together: the backend is
-      # GPL-3.0-or-later as a whole because it bundles mutagen, fpcalc is
-      # LGPL-2.1, and a release missing either source archive or the notices
-      # breaches them on the first download. GitHub adds the repository's
-      # own source archive at the tag by itself.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-release
+          path: music-zamlr_*
+          retention-days: 7
+          if-no-files-found: error
+
+  # The same steps whether a tag or a person starts it. The file names its
+  # own runner and timeout, which a calling job cannot.
+  linux:
+    needs: check
+    uses: ./.github/workflows/linux-package.yml
+
+  # Every file the licences require travels together: each backend is
+  # GPL-3.0-or-later as a whole because it bundles mutagen, each fpcalc is
+  # LGPL-2.1, and a release missing a source archive or the notices
+  # breaches them on the first download. GitHub adds the repository's own
+  # source archive at the tag by itself. A job of its own, after both
+  # builds, so a failure on either platform leaves no half-filled draft.
+  #
+  # Still a draft. The owner publishes it by hand, after this tag's CI run
+  # has passed — it goes in parallel and this workflow cannot wait for it —
+  # and after installing both downloads as a user would.
+  draft:
+    needs: [check, windows, linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: "*-release"
+          path: release
+          merge-multiple: true
+
+      # Eight: four per platform. Counted, because gh attaches whatever the
+      # folder holds, and a release one file short breaches a licence.
       #
-      # Still a draft. The owner publishes it by hand, after this tag's CI
-      # run has passed — it goes in parallel and this job cannot wait for
-      # it — and after downloading the installer to see the SmartScreen
-      # warning a user sees.
+      # --repo because this job has no checkout for gh to read it from.
+      # --verify-tag so gh refuses rather than creating a tag that is not
+      # there.
       - name: Create a draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create $env:GITHUB_REF_NAME `
-            "music-zamlr_${env:VERSION}_x64-setup.exe" `
-            "music-zamlr_${env:VERSION}_python-sources.zip" `
-            "music-zamlr_${env:VERSION}_fpcalc-sources.zip" `
-            "music-zamlr_${env:VERSION}_THIRD-PARTY-NOTICES.txt" `
-            --draft `
-            --title "Music Zamlr ${env:VERSION}" `
+          ls -l release
+          count=$(ls release | wc -l)
+          if [ "$count" -ne 8 ]; then
+            echo "::error::Expected 8 release files, found $count"
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --draft \
+            --title "Music Zamlr $VERSION" \
             --generate-notes

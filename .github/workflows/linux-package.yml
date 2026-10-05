@@ -1,11 +1,12 @@
 name: Linux package
 
-# Builds the .deb and attaches it to the run as an artifact, for installing
-# by hand. It publishes nothing, so it runs on request only. The release
-# workflow is to call this file rather than repeat its steps, because two
-# copies of a build drift apart without a sign.
+# Builds the .deb with its sources and notices, and attaches the four files
+# to the run as one artifact. It publishes nothing. Run on request, it gives
+# a package to install by hand; release.yml calls it rather than repeating
+# its steps, because two copies of a build drift apart without a sign.
 on:
   workflow_dispatch:
+  workflow_call:
 
 env:
   # Kept equal to the same variable in ci.yml and release.yml. A called
@@ -24,6 +25,11 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
+
+      # From the file that names the package, because a called workflow sees
+      # no tag. release.yml has already checked the tag against this file.
+      - name: Read the app version
+        run: echo "VERSION=$(jq -r .version frontend/src-tauri/tauri.conf.json)" >> "$GITHUB_ENV"
 
       # Tauri's prerequisites for Debian and Ubuntu. The 4.1 WebKitGTK is the
       # one Tauri 2 builds against; 4.0 belongs to Tauri 1.
@@ -76,9 +82,9 @@ jobs:
             exit 1
           fi
 
-      # The release will carry these beside the package. Collected here as
-      # well, so a pin that no longer matches its download fails a test
-      # build before it can fail a release.
+      # fpcalc is LGPL-2.1, and the Linux binary also contains glibc, so the
+      # release carries the complete source of both. The script holds the
+      # pinned files and the reason for each.
       - name: Collect the fpcalc sources
         working-directory: backend
         run: python collect_fpcalc_sources.py "${{ runner.temp }}/fpcalc-sources" --platform linux
@@ -86,6 +92,14 @@ jobs:
       # python -m pytest for the sys.path reason given in ci.yml.
       - run: python -m pytest tests/test_packaged_backend.py
         working-directory: backend
+
+      # The binary is a GPL work because it bundles mutagen, so the release
+      # carries the source of every Python package inside it. Read from this
+      # build's tables and this job's Python, which produced the binary; the
+      # Linux bundle is not the Windows one.
+      - name: Collect the Python sources
+        working-directory: backend
+        run: python collect_python_sources.py "${{ runner.temp }}/python-sources"
 
       - run: python stage_backend.py
         working-directory: backend
@@ -167,13 +181,26 @@ jobs:
             exit 1
           fi
 
+      # GitHub turns spaces in an uploaded asset's name into dots, so the
+      # bundler's "Music Zamlr_<version>_amd64.deb" would be published as
+      # "Music.Zamlr_...". The platform in the other names, because the
+      # Windows build attaches its own sources and notices to the same
+      # release. Each zip is made from inside its folder, so the files sit
+      # at its root, as Compress-Archive puts them on Windows.
+      - name: Name the release files
+        run: |
+          (cd "${{ runner.temp }}/python-sources" && zip -qrX "$GITHUB_WORKSPACE/music-zamlr_${VERSION}_linux_python-sources.zip" .)
+          (cd "${{ runner.temp }}/fpcalc-sources" && zip -qrX "$GITHUB_WORKSPACE/music-zamlr_${VERSION}_linux_fpcalc-sources.zip" .)
+          mv "frontend/src-tauri/target/release/bundle/deb/Music Zamlr_${VERSION}_amd64.deb" "music-zamlr_${VERSION}_amd64.deb"
+          cp frontend/src-tauri/notices/THIRD-PARTY-NOTICES.txt "music-zamlr_${VERSION}_linux_THIRD-PARTY-NOTICES.txt"
+          ls -l music-zamlr_*
+
+      # One name whether run by hand or by release.yml, which collects it
+      # by this name.
       - uses: actions/upload-artifact@v7
         with:
-          name: music-zamlr-deb
-          # The notices as well, so they can be read without installing.
-          path: |
-            frontend/src-tauri/target/release/bundle/deb/*.deb
-            frontend/src-tauri/notices/THIRD-PARTY-NOTICES.txt
+          name: linux-release
+          path: music-zamlr_*
           retention-days: 7
           # The default is warn, which ends a run that made no package green,
           # with nothing to download.
