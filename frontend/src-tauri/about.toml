@@ -6,9 +6,9 @@
 # notices file nobody reads line by line.
 #
 # targets matters as much as accepted. Without it cargo-about walks every
-# platform's dependency tree, so the run asks about crates that only ever
-# build on Linux or macOS and never reach this binary. The installer is
-# built for Windows only.
+# platform's dependency tree, so the notices would name crates that never
+# reach the binary. This is the Windows target, which a local preview uses;
+# the Linux job passes --target for its own, which overrides it.
 targets = ["x86_64-pc-windows-msvc"]
 
 accepted = [
@@ -27,4 +27,7 @@ accepted = [
     "Unicode-DFS-2016",
     "BSL-1.0",
     "OpenSSL",
+    # Apache-2.0 with an added permission. Carried by target-lexicon, which
+    # the GTK crates' build scripts use on Linux.
+    "Apache-2.0 WITH LLVM-exception",
 ]

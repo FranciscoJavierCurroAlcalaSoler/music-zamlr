@@ -108,11 +108,18 @@ jobs:
       - run: cargo install cargo-about --version 0.9.2 --locked --features cli
 
       # Linux's crates differ from Windows' (GTK and WebKitGTK bindings in
-      # place of WebView2), so the notices come from this build's lockfile
-      # resolution, not from the Windows job's.
+      # place of WebView2). about.toml names the Windows target, so this
+      # one is passed explicitly; without it the Linux notices list the
+      # Windows crates and miss every GTK one, with the run still green.
+      # The grep is what keeps that from coming back quietly.
       - name: Generate the Rust notices
         working-directory: frontend/src-tauri
-        run: cargo about generate about.hbs -o "${{ runner.temp }}/THIRD-PARTY-RUST.txt"
+        run: |
+          cargo about generate --target x86_64-unknown-linux-gnu about.hbs -o "${{ runner.temp }}/THIRD-PARTY-RUST.txt"
+          if ! grep -q "webkit2gtk" "${{ runner.temp }}/THIRD-PARTY-RUST.txt"; then
+            echo "::error::The Rust notices do not name webkit2gtk, so they describe another platform's build"
+            exit 1
+          fi
 
       # Fails on any library without a notice: a system library no package
       # installed, a package without a copyright file, a Python or npm
