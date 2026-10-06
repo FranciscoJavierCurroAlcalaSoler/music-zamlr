@@ -462,9 +462,9 @@ space before you confirm.
 
 ## Status
 
-Version 0.1.1 adds a package for Linux and completes the license notices of
-the Windows installer. The scan, the comparison, and the import all work, and
-each shows its progress. The comparison uses file hashes,
+Version 0.1.2 completes the license notices on both systems. Version 0.1.1
+added a package for Linux. The scan, the comparison, and the import all work,
+and each shows its progress. The comparison uses file hashes,
 acoustic fingerprints, and tags. The **Settings** tab holds the order of the
 formats.
 
