@@ -111,7 +111,10 @@ window comes to the front.
 The program does not update itself. To update it, download the newer version
 from the Releases page and install it in the same way as the first one:
 
-- On Windows, run the newer installer. It replaces the old version.
+- On Windows, run the newer installer. It finds the old version and selects
+  **Uninstall before installing**. Keep that option. The installer then
+  removes the old version and shows the option **Delete the application
+  data**. Do not select it: it deletes your collections.
 - On Linux, install the newer package with `sudo apt install`. It replaces the
   old version.
 
