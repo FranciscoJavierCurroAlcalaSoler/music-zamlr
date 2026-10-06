@@ -1,0 +1,22 @@
+{{!--
+  The Rust crates compiled into one bundled Python package. write_notices.py
+  puts the package's name above this, so the template has no heading of its
+  own; about.hbs cannot serve, because its heading names the desktop shell.
+--}}
+{{#each overview}}
+{{{name}}} ({{count}} {{#if (eq count 1)}}crate{{else}}crates{{/if}})
+{{/each}}
+
+{{#each licenses}}
+-------------------------------------------------------------------------
+{{{name}}}
+-------------------------------------------------------------------------
+
+Used by:
+{{#each used_by}}
+  - {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}} ({{{crate.repository}}}){{/if}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}

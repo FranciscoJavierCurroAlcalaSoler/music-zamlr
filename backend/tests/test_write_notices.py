@@ -2,6 +2,7 @@ import io
 import json
 import sys
 import tarfile
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -11,12 +12,14 @@ from write_notices import (
     COLLECTED_TABLE,
     GLIBC_TARBALL,
     PLATFORMS,
+    RUST_TARGETS,
     current_platform,
     fpcalc_runtime_section,
     licence_paths,
     npm_sections,
     preamble,
     python_licence,
+    rust_extension_sections,
     system_sections,
     tarball_text,
 )
@@ -259,3 +262,100 @@ def test_no_notices_for_a_platform_with_no_release(monkeypatch):
 
     with pytest.raises(ValueError):
         current_platform()
+
+
+def _sdist(folder, name, members):
+    """A source archive holding these member paths, each with dummy text."""
+    archive = folder / name
+    if name.endswith(".zip"):
+        with zipfile.ZipFile(archive, "w") as written:
+            for member in members:
+                written.writestr(member, "content")
+    else:
+        with tarfile.open(archive, "w:gz") as written:
+            for member in members:
+                info = tarfile.TarInfo(member)
+                info.size = len(b"content")
+                written.addfile(info, io.BytesIO(b"content"))
+    return archive
+
+
+def _recording_notices():
+    calls = []
+
+    def crate_notices(manifest, target):
+        # Read while the archive is unpacked: the temporary folder is gone
+        # once the section is built.
+        calls.append((manifest.name, manifest.is_file(), target))
+        return f"crates of {manifest.parent.name}"
+
+    return crate_notices, calls
+
+
+def test_a_python_package_built_from_rust_gets_its_crates(tmp_path):
+    _sdist(
+        tmp_path,
+        "rusty_core-1.2.3.tar.gz",
+        ["rusty_core-1.2.3/Cargo.lock", "rusty_core-1.2.3/Cargo.toml"],
+    )
+    _sdist(tmp_path, "plain-4.5.tar.gz", ["plain-4.5/setup.py"])
+    (tmp_path / "MANIFEST.txt").write_text("plain==4.5\nrusty_core==1.2.3\n")
+    crate_notices, calls = _recording_notices()
+
+    sections = rust_extension_sections(tmp_path, "linux", crate_notices)
+
+    assert sections == [
+        (
+            "rusty_core 1.2.3 (Rust crates compiled into it)",
+            "crates of rusty_core-1.2.3",
+        )
+    ]
+    assert calls == [("Cargo.toml", True, RUST_TARGETS["linux"])]
+
+
+@pytest.mark.parametrize("platform", PLATFORMS)
+def test_the_crates_are_those_of_the_platform_being_built(tmp_path, platform):
+    # A crate can be a dependency on one target only, as the shell's
+    # WebView2 and WebKitGTK crates are.
+    _sdist(
+        tmp_path,
+        "rusty_core-1.2.3.tar.gz",
+        ["rusty_core-1.2.3/Cargo.lock", "rusty_core-1.2.3/Cargo.toml"],
+    )
+    crate_notices, calls = _recording_notices()
+
+    rust_extension_sections(tmp_path, platform, crate_notices)
+
+    assert [target for _, _, target in calls] == [RUST_TARGETS[platform]]
+    # Against the table itself the first assertion would pass with the two
+    # targets swapped. Each target triple names its system.
+    assert platform in RUST_TARGETS[platform]
+
+
+def test_a_zip_source_archive_is_looked_into_as_well(tmp_path):
+    _sdist(
+        tmp_path,
+        "zipped_core-0.1.zip",
+        ["zipped_core-0.1/Cargo.lock", "zipped_core-0.1/Cargo.toml"],
+    )
+    crate_notices, _ = _recording_notices()
+
+    sections = rust_extension_sections(tmp_path, "windows", crate_notices)
+
+    assert [heading for heading, _ in sections] == [
+        "zipped_core 0.1 (Rust crates compiled into it)"
+    ]
+
+
+def test_a_lockfile_deeper_in_a_package_is_not_its_own(tmp_path):
+    # A package can carry a Rust project it does not build, as test data or
+    # vendored source. Only a lockfile at its top describes its extension.
+    _sdist(
+        tmp_path,
+        "carrier-2.0.tar.gz",
+        ["carrier-2.0/setup.py", "carrier-2.0/vendor/thing/Cargo.lock"],
+    )
+    crate_notices, calls = _recording_notices()
+
+    assert rust_extension_sections(tmp_path, "linux", crate_notices) == []
+    assert calls == []

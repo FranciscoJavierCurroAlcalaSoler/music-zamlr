@@ -143,6 +143,7 @@ jobs:
         run: >-
           python write_notices.py
           --output ../frontend/src-tauri/notices/THIRD-PARTY-NOTICES.txt
+          --python-sources "${{ runner.temp }}/python-sources"
           --fpcalc-sources "${{ runner.temp }}/fpcalc-sources"
           --rust-notices "${{ runner.temp }}/THIRD-PARTY-RUST.txt"
           --frontend ../frontend

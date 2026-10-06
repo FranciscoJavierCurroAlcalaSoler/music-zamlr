@@ -40,7 +40,9 @@ a = Analysis(
     # and uvloop arrives on Linux only, through uvicorn's optional extras,
     # where nothing pins its version. watchfiles serves only --reload.
     # pytest, rich, Pygments and setuptools reach the build through imports
-    # that never run in the app.
+    # that never run in the app. PyYAML is compiled with libyaml, whose
+    # notice its licence file lacks, and uvicorn imports it only to read a
+    # log configuration written in YAML, which the backend never passes.
     excludes=[
         "readline",
         "uvloop",
@@ -53,6 +55,8 @@ a = Analysis(
         "setuptools",
         "pkg_resources",
         "_distutils_hack",
+        "yaml",
+        "_yaml",
     ],
     noarchive=False,
     optimize=0,

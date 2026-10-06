@@ -163,14 +163,16 @@ jobs:
         working-directory: frontend/src-tauri
         run: cargo about generate --target x86_64-pc-windows-msvc about.hbs -o "${{ runner.temp }}/THIRD-PARTY-RUST.txt"
 
-      # After npm ci and after the fpcalc sources, because it reads both:
-      # the licence files in node_modules, and fpcalc's and FFmpeg's licence
-      # texts out of the source tarballs.
+      # After npm ci and after both source collections, because it reads all
+      # three: the licence files in node_modules, fpcalc's and FFmpeg's
+      # licence texts out of their tarballs, and the Python sources, where a
+      # package built from Rust carries the Cargo.lock its crates come from.
       - name: Write the licence notices
         working-directory: backend
         run: >-
           python write_notices.py
           --output ../frontend/src-tauri/notices/THIRD-PARTY-NOTICES.txt
+          --python-sources "${{ runner.temp }}/python-sources"
           --fpcalc-sources "${{ runner.temp }}/fpcalc-sources"
           --rust-notices "${{ runner.temp }}/THIRD-PARTY-RUST.txt"
           --frontend ../frontend

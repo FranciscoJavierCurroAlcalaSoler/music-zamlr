@@ -3,14 +3,16 @@
 One file, installed beside the program and attached to the release, holding
 every licence text the installer's contents oblige it to carry: the project's
 own, the GPL that covers the backend binary as a whole, CPython's, the
-PyInstaller bootloader's, each bundled Python package's, on Linux each
-system library's, fpcalc's with the C runtime linked into it, each Rust
-crate's in the shell, and each npm package's in the interface. The file
-describes the platform this job builds for.
+PyInstaller bootloader's, each bundled Python package's with the Rust crates
+compiled into any of them, on Linux each system library's, fpcalc's with the
+C runtime linked into it, each Rust crate's in the shell, and each npm
+package's in the interface. The file describes the platform this job builds
+for.
 
 Run by the release job after the backend build, after `npm ci`, after the
-fpcalc sources are downloaded and after cargo-about has written the Rust
-notices, because it reads all four.
+Python and fpcalc sources are downloaded and after cargo-about has written
+the shell's Rust notices, because it reads all of them. It also runs
+cargo-about itself, on the Python sources that are Rust projects.
 """
 
 import argparse
@@ -22,7 +24,9 @@ import subprocess
 import sys
 import sysconfig
 import tarfile
+import tempfile
 import textwrap
+import zipfile
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path, PurePosixPath
 
@@ -47,6 +51,12 @@ PackageFinder = Callable[[str], tuple[str, str] | None]
 
 PLATFORMS = ("windows", "linux")
 GLIBC_TARBALL = "glibc_2.35.orig.tar.xz"
+RUST_TARGETS = {
+    "windows": "x86_64-pc-windows-msvc",
+    "linux": "x86_64-unknown-linux-gnu",
+}
+SDIST_SUFFIXES = (".tar.gz", ".zip")
+CrateNotices = Callable[[Path, str], str]
 
 PREAMBLE_TITLE = "Music Zamlr: licences of the installed program and its parts"
 
@@ -212,6 +222,97 @@ def system_sections(
     return sections
 
 
+def cargo_about(manifest: Path, target: str) -> str:
+    """The notices of every crate a Rust project builds into, for one target."""
+    backend_dir = Path(__file__).resolve().parent
+    # The shell's list of accepted licences, so a crate under a licence
+    # nobody has read stops this run as it would stop the shell's.
+    config = backend_dir.parent / "frontend" / "src-tauri" / "about.toml"
+    with tempfile.TemporaryDirectory() as scratch:
+        output = Path(scratch) / "crates.txt"
+        # To a file with -o, not to a captured stdout: under PowerShell,
+        # which runs the Windows release job, cargo-about refuses to write
+        # to a redirected stdout. Nothing is captured, so its explanation
+        # of a failure reaches the job's log.
+        subprocess.run(
+            [
+                "cargo",
+                "about",
+                "generate",
+                "--manifest-path",
+                str(manifest),
+                "-c",
+                str(config),
+                "--target",
+                target,
+                "-o",
+                str(output),
+                str(backend_dir / "rust-crates.hbs"),
+            ],
+            check=True,
+        )
+        return output.read_text(encoding="utf-8")
+
+
+def _rust_project_root(names: list[str]) -> str | None:
+    # A Cargo.lock at the top of the package is what marks a Rust project
+    # whose crates the built extension contains. One deeper down belongs to
+    # something the package carries, not to what it builds.
+    for name in names:
+        parts = name.split("/")
+        if len(parts) == 2 and parts[1] == "Cargo.lock":
+            return parts[0]
+    return None
+
+
+def _unpack_rust_project(archive: Path, into: Path) -> Path | None:
+    """Unpack a source archive that is a Rust project, and name its manifest."""
+    if archive.name.endswith(".zip"):
+        with zipfile.ZipFile(archive) as opened:
+            root = _rust_project_root(opened.namelist())
+            if root is None:
+                return None
+            opened.extractall(into)
+    else:
+        with tarfile.open(archive) as opened:
+            root = _rust_project_root(opened.getnames())
+            if root is None:
+                return None
+            opened.extractall(into, filter="data")
+    return into / root / "Cargo.toml"
+
+
+def rust_extension_sections(
+    python_sources: Path,
+    platform: str,
+    crate_notices: CrateNotices = cargo_about,
+) -> list[Section]:
+    """One section per bundled Python package that is built from Rust.
+
+    Such a package's licence file covers the package alone, not the crates
+    compiled into its extension. Every source archive is looked into, so a
+    Rust package that a later version brings is covered without a change
+    here.
+    """
+    sections = []
+    for archive in sorted(python_sources.iterdir()):
+        if not archive.name.endswith(SDIST_SUFFIXES):
+            continue
+        with tempfile.TemporaryDirectory() as scratch:
+            manifest = _unpack_rust_project(archive, Path(scratch))
+            if manifest is None:
+                continue
+            stem = archive.name.removesuffix(".tar.gz").removesuffix(".zip")
+            name, version = stem.rsplit("-", 1)
+            sections.append(
+                (
+                    f"{name} {version} (Rust crates compiled into it)",
+                    crate_notices(manifest, RUST_TARGETS[platform]),
+                )
+            )
+    return sections
+
+
 def tarball_text(tarball: Path, name: str) -> str:
     """Return one file from a source tarball, wherever it sits inside."""
     with tarfile.open(tarball) as archive:
@@ -251,7 +352,8 @@ def preamble(platform: str) -> str:
             " distributed as a whole under the GNU General Public License, version"
             " 3 or any later version, whose text follows. It contains mutagen,"
             " which is licensed under the GPL version 2 or later, together with the"
-            " Python runtime and the other Python packages listed below. Its"
+            " Python runtime and the other Python packages listed below, some with"
+            " Rust crates compiled into them. Its"
             " complete source is attached to the same GitHub release as the"
             f" {installer}: the repository's source archive and the archive of"
             " Python package sources.",
@@ -324,6 +426,7 @@ def _pyinstaller_bootloader() -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--python-sources", type=Path, required=True)
     parser.add_argument("--fpcalc-sources", type=Path, required=True)
     parser.add_argument("--rust-notices", type=Path, required=True)
     parser.add_argument("--frontend", type=Path, required=True)
@@ -347,6 +450,7 @@ def main() -> None:
         ),
         ("PyInstaller bootloader", _pyinstaller_bootloader()),
         *python_sections(backend_dir / BUILD_DIR),
+        *rust_extension_sections(args.python_sources, platform),
         # Linux only. dpkg is what says where a library came from, and
         # Windows has none to ask.
         *(system_sections(backend_dir / BUILD_DIR) if platform == "linux" else []),
