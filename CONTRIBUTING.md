@@ -296,6 +296,48 @@ mode copies the table, so foreign keys must be off while the revision runs.
 `PRAGMA foreign_keys` has no effect inside a transaction. Set it before the
 transaction starts, and read it back to make sure that it changed.
 
+## Changing the app icon
+
+Two drawings in `frontend/src-tauri/` make the icon. `app-icon-small.svg`
+makes the 16 px, 24 px and 32 px images in `icon.ico`. At these sizes, the Z
+in `app-icon.svg` is too small to read. Windows shows the 32 px image in the
+title bar and on the taskbar. `app-icon.svg` makes all the other images.
+
+Do the steps in this sequence. `tauri icon` makes all the images in
+`icon.ico` from one drawing. If you do step 1 last, the small images become
+unreadable again. From `frontend/`:
+
+1. Make all the images from the full drawing:
+
+   ```
+   npm run tauri icon src-tauri/app-icon.svg
+   ```
+
+2. The command also writes images that this project does not use, for
+   example `icons/android/` and `icons/ios/`. Delete the new files that
+   `git status` shows as untracked.
+3. Make the three small images in a temporary folder:
+
+   ```
+   npm run tauri icon src-tauri/app-icon-small.svg -- -p 16,24,32 -o <temporary folder>
+   ```
+
+4. Put the three small images into `icon.ico`. The script needs Python 3.9 or
+   later and no other package:
+
+   ```
+   python ../backend/replace_small_icons.py <temporary folder>
+   ```
+
+5. If you use `npm run tauri dev`, give `tauri.conf.json` a new time. The
+   build script runs again only when `tauri.conf.json`, `capabilities/` or
+   `binaries/` changes, so without this step the program keeps the old
+   icon. In PowerShell:
+
+   ```
+   (Get-Item src-tauri\tauri.conf.json).LastWriteTime = Get-Date
+   ```
+
 ## Making a release
 
 1. Change `version` in `frontend/src-tauri/tauri.conf.json`. The installer and

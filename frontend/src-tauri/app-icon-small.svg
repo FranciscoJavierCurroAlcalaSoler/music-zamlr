@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- The 16, 24 and 32 px images of icon.ico only; app-icon.svg makes the
+       rest. At those sizes the full icon's Z is a few pixels tall, so this
+       drawing keeps the Z alone, larger, on the disc. The 32 px image is
+       the one Windows shows in the title bar and the taskbar.
+       The tile reaches the edge, unlike app-icon.svg: Windows icons fill
+       their square, and with the margin this one looks smaller than its
+       neighbours on the taskbar. Every edge of the Z is on a multiple of
+       64, which is one pixel at 16 px. To apply it, see
+       backend/replace_small_icons.py. -->
+  <rect x="0" y="0" width="1024" height="1024" rx="192" fill="#657520"/>
+  <circle cx="512" cy="512" r="464" fill="#1E2412"/>
+  <polygon points="256,192 768,192 768,320 448,704 768,704 768,832 256,832 256,704 576,320 256,320" fill="#F28A2E"/>
+</svg>
