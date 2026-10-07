@@ -280,15 +280,22 @@ therefore examines no files and always passes. `tsc -b`, which
 When you change a model in `backend/models.py`, write an Alembic revision.
 `test_the_migrations_match_the_models` fails until the revision exists.
 
-Generate the revision against an empty database, not against your own. Alembic
+Generate the revision against a new database, not against your own. Alembic
 compares the models with the database that it connects to, and your own
-database can already have the change. From `backend/`, on Windows:
+database can already have the change. First, bring the new database to the
+newest revision. If you do not, Alembic stops with "Target database is not up
+to date". From `backend/`, on Windows:
 
 ```
-$env:ZAMLR_DATABASE_PATH = "<absolute path to a new, empty .db file>"
+$env:ZAMLR_DATABASE_PATH = "<absolute path to a new .db file>"
+alembic upgrade head
 alembic revision --autogenerate -m "<what changed>"
 Remove-Item env:ZAMLR_DATABASE_PATH
 ```
+
+A new column that must not be NULL needs a `server_default` in the revision.
+SQLite cannot add such a column without a default. The existing rows get the
+default value. Alembic does not write the default, so add it by hand.
 
 Read the revision before you commit it. A revision that changes or removes a
 column uses batch mode, because SQLite cannot change a column in place. Batch

@@ -1002,9 +1002,15 @@ def test_scan_clears_hash_when_only_file_size_changes(
     # is the case that slips through if file_size is left out of
     # SCANNED_FIELDS: a stale size in the matcher's size index, plus a cached
     # hash that no longer describes the bytes.
+    #
+    # The save moves the mtime as well, and the mtime alone would make the
+    # row count as updated. Putting the old mtime back leaves file_size as
+    # the only changed field, so this test still fails without it.
+    before = os.stat(scanned_file)
     audio = mutagen.File(str(scanned_file), easy=True)
     audio["composer"] = "x" * 20_000
     audio.save()
+    os.utime(scanned_file, ns=(before.st_atime_ns, before.st_mtime_ns))
 
     result = scan_folder(str(tmp_path), collection_id=collection_id, session=session)
 
@@ -1016,6 +1022,71 @@ def test_scan_clears_hash_when_only_file_size_changes(
     assert track.file_size == scanned_file.stat().st_size
     assert track.file_size != original_size
     assert track.file_hash is None
+
+
+def test_scan_clears_caches_when_only_the_mtime_changes(
+    tmp_path, test_collection, session, fixtures_dir
+):
+    scanned_file = tmp_path / "test_track.mp3"
+    shutil.copy(fixtures_dir / "test_track.mp3", scanned_file)
+
+    collection_id = test_collection
+    scan_folder(str(tmp_path), collection_id=collection_id, session=session)
+    track = session.exec(
+        select(Track).where(
+            Track.file_name == "test_track.mp3",
+            Track.collection_id == collection_id,
+        )
+    ).one()
+    track.file_hash = "dummyhash"
+    track.fingerprint = b"dummy"
+    session.add(track)
+    session.commit()
+
+    # The file keeps its size, its tags and its bytes, as a re-rendered WAV
+    # of the same length would from the scanner's point of view. Ten
+    # seconds, not one nanosecond: NTFS keeps times in 100 ns steps, so a
+    # smaller move can vanish and the scan then sees no change at all.
+    before = os.stat(scanned_file)
+    os.utime(scanned_file, ns=(before.st_atime_ns, before.st_mtime_ns + 10_000_000_000))
+
+    result = scan_folder(str(tmp_path), collection_id=collection_id, session=session)
+
+    assert result.updated == 1
+    track = session.exec(select(Track)).one()
+    assert track.file_hash is None
+    assert track.fingerprint is None
+    assert track.file_mtime_ns == os.stat(scanned_file).st_mtime_ns
+
+
+def test_scan_clears_caches_for_a_row_from_before_the_mtime(
+    tmp_path, test_collection, session, fixtures_dir
+):
+    scanned_file = tmp_path / "test_track.mp3"
+    shutil.copy(fixtures_dir / "test_track.mp3", scanned_file)
+
+    collection_id = test_collection
+    scan_folder(str(tmp_path), collection_id=collection_id, session=session)
+    track = session.exec(
+        select(Track).where(
+            Track.file_name == "test_track.mp3",
+            Track.collection_id == collection_id,
+        )
+    ).one()
+    # 0 is what the migration gives every row that existed before the
+    # column. The file has not changed, and the row must still read as
+    # changed, because nothing recorded when its hash was made.
+    track.file_hash = "dummyhash"
+    track.file_mtime_ns = 0
+    session.add(track)
+    session.commit()
+
+    result = scan_folder(str(tmp_path), collection_id=collection_id, session=session)
+
+    assert result.updated == 1
+    track = session.exec(select(Track)).one()
+    assert track.file_hash is None
+    assert track.file_mtime_ns == os.stat(scanned_file).st_mtime_ns
 
 
 def test_scan_skips_superseded_directory(

@@ -279,6 +279,7 @@ def make_track():
             sample_rate=44100,
             duration=200,
             file_size=5_000_000,
+            file_mtime_ns=0,
             file_hash=None,
             fingerprint=None,
             fingerprint_length=None,

@@ -24,6 +24,7 @@ def test_track_with_only_required_fields(session, test_collection):
         sample_rate=44100,
         duration=210,
         file_size=8_400_000,
+        file_mtime_ns=0,
         collection_id=test_collection,
     )
     session.add(track)
@@ -44,6 +45,7 @@ def test_track_missing_bit_rate_fails(session, test_collection):
             sample_rate=44100,
             duration=210,
             file_size=8_400_000,
+            file_mtime_ns=0,
             file_hash="abc123",
             collection_id=test_collection,
         )
@@ -61,6 +63,7 @@ def test_collection_deletion_cascades_to_tracks(session, test_collection):
         sample_rate=44100,
         duration=210,
         file_size=8_400_000,
+        file_mtime_ns=0,
         collection_id=collection_id,
     )
     track2 = Track(
@@ -70,6 +73,7 @@ def test_collection_deletion_cascades_to_tracks(session, test_collection):
         sample_rate=44100,
         duration=180,
         file_size=7_200_000,
+        file_mtime_ns=0,
         collection_id=collection_id,
     )
     session.add_all([track1, track2])

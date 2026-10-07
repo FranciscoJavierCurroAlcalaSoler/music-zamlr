@@ -39,6 +39,10 @@ ALEMBIC_INI_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "alembic.ini"
 )
 
+# The revision whose schema a database made before Alembic already has. It
+# never moves: every later revision goes on top of it.
+BASELINE_REVISION = "7159e92fa59d"
+
 
 @event.listens_for(Engine, "connect")
 def _enforce_foreign_keys(dbapi_connection, connection_record):
@@ -77,17 +81,19 @@ def apply_migrations() -> None:
 
     Three states arrive here. A database with tables and no version table
     was built by an earlier version of this program, before there were any
-    revisions; it already matches the baseline, which was generated from
-    these same models, so it is stamped rather than upgraded. Upgrading it
-    would run the baseline's create_table against tables that exist and stop
-    on "table collection already exists". Everything else is upgraded: a
+    revisions. Its tables match the baseline, so it is stamped at the
+    baseline and then upgraded like every other database. Upgrading it
+    without the stamp would run the baseline's create_table against tables
+    that exist and stop on "table collection already exists". Stamping it at
+    head instead would mark every later revision as done, and the columns
+    they add would never arrive. The other two states are only upgraded: a
     file with nothing in it, where the baseline creates the schema, and a
     database already carrying a version, where whatever is newer runs.
 
     `and table_names` is what separates the first state from an empty file.
-    Without it a new database is stamped at head while holding nothing,
-    Alembic believes it current for good, and every query afterwards fails
-    on a table that will now never be created.
+    Without it a new database is stamped at the baseline while holding
+    nothing, and the upgrade runs only the later revisions, against tables
+    that were never created.
     """
     # SQLite makes a database file but not the directory above it, and the
     # shell names a folder in app-data that has never existed.
@@ -96,9 +102,9 @@ def apply_migrations() -> None:
     table_names = inspect(engine).get_table_names()
 
     if "alembic_version" not in table_names and table_names:
-        command.stamp(config, "head")
-    else:
-        command.upgrade(config, "head")
+        command.stamp(config, BASELINE_REVISION)
+
+    command.upgrade(config, "head")
 
 
 def create_collection(collection: Collection, session: Session) -> Collection:

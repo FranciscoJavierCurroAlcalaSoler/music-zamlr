@@ -28,6 +28,7 @@ class Track(SQLModel, table=True):
     sample_rate: int
     duration: int
     file_size: int
+    file_mtime_ns: int
     file_hash: str | None = None
     # Three columns that move together or not at all. The two producer
     # columns record which fpcalc settings made the bytes, and the matcher

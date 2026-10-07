@@ -277,6 +277,11 @@ def open_audio(file_path: str):
 
 def read_track(file_path: str, collection_id: int) -> Track | None:
     try:
+        # One stat for the size and the time, so both describe the same state
+        # of the file. Two calls could straddle a write and store a pair that
+        # never existed. No test can catch that race, so this comment is the
+        # only guard.
+        file_stat = os.stat(file_path)
         audio = open_audio(file_path)
         fmt = track_format(file_path, audio.info)
         # Return before a Track exists. A row with no format ranks worst, and
@@ -309,7 +314,8 @@ def read_track(file_path: str, collection_id: int) -> Track | None:
             bit_depth=audio.info.bits_per_sample
             if hasattr(audio.info, "bits_per_sample")
             else None,
-            file_size=os.path.getsize(file_path),
+            file_size=file_stat.st_size,
+            file_mtime_ns=file_stat.st_mtime_ns,
             collection_id=collection_id,
         )
     # Exception, not MutagenError, and wider than the project's rule on
@@ -346,9 +352,14 @@ BATCH_SIZE = 100
 # The fields that a re-scan compares with the stored row. format is one of
 # them because an .m4a file gets its format from the codec, so the format can
 # change while the path stays the same: an ALAC file re-encoded to AAC under
-# its old name.
+# its old name. file_mtime_ns is the only field that sees new audio behind an
+# unchanged size and unchanged tags, as an untagged WAV re-rendered at the
+# same length has. Without it, the cached hash and fingerprint describe the
+# old audio. It is compared exactly: a filesystem that rounds times rounds
+# them the same way at every scan.
 SCANNED_FIELDS = (
     "file_size",
+    "file_mtime_ns",
     "bit_rate",
     "sample_rate",
     "duration",
