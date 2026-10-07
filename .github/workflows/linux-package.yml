@@ -4,9 +4,27 @@ name: Linux package
 # to the run as one artifact. It publishes nothing. Run on request, it gives
 # a package to install by hand; release.yml calls it rather than repeating
 # its steps, because two copies of a build drift apart without a sign.
+#
+# The runner is an input so that a newer Ubuntu can be tried by hand before
+# GitHub retires the one in use. The input is declared on both triggers,
+# because each trigger reads only its own inputs; a choice list is allowed
+# on workflow_dispatch only. Both defaults must stay equal: release.yml
+# passes no runner, so its default is the one that ships.
 on:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: The Ubuntu runner that builds the package
+        type: choice
+        options:
+          - ubuntu-22.04
+          - ubuntu-24.04
+        default: ubuntu-22.04
   workflow_call:
+    inputs:
+      runner:
+        type: string
+        default: ubuntu-22.04
 
 env:
   # Kept equal to the same variable in ci.yml and release.yml. A called
@@ -18,8 +36,9 @@ jobs:
     # 22.04 and not ubuntu-latest. A program built here needs the C library
     # of this machine or a newer one, so the build machine sets the oldest
     # system the package runs on. 22.04 matches the oldest that Tauri 2
-    # supports at all; 24.04 would lock out Ubuntu 22.04 and Debian 12.
-    runs-on: ubuntu-22.04
+    # supports at all; 24.04 would lock out Ubuntu 22.04 and Debian 12. The
+    # input's default carries that choice.
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 45
     permissions:
       contents: read
