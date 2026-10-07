@@ -82,6 +82,12 @@ jobs:
             exit 1
           fi
 
+      # The Linux bundle is not the Windows one, so it is checked on its own.
+      # release.yml's Windows job gives the reason for the check.
+      - name: Check the compiled packages are audited
+        working-directory: backend
+        run: python check_compiled_packages.py
+
       # fpcalc is LGPL-2.1, and the Linux binary also contains glibc, so the
       # release carries the complete source of both. The script holds the
       # pinned files and the reason for each.

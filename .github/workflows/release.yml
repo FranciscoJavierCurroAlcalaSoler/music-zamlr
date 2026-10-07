@@ -100,6 +100,14 @@ jobs:
             throw "PyInstaller produced no dist/music-zamlr-backend/music-zamlr-backend.exe"
           }
 
+      # Before anything is built from the bundle: a compiled package nobody
+      # has reviewed can carry code the notices do not name. Straight after
+      # PyInstaller, because the list comes from its build tables and the
+      # versions from this job's Python.
+      - name: Check the compiled packages are audited
+        working-directory: backend
+        run: python check_compiled_packages.py
+
       # The only place outside the development machine where these run.
       # python -m pytest for the sys.path reason given in ci.yml.
       - run: python -m pytest tests/test_packaged_backend.py

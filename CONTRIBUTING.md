@@ -337,6 +337,15 @@ If you change `FPCALC_VERSION`, the workflow stops at the `fpcalc` sources. The
 source files and their hashes in `backend/collect_fpcalc_sources.py` belong to
 one version. Find the sources of the new version and change them too.
 
+Compiled code in a Python package can contain code from other projects, and
+the notices must name that code. `backend/check_compiled_packages.py` keeps a
+list of the compiled packages in the program, each at the version that a
+person examined. If you change the version of a package in this list, a test
+fails in CI. If a package with compiled code that is not in the list goes into
+the program, the build workflows stop after PyInstaller. Find what the package
+compiles in (for example, the Rust crates in its source archive). Make sure
+that `THIRD-PARTY-NOTICES.txt` includes it. Then change `AUDITED_COMPILED`.
+
 If a workflow run fails, delete the draft and the tag before you push the tag
 again:
 
