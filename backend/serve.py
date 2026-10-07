@@ -68,9 +68,8 @@ def configure_file_logging(log_directory: str) -> str:
     # The root logger starts at WARNING, and a record is dropped by the
     # level of the logger it was made on before any handler sees it. Without
     # this, every INFO line made on a logger of our own would be lost.
-    # scanner.py's basicConfig happens to raise the root level already, so
-    # this looks redundant today and is not: it states what this function
-    # needs rather than inheriting it from another module's import.
+    # Nothing else in the server sets the level: scanner.py's basicConfig
+    # runs only from its own command line.
     root_logger.setLevel(logging.INFO)
     return log_path
 

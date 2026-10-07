@@ -53,7 +53,6 @@ from schemas import (
     ScanProgressRead,
     ScanRequest,
     ScanResultRead,
-    TrackRead,
 )
 from token_middleware import TokenMiddleware
 
@@ -112,11 +111,6 @@ app.add_middleware(
 @app.get("/api/health")
 def get_health():
     return {"status": "ok"}
-
-
-@app.get("/api/tracks", response_model=list[TrackRead])
-def list_tracks(session: Session = Depends(get_session)):
-    return session.exec(select(Track)).all()
 
 
 @app.get("/api/collections", response_model=list[CollectionRead])

@@ -339,7 +339,10 @@ ALLOWED_EXTENSIONS = {*EXTENSION_FORMATS, ".m4a", ".ogg", ".wv", ".wma"}
 # and without this they land on unreadable_files by the thousand — reported to
 # the user as a warning that their drive could not be read.
 APPLE_DOUBLE_PREFIX = "._"
-BATCH_SIZE = 100  # placeholder, config file comes later
+# Every BATCH_SIZE new rows, the pending inserts go to the database inside
+# the open transaction. This is a flush, not a commit: the scan still
+# commits once, at the end. The value was not measured.
+BATCH_SIZE = 100
 # The fields that a re-scan compares with the stored row. format is one of
 # them because an .m4a file gets its format from the codec, so the format can
 # change while the path stays the same: an ALAC file re-encoded to AAC under
@@ -534,11 +537,11 @@ def scan_folder(
 
 def main():
     # Here rather than at import, because importing this module must not
-    # decide how the whole process logs. main.py imports it, so a server
-    # started any way at all was getting a handler on the root logger and a
-    # level nobody asked for — in the packaged app, writing to a console
-    # that does not exist. A program run from a terminal may configure its
-    # own logging; a module a server imports may not.
+    # decide how the whole process logs. main.py imports it, so a call at
+    # import would give every server a handler on the root logger and a
+    # level nobody asked for, and in the packaged app that handler would
+    # write to a console that does not exist. A program run from a terminal
+    # may configure its own logging; a module a server imports may not.
     logging.basicConfig(level=logging.INFO)
 
     if len(sys.argv) < 3:
