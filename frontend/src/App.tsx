@@ -25,8 +25,22 @@ function App() {
   const [collectionsError, setCollectionsError] = useState<string | null>(null);
   const [tab, setTab] = useState(0);
   const [formatUpdatedAt, setFormatUpdatedAt] = useState<string | null>(null);
+  // A count, not a flag: a preview can start while a comparison runs, and the
+  // first of the two to end would clear a flag while the other still runs.
+  // That is also why the callbacks below use the function form of the setter:
+  // a value read when the callback was made would lose one of two overlapping
+  // changes.
+  const [runningOperations, setRunningOperations] = useState(0);
   const [startup, setStartup] = useState<Startup>("waiting");
   const [startupError, setStartupError] = useState<string | null>(null);
+
+  const startOperation = useCallback(() => {
+    setRunningOperations((n) => n + 1);
+  }, []);
+
+  const endOperation = useCallback(() => {
+    setRunningOperations((n) => n - 1);
+  }, []);
 
   // Promise callbacks rather than async/await, deliberately. This runs from
   // an effect, and react-hooks/set-state-in-effect rejects a setState that an
@@ -125,6 +139,7 @@ function App() {
           collections={collections}
           loadingCollections={loadingCollections}
           onScanned={refreshCollections}
+          operationRunning={runningOperations > 0}
         />
       </Box>
       <Box sx={{ display: tab === 1 ? "block" : "none" }}>
@@ -132,6 +147,8 @@ function App() {
           collections={collections}
           loadingCollections={loadingCollections}
           formatOrderUpdatedAt={formatUpdatedAt}
+          onOperationStart={startOperation}
+          onOperationEnd={endOperation}
         />
       </Box>
       <Box sx={{ display: tab === 2 ? "block" : "none" }}>

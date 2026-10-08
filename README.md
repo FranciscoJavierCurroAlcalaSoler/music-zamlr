@@ -213,11 +213,25 @@ collection takes minutes.
 ### A collection keeps its path
 
 A collection stores the path of its root folder when you add it. You cannot
-change that path later, and you cannot delete a collection. If Windows gives a
-USB drive a different drive letter, or if Linux mounts the drive at a
-different folder, the tool cannot scan that collection again. The scan then
-fails with the message `Collection path not found. It may not be mounted.`
-Add the drive as a new collection, with a different name.
+change that path later. If Windows gives a USB drive a different drive letter,
+or if Linux mounts the drive at a different folder, the tool cannot scan that
+collection again. The scan then fails with the message
+`Collection path not found. It may not be mounted.` Remove the collection (see
+[Remove a collection](#remove-a-collection)), and then add the drive again at
+its new path.
+
+### Remove a collection
+
+Select **Remove** in the row of the collection, and then select **Remove** in
+the dialog. The tool removes the collection from its list. **The files in the
+folder stay where they are.** The tool forgets the hashes and fingerprints
+that it stored for these files, so the next comparison with this folder reads
+every file again.
+
+You cannot remove a collection while a scan, a comparison, a preview or an
+import runs. If the comparison on the Compare tab used the removed collection,
+the tool marks that comparison as old, and you cannot import from it. Run a
+new comparison.
 
 ### What happens to a replaced file
 

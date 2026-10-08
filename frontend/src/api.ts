@@ -219,6 +219,16 @@ export async function rescanCollection(
   return readStream<ScanResult, ScanProgress>(response, "scan", onProgress);
 }
 
+export async function deleteCollection(collectionId: number): Promise<void> {
+  const response = await fetch(`${apiBase()}/api/collections/${collectionId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!response.ok) {
+    await throwForResponse(response);
+  }
+}
+
 /** Turn whatever a failed fetch produced into something worth showing. */
 export function describeFetchError(error: unknown): string {
   // fetch() rejects with a TypeError only when the request never completed

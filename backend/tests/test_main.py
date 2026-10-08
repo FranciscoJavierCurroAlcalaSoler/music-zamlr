@@ -1594,6 +1594,62 @@ def test_rescan_nonexistent_root_returns_400(
     assert "not found" in response2.json()["detail"]
 
 
+def test_delete_collection_removes_it_and_its_tracks(
+    event_stream, tmp_path, fixtures_dir, client, session
+):
+    shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
+
+    stream = event_stream(
+        "/api/collections/scan",
+        json={"root_path": str(tmp_path), "name": "Theirs"},
+    )
+
+    collection_id = stream.done["collection"]["id"]
+    assert stream.done["added"] == 1
+    result = client.delete(f"/api/collections/{collection_id}")
+    session.rollback()
+
+    assert result.status_code == 204
+    assert result.content == b""
+    assert collection_id not in [c["id"] for c in client.get("/api/collections").json()]
+
+    session.expire_all()
+
+    assert (
+        session.exec(select(Track).where(Track.collection_id == collection_id)).all()
+        == []
+    )
+
+
+def test_delete_collection_keeps_the_files(
+    event_stream, tmp_path, fixtures_dir, client
+):
+    shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
+
+    stream = event_stream(
+        "/api/collections/scan",
+        json={"root_path": str(tmp_path), "name": "Theirs"},
+    )
+
+    collection_id = stream.done["collection"]["id"]
+    file_path = tmp_path / "test_track.mp3"
+    original_bytes = file_path.read_bytes()
+
+    response = client.delete(f"/api/collections/{collection_id}")
+
+    assert response.status_code == 204
+    assert response.content == b""
+    assert file_path.exists()
+    assert file_path.read_bytes() == original_bytes
+
+
+def test_delete_unknown_collection_returns_404(client):
+    response = client.delete("/api/collections/99999")
+
+    assert response.status_code == 404
+    assert "Collection not found" in response.json()["detail"]
+
+
 def test_event_stream_ends_with_a_done_frame(event_stream, tmp_path, fixtures_dir):
     shutil.copy(fixtures_dir / "test_track.mp3", tmp_path / "test_track.mp3")
 

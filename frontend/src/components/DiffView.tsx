@@ -39,8 +39,8 @@ import {
   executeImport,
   describeFetchError,
 } from "../api";
-import type { ComparisonInputs } from "../comparison";
-import { comparisonIsStale } from "../comparison";
+import type { RecordedComparison, SideState } from "../comparison";
+import { staleCauses, sideState } from "../comparison";
 import { ImportSettings } from "./ImportSettings";
 import { ImportPreviewDialog } from "./ImportPreviewDialog";
 import { ImportProgressView } from "./ImportProgressView";
@@ -145,6 +145,8 @@ interface DiffViewProps {
   collections: Collection[];
   loadingCollections: boolean;
   formatOrderUpdatedAt: string | null;
+  onOperationStart: () => void;
+  onOperationEnd: () => void;
 }
 
 function describeStatus(
@@ -176,6 +178,8 @@ export function DiffView({
   collections,
   loadingCollections,
   formatOrderUpdatedAt,
+  onOperationStart,
+  onOperationEnd,
 }: DiffViewProps) {
   const [loadingDiff, setLoadingDiff] = useState(false);
   const [progress, setProgress] = useState<DiffProgress | null>(null);
@@ -207,7 +211,7 @@ export function DiffView({
   // because they answer one question, and two states could disagree about
   // whether a comparison is current.
   const [comparedAgainst, setComparedAgainst] =
-    useState<ComparisonInputs | null>(null);
+    useState<RecordedComparison | null>(null);
   const [reviewing, setReviewing] = useState<AmbiguousMatch | null>(null);
   const [resolutions, setResolutions] = useState<Map<number, number | null>>(
     new Map(),
@@ -351,25 +355,36 @@ export function DiffView({
 
   const scannedAt = (id: number | "") =>
     collections.find((c) => c.id === id)?.last_scanned_at ?? null;
-
-  const visibleRows =
-    bucket === "all" ? rows : rows.filter((r) => r.bucket === bucket);
-
-  const stale =
-    diff !== null &&
-    comparisonIsStale(comparedAgainst, {
+  // A picker whose collection was removed shows nothing, instead of an id
+  // with no MenuItem, which MUI warns about. Derived on every render rather
+  // than reset in an effect: react-hooks rejects that reset, and the state id
+  // must stay, because it is what sideState compares with the recorded one.
+  const collectionIds = collections.map((c) => c.id);
+  const mineGone = mineId !== "" && !collections.some((c) => c.id === mineId);
+  const theirsGone =
+    theirsId !== "" && !collections.some((c) => c.id === theirsId);
+  const shownMineId = mineGone ? "" : mineId;
+  const shownTheirsId = theirsGone ? "" : theirsId;
+  const sides: { mine: SideState; theirs: SideState } =
+    comparedAgainst === null
+      ? { mine: "same", theirs: "same" }
+      : {
+          mine: sideState(comparedAgainst.mineId, mineId, collectionIds),
+          theirs: sideState(comparedAgainst.theirsId, theirsId, collectionIds),
+        };
+  const causes = staleCauses(
+    comparedAgainst?.inputs ?? null,
+    {
       mine: scannedAt(mineId),
       theirs: scannedAt(theirsId),
       order: formatOrderUpdatedAt,
-    });
-  // Which of the two happened, so the message names the real cause. Both can
-  // be true at once, and then the alert says both.
-  const rescanned =
-    comparedAgainst !== null &&
-    (scannedAt(mineId) !== comparedAgainst.mine ||
-      scannedAt(theirsId) !== comparedAgainst.theirs);
-  const orderChanged =
-    comparedAgainst !== null && formatOrderUpdatedAt !== comparedAgainst.order;
+    },
+    sides,
+  );
+  const stale = diff !== null && Object.values(causes).some(Boolean);
+
+  const visibleRows =
+    bucket === "all" ? rows : rows.filter((r) => r.bucket === bucket);
 
   async function runDiff() {
     setLoadingDiff(true);
@@ -378,6 +393,7 @@ export function DiffView({
     setPreview(null);
     setLastSettings(null);
     setResolutions(new Map());
+    onOperationStart();
     try {
       if (mineId === "" || theirsId === "") {
         throw new Error("Select both collections first.");
@@ -385,15 +401,20 @@ export function DiffView({
       const result: DiffResult = await fetchDiff(mineId, theirsId, setProgress);
       setDiff(result);
       setComparedAgainst({
-        mine: scannedAt(mineId),
-        theirs: scannedAt(theirsId),
-        order: formatOrderUpdatedAt,
+        mineId,
+        theirsId,
+        inputs: {
+          mine: scannedAt(mineId),
+          theirs: scannedAt(theirsId),
+          order: formatOrderUpdatedAt,
+        },
       });
     } catch (error: unknown) {
       setDiffError(describeFetchError(error));
     } finally {
       setLoadingDiff(false);
       setProgress(null);
+      onOperationEnd();
     }
   }
 
@@ -436,6 +457,7 @@ export function DiffView({
     setLastSettings(settings);
     setPreviewing(true);
     setImportError(null);
+    onOperationStart();
     try {
       const result = await previewImport(
         importRequestBody(settings),
@@ -447,12 +469,14 @@ export function DiffView({
     } finally {
       setPreviewing(false);
       setPreviewProgress(null);
+      onOperationEnd();
     }
   }
 
   async function runExecute() {
     if (lastSettings === null) return;
 
+    onOperationStart();
     setExecuting(true);
     setImportError(null);
     try {
@@ -469,6 +493,7 @@ export function DiffView({
     } finally {
       setExecuting(false);
       setExecuteProgress(null);
+      onOperationEnd();
     }
   }
 
@@ -481,7 +506,7 @@ export function DiffView({
             <InputLabel id="mine-label">My collection</InputLabel>
             <Select
               labelId="mine-label"
-              value={mineId}
+              value={shownMineId}
               label="My collection"
               onChange={(e) => setMineId(Number(e.target.value))}
             >
@@ -496,7 +521,7 @@ export function DiffView({
             <InputLabel id="theirs-label">Their collection</InputLabel>
             <Select
               labelId="theirs-label"
-              value={theirsId}
+              value={shownTheirsId}
               label="Their collection"
               onChange={(e) => setTheirsId(Number(e.target.value))}
             >
@@ -513,11 +538,11 @@ export function DiffView({
           disabled={
             loadingCollections ||
             loadingDiff ||
-            mineId === "" ||
-            mineId === 0 ||
-            theirsId === "" ||
-            theirsId === 0 ||
-            mineId === theirsId
+            shownMineId === "" ||
+            shownMineId === 0 ||
+            shownTheirsId === "" ||
+            shownTheirsId === 0 ||
+            shownMineId === shownTheirsId
           }
           onClick={runDiff}
         >
@@ -536,9 +561,13 @@ export function DiffView({
             >
               {stale && (
                 <Alert severity="info" sx={{ mt: 1 }}>
-                  {rescanned &&
+                  {causes.removed &&
+                    "A collection in this comparison was removed. "}
+                  {causes.chosenOther &&
+                    "You chose different collections since this comparison. "}
+                  {causes.rescanned &&
                     "These collections were re-scanned since this comparison. "}
-                  {orderChanged &&
+                  {causes.orderChanged &&
                     "The format order changed since this comparison. "}
                   Run Compare again for current results.
                 </Alert>

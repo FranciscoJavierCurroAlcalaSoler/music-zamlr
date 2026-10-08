@@ -1,50 +1,159 @@
 import { describe, expect, it } from "vitest";
-import { comparisonIsStale } from "./comparison";
+import { sideState, staleCauses } from "./comparison";
 
 // Plain strings, never dates: the rule asks whether two values differ, not
 // which of them is later.
 const RAN_AT = { mine: "scan-1", theirs: "scan-1", order: "order-1" };
+const SAME = { mine: "same", theirs: "same" } as const;
 
-describe("comparisonIsStale", () => {
-  it("is not stale while nothing has changed", () => {
-    expect(comparisonIsStale(RAN_AT, { ...RAN_AT })).toBe(false);
+describe("staleCauses", () => {
+  it("names nothing while nothing has changed", () => {
+    expect(staleCauses(RAN_AT, RAN_AT, SAME)).toEqual({
+      removed: false,
+      rescanned: false,
+      orderChanged: false,
+      chosenOther: false,
+    });
   });
 
-  it("is stale when my collection was re-scanned", () => {
-    expect(comparisonIsStale(RAN_AT, { ...RAN_AT, mine: "scan-2" })).toBe(true);
+  it("names nothing when no comparison ran", () => {
+    expect(staleCauses(null, RAN_AT, SAME)).toEqual({
+      removed: false,
+      rescanned: false,
+      orderChanged: false,
+      chosenOther: false,
+    });
   });
 
-  it("is stale when their collection was re-scanned", () => {
-    expect(comparisonIsStale(RAN_AT, { ...RAN_AT, theirs: "scan-2" })).toBe(
-      true,
-    );
+  it("names a re-scan of mine", () => {
+    expect(staleCauses(RAN_AT, { ...RAN_AT, mine: "scan-2" }, SAME)).toEqual({
+      removed: false,
+      rescanned: true,
+      orderChanged: false,
+      chosenOther: false,
+    });
   });
 
-  it("is stale when the format order was saved again", () => {
-    expect(comparisonIsStale(RAN_AT, { ...RAN_AT, order: "order-2" })).toBe(
-      true,
-    );
+  it("names a re-scan of theirs", () => {
+    expect(staleCauses(RAN_AT, { ...RAN_AT, theirs: "scan-2" }, SAME)).toEqual({
+      removed: false,
+      rescanned: true,
+      orderChanged: false,
+      chosenOther: false,
+    });
   });
 
-  it("is stale when an order is saved for the first time", () => {
-    // Before any save the timestamp is null. The first save gives it a value,
-    // and the comparison on screen was ranked by the order before it.
-    const ranBeforeAnySave = { ...RAN_AT, order: null };
+  it("names a changed format order alone", () => {
+    expect(staleCauses(RAN_AT, { ...RAN_AT, order: "order-2" }, SAME)).toEqual({
+      removed: false,
+      rescanned: false,
+      orderChanged: true,
+      chosenOther: false,
+    });
+  });
+
+  it("names the first order ever saved", () => {
+    const recorded = { ...RAN_AT, order: null };
+
+    expect(staleCauses(recorded, RAN_AT, SAME)).toEqual({
+      removed: false,
+      rescanned: false,
+      orderChanged: true,
+      chosenOther: false,
+    });
+  });
+
+  it("names nothing while no order has ever been saved", () => {
+    const recorded = { ...RAN_AT, order: null };
+
+    expect(staleCauses(recorded, recorded, SAME)).toEqual({
+      removed: false,
+      rescanned: false,
+      orderChanged: false,
+      chosenOther: false,
+    });
+  });
+
+  it("names a removed mine as removed, not as re-scanned", () => {
+    const current = { mine: null, theirs: "scan-1", order: "order-1" };
 
     expect(
-      comparisonIsStale(ranBeforeAnySave, { ...RAN_AT, order: "order-1" }),
-    ).toBe(true);
+      staleCauses(RAN_AT, current, { mine: "removed", theirs: "same" }),
+    ).toEqual({
+      removed: true,
+      rescanned: false,
+      orderChanged: false,
+      chosenOther: false,
+    });
   });
 
-  it("is not stale while no order has ever been saved", () => {
-    // Both null, so nothing was saved between the comparison and now. Read as
-    // a change, every comparison would carry the warning on a fresh install.
-    const noOrder = { ...RAN_AT, order: null };
+  it("names a removed theirs as removed, not as re-scanned", () => {
+    const current = { mine: "scan-1", theirs: null, order: "order-1" };
 
-    expect(comparisonIsStale(noOrder, { ...noOrder })).toBe(false);
+    expect(
+      staleCauses(RAN_AT, current, { mine: "same", theirs: "removed" }),
+    ).toEqual({
+      removed: true,
+      rescanned: false,
+      orderChanged: false,
+      chosenOther: false,
+    });
   });
 
-  it("is not stale before a comparison has run", () => {
-    expect(comparisonIsStale(null, RAN_AT)).toBe(false);
+  it("still names a re-scan of the side that remains", () => {
+    const current = { mine: null, theirs: "scan-2", order: "order-1" };
+
+    expect(
+      staleCauses(RAN_AT, current, { mine: "removed", theirs: "same" }),
+    ).toEqual({
+      removed: true,
+      rescanned: true,
+      orderChanged: false,
+      chosenOther: false,
+    });
+  });
+
+  it("names another chosen mine as chosen, not as re-scanned", () => {
+    const current = { mine: "scan-2", theirs: "scan-1", order: "order-1" };
+
+    expect(
+      staleCauses(RAN_AT, current, { mine: "other", theirs: "same" }),
+    ).toEqual({
+      removed: false,
+      rescanned: false,
+      orderChanged: false,
+      chosenOther: true,
+    });
+  });
+
+  it("names another chosen theirs as chosen, not as re-scanned", () => {
+    const current = { mine: "scan-1", theirs: "scan-2", order: "order-1" };
+
+    expect(
+      staleCauses(RAN_AT, current, { mine: "same", theirs: "other" }),
+    ).toEqual({
+      removed: false,
+      rescanned: false,
+      orderChanged: false,
+      chosenOther: true,
+    });
+  });
+});
+
+describe("sideState", () => {
+  it("is same when the picker shows the recorded collection", () => {
+    expect(sideState(1, 1, [1, 2])).toBe("same");
+  });
+
+  it("is other when the picker shows a different collection", () => {
+    expect(sideState(1, 2, [1, 2])).toBe("other");
+  });
+
+  it("is removed when the recorded collection is gone", () => {
+    expect(sideState(1, 1, [2])).toBe("removed");
+  });
+
+  it("is removed, not other, when the recorded collection is gone and the picker shows another", () => {
+    expect(sideState(1, 2, [2])).toBe("removed");
   });
 });

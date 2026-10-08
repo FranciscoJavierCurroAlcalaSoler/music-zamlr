@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createCollection,
+  deleteCollection,
   fetchCollections,
   fetchDiff,
   fetchHealth,
@@ -508,7 +509,10 @@ describe("the token header", () => {
     headers: { "content-type": "application/json" },
   };
 
-  function recordingServer(body: string, init: ResponseInit = STREAM_RESPONSE) {
+  function recordingServer(
+    body: string | null,
+    init: ResponseInit = STREAM_RESPONSE,
+  ) {
     const calls: RequestInit[] = [];
     vi.stubGlobal("fetch", (_url: string, requestInit: RequestInit = {}) => {
       calls.push(requestInit);
@@ -539,6 +543,11 @@ describe("the token header", () => {
       "saveFormatOrder",
       () => recordingServer("{}", JSON_RESPONSE),
       () => saveFormatOrder([["FLAC"], ["MP3"]]),
+    ],
+    [
+      "deleteCollection",
+      () => recordingServer(null, { status: 204 }),
+      () => deleteCollection(1),
     ],
     [
       "createCollection",
@@ -594,5 +603,36 @@ describe("the token header", () => {
     await fetchCollections();
 
     expect(calls[0].headers).not.toHaveProperty("X-Zamlr-Token");
+  });
+});
+
+describe("removing a collection", () => {
+  function deleteServer(status: number, body: string | null = null) {
+    const calls: RequestInit[] = [];
+    vi.stubGlobal("fetch", (_url: string, init: RequestInit = {}) => {
+      calls.push(init);
+      return Promise.resolve(
+        new Response(body, {
+          status,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    });
+    return calls;
+  }
+
+  it("sends DELETE", async () => {
+    const calls = deleteServer(204);
+
+    await deleteCollection(1);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe("DELETE");
+  });
+
+  it("throws the detail of a refusal", async () => {
+    deleteServer(404, JSON.stringify({ detail: "Collection not found." }));
+
+    await expect(deleteCollection(1)).rejects.toThrow("Collection not found.");
   });
 });

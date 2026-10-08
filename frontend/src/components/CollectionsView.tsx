@@ -13,27 +13,40 @@ import {
 import type { Collection, ScanProgress, ScanResult } from "../types";
 import { formatTimestamp } from "../format";
 import { useState } from "react";
-import { rescanCollection, describeFetchError, createCollection } from "../api";
+import {
+  rescanCollection,
+  describeFetchError,
+  createCollection,
+  deleteCollection,
+} from "../api";
 import { ScanResultView } from "./ScanResultView";
 import { ScanProgressView } from "./ScanProgressView";
 import { AddCollectionForm } from "./AddCollectionForm";
+import { RemoveCollectionDialog } from "./RemoveCollectionDialog";
 
 interface CollectionsViewProps {
   collections: Collection[];
   loadingCollections: boolean;
   onScanned: () => Promise<void>;
+  operationRunning: boolean;
 }
 
 export function CollectionsView({
   collections,
   loadingCollections,
   onScanned,
+  operationRunning,
 }: CollectionsViewProps) {
   const [scanningId, setScanningId] = useState<number | null>(null);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [progress, setProgress] = useState<ScanProgress | null>(null);
+  // The target stays set after the dialog closes, so the dialog keeps its text
+  // while it fades out. The next Remove overwrites it.
+  const [removeTarget, setRemoveTarget] = useState<Collection | null>(null);
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   async function runRescan(id: number) {
     setScanningId(id);
@@ -85,7 +98,26 @@ export function CollectionsView({
     }
   }
 
-  const busy = scanningId !== null || creating;
+  async function runRemove() {
+    if (removeTarget === null) return;
+
+    setRemoving(true);
+    setScanError(null);
+    setScanResult(null);
+    try {
+      await deleteCollection(removeTarget.id);
+    } catch (error: unknown) {
+      setScanError(describeFetchError(error));
+    } finally {
+      // After a failure too, as in runCreate: the list must show what the
+      // server holds, whichever way the request ended.
+      await onScanned();
+      setRemoving(false);
+      setRemoveOpen(false);
+    }
+  }
+
+  const busy = scanningId !== null || creating || removing;
 
   return (
     <Box>
@@ -130,6 +162,16 @@ export function CollectionsView({
                     >
                       {scanningId === collection.id ? "Scanning..." : "Scan"}
                     </Button>
+                    <Button
+                      color="error"
+                      onClick={() => {
+                        setRemoveTarget(collection);
+                        setRemoveOpen(true);
+                      }}
+                      disabled={busy || operationRunning}
+                    >
+                      Remove
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))
@@ -148,6 +190,13 @@ export function CollectionsView({
       <ScanResultView
         result={scanResult}
         onDismiss={() => setScanResult(null)}
+      />
+      <RemoveCollectionDialog
+        open={removeOpen}
+        collection={removeTarget}
+        removing={removing}
+        onCancel={() => setRemoveOpen(false)}
+        onConfirm={runRemove}
       />
     </Box>
   );

@@ -1008,6 +1008,18 @@ def rescan_collection(
     )
 
 
+@app.delete("/api/collections/{collection_id}", status_code=204)
+def delete_collection(
+    collection_id: int, session: Session = Depends(get_session)
+) -> None:
+    collection = session.get(Collection, collection_id)
+    if collection is None:
+        raise HTTPException(status_code=404, detail="Collection not found.")
+
+    session.delete(collection)
+    session.commit()
+
+
 def _format_order_state(session: Session) -> FormatOrderRead:
     """Read the saved order and answer with what the matcher would rank by.
 
