@@ -113,10 +113,10 @@ const diffColumns: GridColDef[] = [
     width: 100,
     valueFormatter: (value: number | null) => duration(value),
   },
-  { field: "mine_format", headerName: "Your format", width: 110 },
+  { field: "mine_format", headerName: "Main format", width: 110 },
   {
     field: "mine_bit_rate",
-    headerName: "Your bitrate",
+    headerName: "Main bitrate",
     width: 110,
     valueFormatter: (value: number | null) => bitrate(value),
   },
@@ -155,7 +155,7 @@ function describeStatus(
   rejected: boolean,
 ): string {
   // The rejection wording is short because the evidence is already on the
-  // row: "Your format" and "Your bitrate" carry the file it was compared
+  // row: "Main format" and "Main bitrate" carry the file it was compared
   // against, so the label only has to say why the pairing was refused.
   //
   // No error rate. 0.27 means nothing to a reader, and a number invites the
@@ -166,12 +166,13 @@ function describeStatus(
   if (bucket === "upgrade_available") return "Upgrade";
   if (bucket === "already_have") return "Already have";
   // Checked, not asserted in a comment: a fifth bucket would break the build
-  // here rather than quietly falling through to the "replaces yours" label.
+  // here rather than quietly falling through to the "replaces a main file"
+  // label.
   bucket satisfies "needs_review";
   if (resolvedTo === undefined) return "Needs review";
   if (resolvedTo === null) return "Resolved · import as new";
   /* From here on, resolvedTo can only be a number. */
-  return "Resolved · replaces yours";
+  return "Resolved · replaces a main file";
 }
 
 export function DiffView({
@@ -503,11 +504,11 @@ export function DiffView({
         {diffError && <Alert severity="error">Error: {diffError}</Alert>}
         <Stack direction="row" spacing={2}>
           <FormControl fullWidth>
-            <InputLabel id="mine-label">My collection</InputLabel>
+            <InputLabel id="mine-label">Main collection</InputLabel>
             <Select
               labelId="mine-label"
               value={shownMineId}
-              label="My collection"
+              label="Main collection"
               onChange={(e) => setMineId(Number(e.target.value))}
             >
               {collections.map((c) => (
@@ -518,11 +519,11 @@ export function DiffView({
             </Select>
           </FormControl>
           <FormControl fullWidth>
-            <InputLabel id="theirs-label">Their collection</InputLabel>
+            <InputLabel id="theirs-label">Incoming collection</InputLabel>
             <Select
               labelId="theirs-label"
               value={shownTheirsId}
-              label="Their collection"
+              label="Incoming collection"
               onChange={(e) => setTheirsId(Number(e.target.value))}
             >
               {collections.map((c) => (
@@ -612,7 +613,7 @@ export function DiffView({
                   label={`Import candidates (${formatCount(rows.length)})`}
                 />
                 <Tab
-                  label={`Only in mine (${formatCount(diff.match_counts.only_in_mine)})`}
+                  label={`Only in main (${formatCount(diff.match_counts.only_in_mine)})`}
                 />
               </Tabs>
 

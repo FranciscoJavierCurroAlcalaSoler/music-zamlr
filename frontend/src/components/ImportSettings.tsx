@@ -75,7 +75,7 @@ export function ImportSettings({
           <FormControlLabel
             value="mirror"
             control={<Radio />}
-            label="Mirror their folders"
+            label="Mirror the incoming folders"
           />
           <FormControlLabel
             value="flat"
@@ -98,7 +98,8 @@ export function ImportSettings({
               <>
                 <Typography variant="body2">Keep both tracks</Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Your file stays where it is; theirs is added alongside it.
+                  The main file stays where it is; the incoming file is added
+                  beside it.
                 </Typography>
               </>
             }
@@ -109,10 +110,12 @@ export function ImportSettings({
             control={<Radio sx={{ py: 0 }} />}
             label={
               <>
-                <Typography variant="body2">Move my track aside</Typography>
+                <Typography variant="body2">
+                  Move the replaced file aside
+                </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Your file moves to a <code>_superseded</code> folder under the
-                  destination. You can put it back.
+                  The main file moves to a <code>_superseded</code> folder under
+                  the destination. You can put it back.
                 </Typography>
               </>
             }
@@ -123,9 +126,11 @@ export function ImportSettings({
             control={<Radio sx={{ py: 0 }} />}
             label={
               <>
-                <Typography variant="body2">Delete my track</Typography>
+                <Typography variant="body2">
+                  Delete the replaced file
+                </Typography>
                 <Typography variant="caption" color="error">
-                  Your file is deleted. This cannot be undone.
+                  The main file is deleted. This cannot be undone.
                 </Typography>
               </>
             }

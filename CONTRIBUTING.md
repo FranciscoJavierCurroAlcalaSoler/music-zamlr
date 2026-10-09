@@ -194,6 +194,10 @@ that you build on a newer system does not install on an older one.
   API contract.
 - `frontend/` is the React interface. `frontend/src-tauri/` is the desktop
   window.
+- The interface calls the two sides of a comparison the main collection and
+  the incoming collection. The code calls them `mine` and `theirs`, for
+  example `mine_collection_id` and `only_in_mine`. `mine` is the main
+  collection, and `theirs` is the incoming collection.
 
 ### Rules for the backend
 

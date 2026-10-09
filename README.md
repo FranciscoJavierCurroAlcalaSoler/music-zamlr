@@ -16,9 +16,9 @@ those tracks and copies only them.
 
 https://github.com/user-attachments/assets/1972c370-2eff-484c-a1f4-564796d93ea8
 
-The video adds two collections, compares them, settles a track that matches
-two of your files, and imports nine tracks. The two collections are demo
-data: the audio is synthetic, and all artist and track names are invented.
+The video adds two collections, compares them, settles a track that matches two
+files in the main collection, and imports nine tracks. The two collections are
+demo data: the audio is synthetic, and all artist and track names are invented.
 The typing and the waits play faster than real time.
 
 ## How it works
@@ -196,7 +196,7 @@ Two things are different from the desktop program:
    slow one, because it reads files to compare them. The tool stores hashes and
    fingerprints in its database, so later comparisons are faster.
 4. Examine the result table. Each track belongs to one group: missing, upgrade
-   available, already have, needs review, or only in yours.
+   available, already have, needs review, or only in main.
 5. Select the tracks to import. Select a destination folder, a folder
    structure, and what must happen to a file that an upgrade replaces (see
    [What happens to a replaced file](#what-happens-to-a-replaced-file)).
@@ -238,17 +238,18 @@ new comparison.
 Before an import, you select one of three actions for the files that the
 upgrades replace:
 
-- **Keep both tracks.** Your file stays where it is. The tool copies the
+- **Keep both tracks.** The main file stays where it is. The tool copies the
   better file into the destination folder as a separate file.
-- **Move my track aside.** Your file moves into a folder named `_superseded`,
-  directly under the destination folder. All moved files go into this one
-  folder, without subfolders. If a file with the same name is already there,
-  the moved file gets a numbered suffix. You can move a file back by hand.
-- **Delete my track.** The tool deletes your file after it writes the better
-  copy. You cannot undo this.
+- **Move the replaced file aside.** The replaced file moves into a folder named
+  `_superseded`, directly under the destination folder. All moved files go into
+  this one folder, without subfolders. If a file with the same name is already
+  there, the moved file gets a numbered suffix. You can move a file back by
+  hand.
+- **Delete the replaced file.** The tool deletes the replaced file after it
+  writes the better copy. You cannot undo this.
 
-If you are not sure that every upgrade is correct, select **Move my track
-aside**. It keeps your file, and you can move the file back.
+If you are not sure that every upgrade is correct, select **Move the replaced
+file aside**. It keeps the replaced file, and you can move the file back.
 
 The scanner never reads a folder named `_superseded`, in any letter case and at
 any depth in a collection. This keeps moved files out of later comparisons. It
@@ -285,12 +286,12 @@ blank.
 
 - If the sound differs, the tags cannot overrule it. The track goes to
   **missing**, and the table shows `Missing · audio differs`. The columns
-  `Your format` and `Your bitrate` then show the format and bitrate of the file
+  `Main format` and `Main bitrate` then show the format and bitrate of the file
   that the tool compared.
 - If `fpcalc` cannot read a file, or if a file is shorter than about 12
   seconds, this rule gives no answer. The next rule then decides.
-- If two of your files have the same sound, the track goes to **needs review**,
-  and you decide.
+- If two files in the main collection have the same sound, the track goes to
+  **needs review**, and you decide.
 - A remaster can count as a different recording. A remaster can change the
   speed or the balance of the sound, and the fingerprint then changes too. The
   tool then offers the remaster as missing. That is the safe direction: the
@@ -309,10 +310,10 @@ The third rule has two consequences that appear in the result table:
 
 - A track with a blank artist or a blank title is never matched by the third
   rule. The second rule can still match it.
-- If two or more of your tracks fall within the 2-second window, the tool does
-  not choose one. The track goes to **needs review**, and you decide. An
-  obvious duplicate therefore waits for you. The tool never makes an uncertain
-  decision on your behalf.
+- If two or more tracks in the main collection fall within the 2-second window,
+  the tool does not choose one. The track goes to **needs review**, and you
+  decide. An obvious duplicate therefore waits for you. The tool never makes an
+  uncertain decision on your behalf.
 
 **A file that cannot be read.** A comparison does not stop at a file that it
 cannot read. A warning above the result table lists each such file. The tool
@@ -322,8 +323,8 @@ was deleted, after its scan. Scan the collection of that file again.
 
 ## How the tool decides that a copy is better
 
-After the tool pairs your track with a track of theirs, it compares the two
-files:
+After the tool pairs a track in the main collection with an incoming track,
+it compares the two files:
 
 1. The format decides first. The lossless formats (FLAC, ALAC, WAV, AIFF, TTA,
    Monkey's Audio, TAK, OptimFROG, WavPack, and WMA Lossless) and DSD have
@@ -331,10 +332,10 @@ files:
    and WMA) have a lower rank. A file with a higher rank is always better,
    whatever its bitrate. You can change this order. See
    [The order of the formats](#the-order-of-the-formats).
-2. If both files are lossless, bit depth and sample rate decide.
-   Their file is better only if neither value is lower than yours and at least
-   one value is higher. Bitrate does not count here. A lossless bitrate shows
-   how well the sound compresses, not how good the sound is.
+2. If both files are lossless, bit depth and sample rate decide. The incoming
+   file is better only if neither value is lower than in the main file and at
+   least one value is higher. Bitrate does not count here. A lossless bitrate
+   shows how well the sound compresses, not how good the sound is.
 3. If one file is DSD and the other file is lossless, neither file is better.
    DSD records sound in a different way, so the numbers of the two files do
    not compare. If both files are DSD, the higher sample rate is better.
@@ -344,9 +345,10 @@ files:
    track too. The tool never offers to replace a file whose quality it did not
    measure.
 
-Every upgrade in the table is a file that **Delete my track** removes from your
-collection. The rule can be wrong about a track, for example about a file that
-was converted to a higher sample rate. The deletion is then permanent.
+Every upgrade in the table is a file that **Delete the replaced file** removes
+from the main collection. The rule can be wrong about a track, for example about
+a file that was converted to a higher sample rate. The deletion is then
+permanent.
 
 The rule for lossless files has three consequences:
 
@@ -396,9 +398,10 @@ it ran. If you store a different order after that, the comparison says that it
 is out of date. Select **Compare** again to get current results.
 
 > **Warning.** You can put a lossy tier above a lossless tier. The tool then
-> offers a lossy file as an upgrade of a lossless file. With **Delete my
-> track**, the import deletes your lossless file. The Settings tab shows a
-> warning while the order has a lossy tier above a lossless tier.
+> offers a lossy file as an upgrade of a lossless file. With **Delete the
+> replaced file**, the import deletes the lossless file in the main
+> collection. The Settings tab shows a warning while the order has a lossy
+> tier above a lossless tier.
 
 ## Design notes
 
@@ -432,7 +435,7 @@ deleted only after its replacement is written. An uncertain match goes to you.
 **The preview warns before an import that cannot fit.** It compares the free
 space on the destination drive against the total size of the files to copy,
 plus every file that moves into `_superseded` from a different drive. Such a
-move copies the file, so the destination drive holds both your old file and
+move copies the file, so the destination drive holds both the old file and
 the better one. The tool warns and lets you continue, because you can clear
 space before you confirm.
 

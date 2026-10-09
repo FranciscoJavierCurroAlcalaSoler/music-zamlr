@@ -54,7 +54,7 @@ function describeDestructive(counts: Record<string, number>): string {
     parts.length === 1
       ? parts[0]
       : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
-  return `This will ${list} of your existing files.`;
+  return `This will ${list} of the existing files.`;
 }
 
 interface ComparisonRow {
@@ -167,7 +167,7 @@ export function ImportPreviewDialog({
               </Alert>
             ) : (
               <Alert severity="success" sx={{ mt: 2 }}>
-                Nothing of yours will be deleted or overwritten.
+                No existing file will be deleted or overwritten.
               </Alert>
             )}
           </>
@@ -188,8 +188,8 @@ export function ImportPreviewDialog({
                 <TableHead>
                   <TableRow>
                     <TableCell sx={{ width: "20%" }} />
-                    <TableCell sx={{ width: "40%" }}>Yours</TableCell>
-                    <TableCell sx={{ width: "40%" }}>Theirs</TableCell>
+                    <TableCell sx={{ width: "40%" }}>Main</TableCell>
+                    <TableCell sx={{ width: "40%" }}>Incoming</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -216,7 +216,7 @@ export function ImportPreviewDialog({
                     );
                   })}
                   <TableRow>
-                    <TableCell>Your file</TableCell>
+                    <TableCell>Main file</TableCell>
                     <TableCell colSpan={2} sx={{ wordBreak: "break-all" }}>
                       {match.mine.file_path}
                     </TableCell>
@@ -251,7 +251,7 @@ export function ImportPreviewDialog({
                     />
                     {op.overwrites && (
                       <Chip
-                        label="replaces yours"
+                        label="replaces a main file"
                         size="small"
                         color="error"
                         sx={{ ml: 0.5 }}

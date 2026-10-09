@@ -82,16 +82,16 @@ export function ResolveMatchDialog({
   return (
     // `open` unconditionally: the early return above is what closes it.
     <Dialog open onClose={onCancel} maxWidth="md" fullWidth>
-      <DialogTitle>Which of your files does this replace?</DialogTitle>
+      <DialogTitle>Which main file does this replace?</DialogTitle>
       <DialogContent dividers>
-        {/* Their track first. The dialog asks which file "this" replaces, so
+        {/* The incoming track first. The dialog asks which file "this" replaces, so
             it has to show what "this" is — otherwise the answer depends on
             remembering the grid row behind the dialog. Artist and title lead
             here because they identify the song; for the candidates below they
             are identical by construction, so those lead with the file name. */}
         <Box sx={{ mb: 3 }}>
           <Typography variant="overline" color="text.secondary">
-            Their track
+            Incoming track
           </Typography>
           <Typography variant="body2">
             {text(ambiguity.theirs.artist)} — {text(ambiguity.theirs.title)}
@@ -102,7 +102,7 @@ export function ResolveMatchDialog({
         </Box>
 
         <Typography variant="overline" color="text.secondary">
-          Your files
+          Main files
         </Typography>
         <RadioGroup
           value={pending}
@@ -140,8 +140,7 @@ export function ResolveMatchDialog({
               <>
                 <Typography variant="body2">None of These</Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Import as a new track. None of your files is the same
-                  recording.
+                  Import as a new track. No main file is the same recording.
                 </Typography>
               </>
             }

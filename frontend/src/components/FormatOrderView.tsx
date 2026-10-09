@@ -140,8 +140,9 @@ export function FormatOrderView({ onSaved }: FormatOrderViewProps) {
         {blocked && <Alert severity="warning">{blocked}</Alert>}
         {lossyAboveLossless && (
           <Alert severity="warning">
-            A lossy tier is above a lossless one. With <b>Delete my track</b>,
-            an import can then replace a lossless file with a lossy one.
+            A lossy tier is above a lossless one. With{" "}
+            <b>Delete the replaced file</b>, an import can then replace a
+            lossless file with a lossy one.
           </Alert>
         )}
         {/* The list the server sends, never a comparison made here: the server
