@@ -14,7 +14,7 @@ those tracks and copies only them.
 
 ## See it work
 
-https://github.com/user-attachments/assets/1972c370-2eff-484c-a1f4-564796d93ea8
+https://github.com/user-attachments/assets/b6591d1c-dda3-4e37-9698-512b0b420709
 
 The video adds two collections, compares them, settles a track that matches two
 files in the main collection, and imports nine tracks. The two collections are
