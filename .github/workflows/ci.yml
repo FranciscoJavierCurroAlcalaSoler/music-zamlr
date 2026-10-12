@@ -225,12 +225,12 @@ jobs:
 
       # The HTML report holds a trace of each failed test: the page, the
       # network and the console at every step. Kept only when the run fails.
+      # The report alone, not test-results/: the report already carries every
+      # trace, and test-results/ adds the audio files each test copied.
       - name: Keep the report of a failed run
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report
-          path: |
-            frontend/playwright-report/
-            frontend/test-results/
+          path: frontend/playwright-report/
           retention-days: 14

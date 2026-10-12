@@ -286,7 +286,7 @@ fails, the run keeps an HTML report for 14 days as the artifact
 `playwright-report`. The report has a trace of each failed test, with the
 page, the network requests and the console at each step. To see a trace,
 download the artifact, unpack it, and run
-`npx playwright show-report <folder>/playwright-report` from `frontend/`.
+`npx playwright show-report <folder>` from `frontend/`.
 
 ### Rules for tests
 
