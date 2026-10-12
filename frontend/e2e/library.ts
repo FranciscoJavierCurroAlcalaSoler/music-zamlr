@@ -59,26 +59,63 @@ export function uniqueName(testInfo: TestInfo, label: string): string {
   return `${label} ${testInfo.project.name} ${testPart}`;
 }
 
-/** Scan a folder into a new collection through the API, and return its id. */
+/** The header every request to the backend needs. */
+export const AUTH = { "X-Zamlr-Token": TOKEN };
+
+export type Frame = { event: string; data: unknown };
+
+/**
+ * The frames of a server-sent event stream, read whole. Each frame is an
+ * "event:" line and a "data:" line holding JSON, and a blank line ends it.
+ */
+export function frames(body: string): Frame[] {
+  return body
+    .split("\n\n")
+    .filter((block) => block.trim() !== "")
+    .map((block) => {
+      const lines = block.trim().split("\n");
+      const event = lines.find((line) => line.startsWith("event: "));
+      const data = lines.find((line) => line.startsWith("data: "));
+      return {
+        event: event?.slice("event: ".length) ?? "",
+        data: JSON.parse(data?.slice("data: ".length) ?? "null"),
+      };
+    });
+}
+
+/** The data of the stream's done frame. A stream without one fails the test. */
+export function doneData(all: Frame[]): Record<string, unknown> {
+  const done = all.find((frame) => frame.event === "done");
+  expect(done, `no done frame in ${JSON.stringify(all)}`).toBeDefined();
+  return done!.data as Record<string, unknown>;
+}
+
+/** Scan a folder into a new collection through the API; return the frames. */
+export async function scanFrames(
+  request: APIRequestContext,
+  name: string,
+  rootPath: string,
+  backendUrl: string = BACKEND_URL,
+): Promise<Frame[]> {
+  const response = await request.post(`${backendUrl}/api/collections/scan`, {
+    headers: AUTH,
+    data: { name, root_path: rootPath },
+  });
+  expect(response.ok(), await response.text()).toBe(true);
+  return frames(await response.text());
+}
+
+/** Scan a folder into a new collection through the API; return its id. */
 export async function addCollection(
   request: APIRequestContext,
   name: string,
   rootPath: string,
   backendUrl: string = BACKEND_URL,
 ): Promise<number> {
-  const response = await request.post(`${backendUrl}/api/collections/scan`, {
-    headers: { "X-Zamlr-Token": TOKEN },
-    data: { name, root_path: rootPath },
-  });
-  expect(response.ok(), await response.text()).toBe(true);
-  // The body is a stream of server-sent events, read whole here. The scan's
-  // result is the frame named done.
-  const frame = (await response.text())
-    .split("\n\n")
-    .find((block) => block.startsWith("event: done"));
-  expect(frame, "the scan ended without a done frame").toBeDefined();
-  const data = frame!.split("\n").find((line) => line.startsWith("data: "))!;
-  return JSON.parse(data.slice("data: ".length)).collection.id;
+  const result = doneData(
+    await scanFrames(request, name, rootPath, backendUrl),
+  );
+  return (result.collection as { id: number }).id;
 }
 
 /** Choose the two collections on the Compare tab and run the comparison. */
