@@ -23,6 +23,10 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   forbidOnly: !!process.env.CI,
+  // In CI, an HTML report as well, which the workflow keeps when a run fails:
+  // a trace there is the only way to see what the browser saw. Never opened
+  // here, because opening it would hold the terminal.
+  reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
     baseURL: FRONTEND_URL,
     trace: "retain-on-failure",

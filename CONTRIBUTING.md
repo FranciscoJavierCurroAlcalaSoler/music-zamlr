@@ -281,6 +281,13 @@ temporary folder. The backend starts with `python`, so the virtual environment
 must be active. If it is not active, the backend does not start and every test
 fails.
 
+CI runs the end-to-end tests on Linux, in Chromium and in WebKit. If a test
+fails, the run keeps an HTML report for 14 days as the artifact
+`playwright-report`. The report has a trace of each failed test, with the
+page, the network requests and the console at each step. To see a trace,
+download the artifact, unpack it, and run
+`npx playwright show-report <folder>/playwright-report` from `frontend/`.
+
 ### Rules for tests
 
 - Compare relations, not literal ids. Make expected paths with

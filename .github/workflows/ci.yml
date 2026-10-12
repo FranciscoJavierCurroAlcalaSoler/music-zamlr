@@ -167,3 +167,70 @@ jobs:
       - run: npx prettier --check src/ e2e/ playwright.config.ts
 
       - run: npm run test
+
+  # The end-to-end tests: the page in a real browser against a real backend.
+  # A job of its own, because it needs Python, fpcalc and browsers that the
+  # other two jobs do not, and so that a failure here never hides a lint or
+  # unit-test result. Linux only: the tests drive the page, not the desktop
+  # window, so the operating system matters less than the browser engine,
+  # and both engines run here.
+  e2e:
+    runs-on: ubuntu-latest
+    # The suite takes about five minutes on the development machine, and the
+    # browsers and their system packages take a few more to install.
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      # No venv: Playwright starts the backend with "python", and on the
+      # runner that is this Python, with the requirements installed into it.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - run: pip install -r requirements.txt
+        working-directory: backend
+
+      # The same pinned fpcalc as the backend job, for the reason given there.
+      # The tests pin values that depend on it: every fixture is too short
+      # for a fingerprint, and the page's warning about it is checked.
+      - name: Install fpcalc
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -sSLf -o fpcalc.tar.gz "https://github.com/acoustid/chromaprint/releases/download/v${{ env.FPCALC_VERSION }}/chromaprint-fpcalc-${{ env.FPCALC_VERSION }}-linux-x86_64.tar.gz"
+          tar xzf fpcalc.tar.gz
+          echo "${{ runner.temp }}/chromaprint-fpcalc-${{ env.FPCALC_VERSION }}-linux-x86_64" >> "$GITHUB_PATH"
+
+      - name: Check the fpcalc version
+        run: fpcalc -version | grep -F "fpcalc version ${FPCALC_VERSION} "
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      # --with-deps also installs the system libraries the browsers need,
+      # which WebKit on Linux does not find on a bare runner.
+      - run: npx playwright install --with-deps chromium webkit
+
+      - run: npx playwright test
+
+      # The HTML report holds a trace of each failed test: the page, the
+      # network and the console at every step. Kept only when the run fails.
+      - name: Keep the report of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 14
