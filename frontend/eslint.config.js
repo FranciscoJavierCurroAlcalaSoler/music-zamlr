@@ -10,7 +10,14 @@ export default defineConfig([
   // none of it is source this project lints.
   globalIgnores(['dist', 'src-tauri/target', 'src-tauri/gen']),
   {
-    files: ['**/*.{ts,tsx}'],
+    files: ['e2e/**/*.ts', '*.config.ts'],
+    extends: [js.configs.recommended, tseslint.configs.recommended],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
+  {
+    files: ['src/**/*.{ts,tsx}'],
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,

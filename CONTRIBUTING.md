@@ -256,7 +256,7 @@ Interface, from `frontend/`:
 ```
 npm run typecheck
 npm run lint
-npx prettier --check src/
+npx prettier --check src/ e2e/ playwright.config.ts
 npm test
 ```
 
@@ -264,6 +264,22 @@ Use `npm run typecheck`, never `npx tsc --noEmit`. The root `tsconfig.json`
 has `"files": []` and passes the work to project references. `tsc --noEmit`
 therefore examines no files and always passes. `tsc -b`, which
 `npm run typecheck` runs, follows the references.
+
+End-to-end tests, from `frontend/`, with the backend's virtual environment
+active:
+
+```
+npx playwright install chromium webkit
+npx playwright test
+```
+
+The first command downloads the two browsers. Run it one time, and again after
+each upgrade of `@playwright/test`. The second command starts its own backend
+on port 8010 and its own development server on port 5180, so it does not use
+your servers on ports 8000 and 5173. Each run gets a new database in a
+temporary folder. The backend starts with `python`, so the virtual environment
+must be active. If it is not active, the backend does not start and every test
+fails.
 
 ### Rules for tests
 

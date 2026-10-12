@@ -164,6 +164,6 @@ jobs:
 
       - run: npm run lint
 
-      - run: npx prettier --check src/
+      - run: npx prettier --check src/ e2e/ playwright.config.ts
 
       - run: npm run test
