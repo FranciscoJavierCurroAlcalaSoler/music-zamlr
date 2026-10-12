@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -12,10 +12,28 @@ import {
   TOKEN,
 } from "./e2e/settings";
 
+const RUN_DIR_PREFIX = "music-zamlr-e2e-";
+
 // Playwright loads this file in the main process and again in every worker.
-// ??= makes the folder once: the workers inherit the variable, and a plain =
-// would give each of them a folder of its own.
-process.env.ZAMLR_E2E_DIR ??= mkdtempSync(join(tmpdir(), "music-zamlr-e2e-"));
+// Only the first load, in the main process, finds the variable unset, so the
+// folder is made once and the workers inherit it.
+if (process.env.ZAMLR_E2E_DIR === undefined) {
+  // Earlier runs' folders go first, each holding a database. They are removed
+  // here and not at the end of a run, because the backends still hold their
+  // databases open while Playwright's teardown runs. Removing them cannot
+  // reach a run in progress: the ports are fixed, so a second run cannot
+  // start beside one. A folder that cannot be removed is left for next time.
+  for (const name of readdirSync(tmpdir())) {
+    if (name.startsWith(RUN_DIR_PREFIX)) {
+      try {
+        rmSync(join(tmpdir(), name), { recursive: true, force: true });
+      } catch {
+        // Locked or not ours to remove; the next run tries again.
+      }
+    }
+  }
+  process.env.ZAMLR_E2E_DIR = mkdtempSync(join(tmpdir(), RUN_DIR_PREFIX));
+}
 const runDir = process.env.ZAMLR_E2E_DIR;
 
 export default defineConfig({

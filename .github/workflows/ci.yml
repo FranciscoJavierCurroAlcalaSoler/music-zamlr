@@ -219,7 +219,13 @@ jobs:
 
       # --with-deps also installs the system libraries the browsers need,
       # which WebKit on Linux does not find on a bare runner.
+      #
+      # A limit of its own, far above the minute it takes: --with-deps runs
+      # apt-get update first, and an apt mirror that stops answering hangs
+      # the step until the job's limit ends it, with no step named. A retry
+      # would hide the cause; a rerun of the failed job is the remedy.
       - run: npx playwright install --with-deps chromium webkit
+        timeout-minutes: 10
 
       - run: npx playwright test
 
