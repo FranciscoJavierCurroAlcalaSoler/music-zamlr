@@ -1,0 +1,63 @@
+name: Bug report
+description: Tell me about a part of Music Zamlr that does not work correctly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not use this form for a security problem. Read [SECURITY.md](https://github.com/FranciscoJavierCurroAlcalaSoler/music-zamlr/blob/main/SECURITY.md) to report it privately.
+
+        This issue is public. Everybody can read what you write here and every file that you attach.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: >-
+        On Windows, open Settings > Apps and find Music Zamlr.
+        On Linux, run `dpkg-query -W music-zamlr`.
+        If you run the program from its source code, give the commit.
+      placeholder: "0.2.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: System
+      options:
+        - Windows 10
+        - Windows 11
+        - Linux
+        - macOS, from the source code
+    validations:
+      required: true
+  - type: input
+    id: distribution
+    attributes:
+      label: Linux distribution
+      description: Only on Linux. Give the name and the version.
+      placeholder: "Ubuntu 24.04"
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: >-
+        Tell what you did, step by step, and what the program did.
+        Copy the text of each error message.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: >-
+        Attach the file music-zamlr.log, or copy the lines near the problem.
+        On Windows, the file is in %APPDATA%\com.zamlr.music\logs.
+        On Linux, the file is in ~/.local/share/com.zamlr.music/logs.
+        The log contains the paths and the names of your folders and files.
+        Remove each name that you do not want to show.

@@ -484,11 +484,19 @@ space before you confirm.
 
 ## Status
 
-Version 0.1.2 completes the license notices on both systems. Version 0.1.1
-added a package for Linux. The scan, the comparison, and the import all work,
-and each shows its progress. The comparison uses file hashes,
-acoustic fingerprints, and tags. The **Settings** tab holds the order of the
-formats.
+The scan, the comparison, and the import all work, and each shows its
+progress. The comparison uses file hashes, acoustic fingerprints, and tags.
+The **Settings** tab holds the order of the formats. The
+[Releases page](https://github.com/FranciscoJavierCurroAlcalaSoler/music-zamlr/releases)
+lists the changes in each version.
+
+## Report a problem
+
+Open an issue and select the form **Bug report**. The form asks for the
+version, the system, and the log. Questions are welcome as issues too.
+
+Do not open a public issue for a security problem. Obey
+[SECURITY.md](SECURITY.md) to report it privately.
 
 ## License
 
