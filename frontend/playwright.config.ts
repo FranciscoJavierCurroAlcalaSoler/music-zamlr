@@ -1,5 +1,3 @@
-/// <reference types="node" />
-
 import { defineConfig, devices } from "@playwright/test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,6 +7,8 @@ import {
   FRONTEND_URL,
   BACKEND_PORT,
   FRONTEND_PORT,
+  NO_FPCALC_PORT,
+  NO_FPCALC_URL,
   TOKEN,
 } from "./e2e/settings";
 
@@ -51,6 +51,20 @@ export default defineConfig({
         ZAMLR_DATABASE_PATH: join(runDir, "e2e.db"),
         ZAMLR_TOKEN: TOKEN,
         ZAMLR_ALLOWED_ORIGINS: FRONTEND_URL,
+      },
+    },
+    {
+      command: `python -m uvicorn main:app --host 127.0.0.1 --port ${NO_FPCALC_PORT}`,
+      cwd: "../backend",
+      url: `${NO_FPCALC_URL}/api/health`,
+      reuseExistingServer: false,
+      env: {
+        ZAMLR_DATABASE_PATH: join(runDir, "no-fpcalc.db"),
+        ZAMLR_TOKEN: TOKEN,
+        ZAMLR_ALLOWED_ORIGINS: FRONTEND_URL,
+        // A path that does not exist. Set, it is the only place the backend
+        // looks: it does not fall back to fpcalc on PATH.
+        ZAMLR_FPCALC: join(runDir, "no-such-fpcalc"),
       },
     },
     {
