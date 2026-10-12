@@ -123,6 +123,11 @@ folder that an installation does not change (see
 [Where your data is](#where-your-data-is)). To be safe, make a backup of that
 folder before you update.
 
+A newer version can change the database when it starts for the first time. An
+older version cannot then open the database: its backend stops, and the window
+shows that the backend did not answer. To go back to an older version, restore
+the backup that you made before the update.
+
 ## Where your data is
 
 The program keeps its data in one folder:
