@@ -256,6 +256,14 @@ upgrades replace:
 If you are not sure that every upgrade is correct, select **Move the replaced
 file aside**. It keeps the replaced file, and you can move the file back.
 
+The better file goes into the destination folder, in the folder structure that
+you selected. This path is often not the folder of the replaced file. With
+**Move the replaced file aside** or **Delete the replaced file**, that folder
+then loses the track. For example, a single and the same track on an album
+count as the same recording. An upgrade from the single then removes the track
+from the album folder in the main collection. The preview marks the album and
+the year with `differs` when they are not the same in the two files.
+
 The scanner never reads a folder named `_superseded`, in any letter case and at
 any depth in a collection. This keeps moved files out of later comparisons. It
 also hides your own folder, if it has this name.
@@ -301,6 +309,13 @@ blank.
   speed or the balance of the sound, and the fingerprint then changes too. The
   tool then offers the remaster as missing. That is the safe direction: the
   result is an extra copy, not a deleted file.
+- A remaster can also count as the same recording. A louder master with more
+  compression often keeps the fingerprint of the original master. If the
+  remaster has a better format, it is then an upgrade, and **Delete the
+  replaced file** removes the original master. Many listeners prefer the
+  original master.
+- A single and the same track on an album count as the same recording. See
+  [What happens to a replaced file](#what-happens-to-a-replaced-file).
 
 The tool stores each fingerprint, so `fpcalc` reads a file only one time. If
 `fpcalc` is not installed, the tool skips this rule, and a warning appears
@@ -465,6 +480,12 @@ space before you confirm.
   file can count as an upgrade, and **Delete the replaced file** can then
   remove the better file. See
   [How the tool decides that a copy is better](#how-the-tool-decides-that-a-copy-is-better).
+- The tool identifies a recording, not a master or a release. A louder
+  remaster and the original master can count as the same recording. So can a
+  single and the same track on an album. An upgrade can then remove the
+  original master, or remove a track from an album folder. See
+  [How the tool decides that two tracks are the same](#how-the-tool-decides-that-two-tracks-are-the-same)
+  and [What happens to a replaced file](#what-happens-to-a-replaced-file).
 - The action for a replaced file applies to every upgrade in one import. You
   cannot select a different action for each file.
 - The tool identifies a file by its path. If you move or rename a file, the
