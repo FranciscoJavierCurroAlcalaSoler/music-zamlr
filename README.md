@@ -366,6 +366,21 @@ The rule for lossless files has three consequences:
   44.1 kHz recording that was converted to 96 kHz still counts as an upgrade.
   So does a 32-bit float WAV file from an audio editor.
 
+**Known limit: converted files.** The rule reads the format and the bitrate in
+the file, not the history of the sound. A file that was converted from a lossy
+file keeps the quality of that lossy file, and the tool does not find this.
+Each of these files counts as an upgrade:
+
+- A FLAC file that was made from an MP3 file, against a 320 kbps MP3 file.
+- A 128 kbps MP3 file that was encoded again at 320 kbps, against the 128 kbps
+  original.
+- A 320 kbps MP3 file that was made from a 160 kbps Opus file, against the Opus
+  file. An MP3 file from a video-site download is often of this type.
+
+**Delete the replaced file** then removes the better file. Before you import an
+upgrade from an unknown source, examine the file with a spectrum tool, for
+example [Spek](https://www.spek.cc/).
+
 ### The order of the formats
 
 The **Settings** tab holds the order of the formats. The tool starts with the
@@ -446,6 +461,10 @@ space before you confirm.
 
 ## Known limits
 
+- The tool does not find a file that was converted from a lossy file. Such a
+  file can count as an upgrade, and **Delete the replaced file** can then
+  remove the better file. See
+  [How the tool decides that a copy is better](#how-the-tool-decides-that-a-copy-is-better).
 - The action for a replaced file applies to every upgrade in one import. You
   cannot select a different action for each file.
 - The tool identifies a file by its path. If you move or rename a file, the
